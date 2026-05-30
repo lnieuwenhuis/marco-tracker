@@ -58,6 +58,18 @@ const ACTIONS: Array<{
     ),
   },
   {
+    action: "photo",
+    label: "Photo",
+    description: "Estimate from a meal photo",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2.5" y="4" width="13" height="10.5" rx="2.2" />
+        <path d="M6 4l1.2-1.4h3.6L12 4" />
+        <circle cx="9" cy="9.2" r="2.6" />
+      </svg>
+    ),
+  },
+  {
     action: "recipe",
     label: "Recipe",
     description: "Add a saved recipe",

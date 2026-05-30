@@ -90,6 +90,7 @@ describe("compose + progress helpers", () => {
 
   it("normalizes compose actions", () => {
     expect(normalizeComposeAction("custom")).toBe("custom");
+    expect(normalizeComposeAction("photo")).toBe("photo");
     expect(normalizeComposeAction("recipe")).toBe("recipe");
     expect(normalizeComposeAction("unexpected")).toBeNull();
   });
