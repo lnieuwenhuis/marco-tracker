@@ -120,7 +120,7 @@ export function DashboardShell({
   presets: initialPresets,
   recipes,
   recentCandidates,
-  uiMode = "legacy",
+  uiMode = "experimental",
   initialComposeAction = null,
 }: DashboardShellProps) {
   const router = useRouter();

@@ -31,7 +31,7 @@ export function SummaryShell({
   recentOverviews,
   goals,
   statsData,
-  uiMode = "legacy",
+  uiMode = "experimental",
 }: SummaryShellProps) {
   const isExperimental = uiMode === "experimental";
   const dailyTotals = dailySummary.totals;
