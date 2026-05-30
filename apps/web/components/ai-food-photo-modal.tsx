@@ -170,7 +170,11 @@ export function AiFoodPhotoModal({
       <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
         <div
           className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-          onClick={onClose}
+          onClick={() => {
+            if (!isAnalyzing) {
+              onClose();
+            }
+          }}
         />
         <div className="relative z-10 mx-4 mb-4 w-full max-w-sm rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] shadow-2xl sm:mb-0">
           <div className="flex items-center justify-between border-b border-[var(--color-border)] px-5 py-4">
@@ -184,7 +188,12 @@ export function AiFoodPhotoModal({
             </div>
             <button
               type="button"
-              onClick={onClose}
+              onClick={() => {
+                if (!isAnalyzing) {
+                  onClose();
+                }
+              }}
+              disabled={isAnalyzing}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
               aria-label="Close"
             >
