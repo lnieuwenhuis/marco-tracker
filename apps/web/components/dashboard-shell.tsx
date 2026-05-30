@@ -17,6 +17,7 @@ import { getLocalDateString } from "@/lib/startup-date";
 import type { UiMode } from "@/lib/ui-mode";
 
 import { AddFoodButton } from "./add-food-button";
+import { AiFoodPhotoModal } from "./ai-food-photo-modal";
 import { invalidateAppDataCache } from "./app-data-cache";
 import { AppShell } from "./app-shell";
 import { BarcodeResult } from "./barcode-result";
@@ -119,7 +120,7 @@ export function DashboardShell({
   presets: initialPresets,
   recipes,
   recentCandidates,
-  uiMode = "legacy",
+  uiMode = "experimental",
   initialComposeAction = null,
 }: DashboardShellProps) {
   const router = useRouter();
@@ -141,6 +142,9 @@ export function DashboardShell({
 
   // Food search state
   const [showSearchModal, setShowSearchModal] = useState(false);
+
+  // AI photo estimate state
+  const [showPhotoModal, setShowPhotoModal] = useState(false);
 
   // Tracks cards that were recently copied to today so the button can give
   // brief visual confirmation before returning to its normal state.
@@ -495,6 +499,9 @@ export function DashboardShell({
         setNotFoundBarcode(null);
         setShowScanner(true);
         break;
+      case "photo":
+        setShowPhotoModal(true);
+        break;
       case "recipe":
         setShowRecipePickerModal(true);
         break;
@@ -620,6 +627,7 @@ export function DashboardShell({
                   setNotFoundBarcode(null);
                   setShowScanner(true);
                 }}
+                onPhoto={() => setShowPhotoModal(true)}
                 onRecipe={() => setShowRecipePickerModal(true)}
               />
             ) : null}
@@ -733,6 +741,31 @@ export function DashboardShell({
           recipes={recipes}
           onClose={() => setShowRecipePickerModal(false)}
           onSelect={addDraftFromRecipe}
+        />
+      )}
+
+      {showPhotoModal && (
+        <AiFoodPhotoModal
+          onClose={() => setShowPhotoModal(false)}
+          onAddToLog={(macros) => {
+            setDrafts((currentDrafts) => [
+              ...currentDrafts,
+              {
+                clientId: `draft-${crypto.randomUUID()}`,
+                label: macros.label,
+                proteinG: String(macros.proteinG),
+                carbsG: String(macros.carbsG),
+                fatG: String(macros.fatG),
+                caloriesKcal: String(macros.caloriesKcal),
+                sortOrder: nextSortOrder(),
+              },
+            ]);
+            invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
+            setShowPhotoModal(false);
+          }}
+          onSaveAsPreset={(input) => {
+            handleSavePreset(input);
+          }}
         />
       )}
 

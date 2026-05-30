@@ -2,7 +2,7 @@ export const UI_MODE_STORAGE_KEY = "macro-tracker-ui-mode";
 export const UI_MODE_COOKIE_NAME = UI_MODE_STORAGE_KEY;
 export const UI_MODE_EVENT = "macro-tracker-ui-mode-change";
 export const UI_MODE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-export const DEFAULT_UI_MODE = "legacy";
+export const DEFAULT_UI_MODE = "experimental";
 
 export type UiMode = "legacy" | "experimental";
 export type ProgressTab = "goals" | "weight";

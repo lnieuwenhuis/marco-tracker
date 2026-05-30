@@ -21,7 +21,7 @@ export function RecipesShell({
   canAccessAdmin,
   selectedDate,
   recipes,
-  uiMode = "legacy",
+  uiMode = "experimental",
 }: RecipesShellProps) {
   const content = (
     <div className="space-y-5">

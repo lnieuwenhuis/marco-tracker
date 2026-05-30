@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { normalizeComposeAction } from "@/lib/compose";
 import {
+  DEFAULT_UI_MODE,
   UI_MODE_COOKIE_NAME,
   UI_MODE_STORAGE_KEY,
   mapRouteForUiMode,
+  normalizeUiMode,
   normalizeProgressTab,
   setUiMode,
 } from "@/lib/ui-mode";
@@ -14,6 +16,12 @@ afterEach(() => {
 });
 
 describe("ui-mode", () => {
+  it("defaults to the experimental ui", () => {
+    expect(DEFAULT_UI_MODE).toBe("experimental");
+    expect(normalizeUiMode(undefined)).toBe("experimental");
+    expect(normalizeUiMode("unexpected")).toBe("experimental");
+  });
+
   it("maps legacy goals routes into progress when enabling the experiment", () => {
     const searchParams = new URLSearchParams({ date: "2026-04-20" });
 
@@ -72,11 +80,11 @@ describe("ui-mode", () => {
     });
     vi.stubGlobal("document", { cookie: "" });
 
-    setUiMode("experimental");
+    setUiMode("legacy");
 
-    expect(setItem).toHaveBeenCalledWith(UI_MODE_STORAGE_KEY, "experimental");
+    expect(setItem).toHaveBeenCalledWith(UI_MODE_STORAGE_KEY, "legacy");
     expect((document as { cookie: string }).cookie).toContain(
-      `${UI_MODE_COOKIE_NAME}=experimental`,
+      `${UI_MODE_COOKIE_NAME}=legacy`,
     );
     expect(dispatchEvent).toHaveBeenCalled();
   });
@@ -90,6 +98,7 @@ describe("compose + progress helpers", () => {
 
   it("normalizes compose actions", () => {
     expect(normalizeComposeAction("custom")).toBe("custom");
+    expect(normalizeComposeAction("photo")).toBe("photo");
     expect(normalizeComposeAction("recipe")).toBe("recipe");
     expect(normalizeComposeAction("unexpected")).toBeNull();
   });

@@ -54,7 +54,7 @@ export function RecipeBuilderShell({
   presets: initialPresets,
   mode,
   recipe,
-  uiMode = "legacy",
+  uiMode = "experimental",
 }: RecipeBuilderShellProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
