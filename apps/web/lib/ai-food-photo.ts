@@ -20,11 +20,24 @@ export type FoodPhotoAnalysis =
       estimate: null;
     };
 
+export type AnalyzeFoodPhotoFailureKind =
+  | "missing_api_key"
+  | "invalid_image"
+  | "provider_rate_limit"
+  | "provider_quota"
+  | "provider_image_access"
+  | "provider_error"
+  | "empty_response"
+  | "invalid_json"
+  | "unsupported_model"
+  | "unknown";
+
 export type AnalyzeFoodPhotoResult =
   | { ok: true; analysis: FoodPhotoAnalysis }
   | {
       ok: false;
       error: string;
+      kind: AnalyzeFoodPhotoFailureKind;
       statusCode?: number;
       aiResponse?: string;
       retryable?: boolean;
@@ -324,14 +337,70 @@ function metadataDetail(metadata: unknown) {
   return details || null;
 }
 
-function isRetryableOpenRouterError(error: string, statusCode?: number) {
+export function classifyFoodPhotoFailure(
+  error: string,
+  statusCode?: number,
+): AnalyzeFoodPhotoFailureKind {
   const lower = error.toLowerCase();
 
   if (
     lower.includes("insufficient_quota") ||
     lower.includes("insufficient funds") ||
+    lower.includes("insufficient_funds") ||
     lower.includes("balance is too low") ||
     lower.includes("/billing")
+  ) {
+    return "provider_quota";
+  }
+
+  if (
+    lower.includes("free-models-per-min") ||
+    lower.includes("rate limit") ||
+    lower.includes("rate-limit") ||
+    lower.includes("rate limited") ||
+    lower.includes("temporarily rate-limited") ||
+    statusCode === 429
+  ) {
+    return "provider_rate_limit";
+  }
+
+  if (
+    statusCode === 403 &&
+    lower.includes("forbidden") &&
+    (lower.includes("image") ||
+      lower.includes(".jpg") ||
+      lower.includes(".jpeg") ||
+      lower.includes(".png") ||
+      lower.includes(".webp"))
+  ) {
+    return "provider_image_access";
+  }
+
+  if (
+    lower.includes("unsupported image") ||
+    lower.includes("does not support image") ||
+    lower.includes("doesn't support image") ||
+    lower.includes("vision is not supported") ||
+    lower.includes("not support vision")
+  ) {
+    return "unsupported_model";
+  }
+
+  if (typeof statusCode === "number") {
+    return "provider_error";
+  }
+
+  return "unknown";
+}
+
+function isRetryableOpenRouterError(error: string, statusCode?: number) {
+  const lower = error.toLowerCase();
+  const kind = classifyFoodPhotoFailure(error, statusCode);
+
+  if (
+    kind === "provider_quota" ||
+    kind === "provider_image_access" ||
+    kind === "unsupported_model"
   ) {
     return false;
   }
@@ -386,25 +455,30 @@ export async function analyzeFoodPhoto(params: {
     return {
       ok: false,
       error: "OPENROUTER_API_KEY is not configured on the server.",
+      kind: "missing_api_key",
     };
   }
 
   let imageUrl = params.imageUrl?.trim();
 
   if (imageUrl) {
-    try {
-      const parsedImageUrl = new URL(imageUrl);
-      if (parsedImageUrl.protocol !== "https:") {
+    if (!imageUrl.startsWith("data:image/")) {
+      try {
+        const parsedImageUrl = new URL(imageUrl);
+        if (parsedImageUrl.protocol !== "https:") {
+          return {
+            ok: false,
+            error: "Benchmark image URLs must use HTTPS or data:image URLs.",
+            kind: "invalid_image",
+          };
+        }
+      } catch {
         return {
           ok: false,
-          error: "Benchmark image URLs must use HTTPS.",
+          error: "Benchmark image URL is invalid.",
+          kind: "invalid_image",
         };
       }
-    } catch {
-      return {
-        ok: false,
-        error: "Benchmark image URL is invalid.",
-      };
     }
   }
 
@@ -413,6 +487,7 @@ export async function analyzeFoodPhoto(params: {
       return {
         ok: false,
         error: "A food photo is required.",
+        kind: "invalid_image",
       };
     }
 
@@ -420,6 +495,7 @@ export async function analyzeFoodPhoto(params: {
       return {
         ok: false,
         error: "Upload a PNG, JPEG, WebP, or GIF image.",
+        kind: "invalid_image",
       };
     }
 
@@ -427,6 +503,7 @@ export async function analyzeFoodPhoto(params: {
       return {
         ok: false,
         error: "Image is too large. Use an image under 8 MB.",
+        kind: "invalid_image",
       };
     }
 
@@ -517,6 +594,7 @@ export async function analyzeFoodPhoto(params: {
       lastFailure = {
         ok: false,
         error,
+        kind: classifyFoodPhotoFailure(error, response.status),
         statusCode: response.status,
         retryable,
       };
@@ -548,7 +626,12 @@ export async function analyzeFoodPhoto(params: {
 
     if (payload.error?.message) {
       const retryable = isRetryableOpenRouterError(payload.error.message);
-      lastFailure = { ok: false, error: payload.error.message, retryable };
+      lastFailure = {
+        ok: false,
+        error: payload.error.message,
+        kind: classifyFoodPhotoFailure(payload.error.message),
+        retryable,
+      };
       if (retryable && attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
         continue;
@@ -561,7 +644,12 @@ export async function analyzeFoodPhoto(params: {
       const error =
         choice.error?.message ?? "The AI provider returned an error.";
       const retryable = isRetryableOpenRouterError(error);
-      lastFailure = { ok: false, error, retryable };
+      lastFailure = {
+        ok: false,
+        error,
+        kind: classifyFoodPhotoFailure(error),
+        retryable,
+      };
 
       if (retryable && attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
@@ -582,6 +670,7 @@ export async function analyzeFoodPhoto(params: {
       lastFailure = {
         ok: false,
         error: "The AI did not return a response.",
+        kind: "empty_response",
         aiResponse,
         retryable: true,
       };
@@ -607,6 +696,7 @@ export async function analyzeFoodPhoto(params: {
           error instanceof Error
             ? error.message
             : "Unable to parse the AI response.",
+        kind: "invalid_json",
         aiResponse: content,
         retryable: true,
       };
@@ -624,6 +714,7 @@ export async function analyzeFoodPhoto(params: {
     lastFailure ?? {
       ok: false,
       error: "The AI request failed.",
+      kind: "unknown",
       retryable: false,
     }
   );

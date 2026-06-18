@@ -1,7 +1,11 @@
 import { canAccessAdmin } from "@macro-tracker/db";
 
 import { getCurrentAppUser } from "@/lib/auth";
-import { runMacroBenchmark } from "@/lib/ai-model-benchmark";
+import {
+  runMacroBenchmark,
+  type MacroBenchmarkBaseline,
+  type MacroBenchmarkMode,
+} from "@/lib/ai-model-benchmark";
 
 export const maxDuration = 300;
 
@@ -22,6 +26,40 @@ function parseModelName(value: unknown) {
   return model;
 }
 
+function parseFixtureLimit(value: unknown) {
+  return value === 4 || value === 8 || value === 12 || value === 18
+    ? value
+    : undefined;
+}
+
+function parseMode(value: unknown): MacroBenchmarkMode {
+  return value === "candidate_only" ? "candidate_only" : "compare";
+}
+
+function parseBaseline(value: unknown): MacroBenchmarkBaseline | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.currentModel !== "string" ||
+    typeof record.createdAt !== "string" ||
+    !Array.isArray(record.fixtureIds) ||
+    !Array.isArray(record.results) ||
+    !record.fixtureIds.every((fixtureId) => typeof fixtureId === "string")
+  ) {
+    return undefined;
+  }
+
+  return {
+    currentModel: record.currentModel,
+    createdAt: record.createdAt,
+    fixtureIds: record.fixtureIds,
+    results: record.results as MacroBenchmarkBaseline["results"],
+  };
+}
+
 export async function POST(request: Request) {
   const adminUser = await getCurrentAppUser();
 
@@ -34,15 +72,15 @@ export async function POST(request: Request) {
   }
 
   const payload = (await request.json().catch(() => null)) as {
+    baseline?: unknown;
     fixtureLimit?: unknown;
+    mode?: unknown;
     model?: unknown;
   } | null;
   const candidateModel = parseModelName(payload?.model);
-  const fixtureLimit =
-    typeof payload?.fixtureLimit === "number" &&
-    Number.isInteger(payload.fixtureLimit)
-      ? payload.fixtureLimit
-      : undefined;
+  const fixtureLimit = parseFixtureLimit(payload?.fixtureLimit);
+  const mode = parseMode(payload?.mode);
+  const baseline = parseBaseline(payload?.baseline);
 
   if (!candidateModel) {
     return Response.json(
@@ -57,8 +95,10 @@ export async function POST(request: Request) {
 
   try {
     const result = await runMacroBenchmark({
+      baseline,
       candidateModel,
       fixtureLimit,
+      mode,
       userId: adminUser.id,
     });
 
