@@ -1,6 +1,11 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import {
   analyzeFoodPhoto,
   getConfiguredFoodPhotoModel,
+  type AnalyzeFoodPhotoFailureKind,
+  type AnalyzeFoodPhotoResult,
   type FoodPhotoEstimate,
 } from "./ai-food-photo";
 
@@ -11,45 +16,72 @@ export type MacroBenchmarkMacros = {
   fatG: number;
 };
 
+export type MacroBenchmarkCategory =
+  | "fruit"
+  | "protein"
+  | "grain"
+  | "vegetable"
+  | "dairy"
+  | "fat"
+  | "legume";
+
 export type MacroBenchmarkFixture = {
   id: string;
   name: string;
   servingDescription: string;
-  imageUrl: string;
+  assetFileName: string;
+  thumbnailUrl: string;
   imageSourceUrl: string;
   expected: MacroBenchmarkMacros;
   expectedSource: string;
+  category: MacroBenchmarkCategory;
+};
+
+export type MacroBenchmarkModelCaseResult = {
+  model: string;
+  ok: boolean;
+  latencyMs: number | null;
+  estimate: FoodPhotoEstimate | null;
+  absoluteError: MacroBenchmarkMacros | null;
+  normalizedErrorPct: number | null;
+  error: string | null;
+  failureKind?: AnalyzeFoodPhotoFailureKind;
+  retryable?: boolean;
+  wasSkipped?: boolean;
 };
 
 export type MacroBenchmarkCaseResult = {
   fixtureId: string;
   fixtureName: string;
   servingDescription: string;
-  imageUrl: string;
+  thumbnailUrl: string;
   imageSourceUrl: string;
   expected: MacroBenchmarkMacros;
   expectedSource: string;
+  category: MacroBenchmarkCategory;
   current: MacroBenchmarkModelCaseResult;
   candidate: MacroBenchmarkModelCaseResult;
 };
 
-export type MacroBenchmarkModelCaseResult = {
-  model: string;
-  ok: boolean;
-  latencyMs: number;
-  estimate: FoodPhotoEstimate | null;
-  absoluteError: MacroBenchmarkMacros | null;
-  normalizedErrorPct: number | null;
-  error: string | null;
-  retryable?: boolean;
+export type MacroBenchmarkMode = "compare" | "candidate_only";
+
+export type MacroBenchmarkBaseline = {
+  currentModel: string;
+  fixtureIds: string[];
+  results: MacroBenchmarkModelCaseResult[];
+  createdAt: string;
 };
 
 export type MacroBenchmarkModelSummary = {
   model: string;
   completedCases: number;
   failedCases: number;
+  skippedCases: number;
   averageLatencyMs: number | null;
   averageErrorPct: number | null;
+  reliabilityPct: number;
+  failureBreakdown: Record<AnalyzeFoodPhotoFailureKind | "skipped", number>;
+  categoryAverages: Record<MacroBenchmarkCategory, number | null>;
 };
 
 export type MacroBenchmarkResult = {
@@ -57,10 +89,14 @@ export type MacroBenchmarkResult = {
   candidateModel: string;
   fixtureCount: number;
   totalFixtureCount: number;
+  comparedSameModel: boolean;
+  mode: MacroBenchmarkMode;
+  usedBaseline: boolean;
+  baselineCreatedAt: string | null;
   fixtures: MacroBenchmarkFixture[];
   cases: MacroBenchmarkCaseResult[];
   summaries: {
-    current: MacroBenchmarkModelSummary;
+    current: MacroBenchmarkModelSummary | null;
     candidate: MacroBenchmarkModelSummary;
   };
 };
@@ -72,287 +108,226 @@ const ERROR_DENOMINATORS: MacroBenchmarkMacros = {
   fatG: 5,
 };
 
+export const BENCHMARK_REQUEST_DELAY_MS = 3500;
+export const BENCHMARK_RETRY_DELAY_MS = 8000;
+const BASELINE_TTL_MS = 24 * 60 * 60 * 1000;
+
+type AnalyzeFoodPhotoFn = typeof analyzeFoodPhoto;
+
+const FAILURE_KINDS: AnalyzeFoodPhotoFailureKind[] = [
+  "missing_api_key",
+  "invalid_image",
+  "provider_rate_limit",
+  "provider_quota",
+  "provider_image_access",
+  "provider_error",
+  "empty_response",
+  "invalid_json",
+  "unsupported_model",
+  "unknown",
+];
+
+const CATEGORIES: MacroBenchmarkCategory[] = [
+  "fruit",
+  "protein",
+  "grain",
+  "vegetable",
+  "dairy",
+  "fat",
+  "legume",
+];
+
+function fixtureAsset(fileName: string) {
+  return {
+    assetFileName: fileName,
+    thumbnailUrl: `/benchmark-foods/${fileName}`,
+  };
+}
+
 export const MACRO_BENCHMARK_FIXTURES: MacroBenchmarkFixture[] = [
   {
     id: "medium-banana",
     name: "Medium banana",
     servingDescription: "One medium banana, edible portion only.",
-    imageUrl:
-      "https://commons.wikimedia.org/wiki/Special:Redirect/file/Banana-Single.jpg",
+    ...fixtureAsset("banana.jpg"),
     imageSourceUrl: "https://commons.wikimedia.org/wiki/File:Banana-Single.jpg",
-    expected: {
-      caloriesKcal: 105,
-      proteinG: 1.3,
-      carbsG: 27,
-      fatG: 0.4,
-    },
+    expected: { caloriesKcal: 105, proteinG: 1.3, carbsG: 27, fatG: 0.4 },
     expectedSource: "USDA FoodData Central, one medium banana, rounded.",
+    category: "fruit",
   },
   {
     id: "medium-red-apple",
     name: "Medium red apple",
     servingDescription: "One medium raw apple with skin.",
-    imageUrl:
-      "https://commons.wikimedia.org/wiki/Special:Redirect/file/Red_Apple.jpg",
+    ...fixtureAsset("apple.jpg"),
     imageSourceUrl: "https://commons.wikimedia.org/wiki/File:Red_Apple.jpg",
-    expected: {
-      caloriesKcal: 95,
-      proteinG: 0.5,
-      carbsG: 25.1,
-      fatG: 0.3,
-    },
+    expected: { caloriesKcal: 95, proteinG: 0.5, carbsG: 25.1, fatG: 0.3 },
     expectedSource: "USDA FoodData Central, one medium apple with skin, rounded.",
+    category: "fruit",
   },
   {
     id: "large-hard-boiled-egg",
     name: "Large hard-boiled egg",
     servingDescription: "One large hard-boiled egg.",
-    imageUrl:
-      "https://commons.wikimedia.org/wiki/Special:Redirect/file/Hard_boiled_egg.jpg",
+    ...fixtureAsset("hard-boiled-egg.jpg"),
     imageSourceUrl: "https://commons.wikimedia.org/wiki/File:Hard_boiled_egg.jpg",
-    expected: {
-      caloriesKcal: 78,
-      proteinG: 6.3,
-      carbsG: 0.6,
-      fatG: 5.3,
-    },
+    expected: { caloriesKcal: 78, proteinG: 6.3, carbsG: 0.6, fatG: 5.3 },
     expectedSource: "USDA FoodData Central, one large hard-boiled egg, rounded.",
+    category: "protein",
   },
   {
     id: "medium-orange",
     name: "Medium orange",
     servingDescription: "One medium raw orange, peeled edible portion.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/4/43/Ambersweet_oranges.jpg",
+    ...fixtureAsset("orange.jpg"),
     imageSourceUrl:
       "https://commons.wikimedia.org/wiki/File:Ambersweet_oranges.jpg",
-    expected: {
-      caloriesKcal: 62,
-      proteinG: 1.2,
-      carbsG: 15.4,
-      fatG: 0.2,
-    },
+    expected: { caloriesKcal: 62, proteinG: 1.2, carbsG: 15.4, fatG: 0.2 },
     expectedSource: "USDA FoodData Central, one medium orange, rounded.",
+    category: "fruit",
   },
   {
     id: "cooked-white-rice-cup",
     name: "Cooked white rice",
     servingDescription: "One cup cooked long-grain white rice.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/1/16/Cooked_white_rice.jpg",
+    ...fixtureAsset("white-rice.jpg"),
     imageSourceUrl: "https://commons.wikimedia.org/wiki/File:Cooked_white_rice.jpg",
-    expected: {
-      caloriesKcal: 205,
-      proteinG: 4.3,
-      carbsG: 44.5,
-      fatG: 0.4,
-    },
+    expected: { caloriesKcal: 205, proteinG: 4.3, carbsG: 44.5, fatG: 0.4 },
     expectedSource: "USDA FoodData Central, one cup cooked white rice, rounded.",
+    category: "grain",
   },
   {
     id: "cooked-pasta-cup",
-    name: "Cooked pasta",
+    name: "Cooked spaghetti",
     servingDescription: "One cup cooked plain spaghetti pasta.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/3/3f/%28Pasta%29_by_David_Adam_Kess_%28pic.2%29.jpg",
+    ...fixtureAsset("pasta.jpg"),
     imageSourceUrl:
       "https://commons.wikimedia.org/wiki/File:(Pasta)_by_David_Adam_Kess_(pic.2).jpg",
-    expected: {
-      caloriesKcal: 221,
-      proteinG: 8.1,
-      carbsG: 43.2,
-      fatG: 1.3,
-    },
+    expected: { caloriesKcal: 221, proteinG: 8.1, carbsG: 43.2, fatG: 1.3 },
     expectedSource: "USDA FoodData Central, one cup cooked spaghetti, rounded.",
+    category: "grain",
   },
   {
     id: "half-avocado",
     name: "Half avocado",
     servingDescription: "One half medium raw avocado.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/f/f0/Liat_Portal_for_Foodie_Disorder_-_Avocado_halves.jpg",
+    ...fixtureAsset("avocado.jpg"),
     imageSourceUrl:
       "https://commons.wikimedia.org/wiki/File:Liat_Portal_for_Foodie_Disorder_-_Avocado_halves.jpg",
-    expected: {
-      caloriesKcal: 120,
-      proteinG: 1.5,
-      carbsG: 6.4,
-      fatG: 11,
-    },
+    expected: { caloriesKcal: 120, proteinG: 1.5, carbsG: 6.4, fatG: 11 },
     expectedSource: "USDA FoodData Central, half medium avocado, rounded.",
+    category: "fat",
   },
   {
     id: "cooked-broccoli-cup",
     name: "Cooked broccoli",
     servingDescription: "One cup cooked chopped broccoli.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/4/48/Broccoli_florets_on_ice.jpg",
+    ...fixtureAsset("broccoli.jpg"),
     imageSourceUrl:
       "https://commons.wikimedia.org/wiki/File:Broccoli_florets_on_ice.jpg",
-    expected: {
-      caloriesKcal: 55,
-      proteinG: 3.7,
-      carbsG: 11.2,
-      fatG: 0.6,
-    },
+    expected: { caloriesKcal: 55, proteinG: 3.7, carbsG: 11.2, fatG: 0.6 },
     expectedSource: "USDA FoodData Central, one cup cooked broccoli, rounded.",
+    category: "vegetable",
   },
   {
     id: "medium-carrot",
     name: "Medium carrot",
     servingDescription: "One medium raw carrot.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/a/a4/Raw_Carrots_in_Bowl.jpg",
-    imageSourceUrl: "https://commons.wikimedia.org/wiki/File:Raw_Carrots_in_Bowl.jpg",
-    expected: {
-      caloriesKcal: 25,
-      proteinG: 0.6,
-      carbsG: 5.8,
-      fatG: 0.1,
-    },
+    ...fixtureAsset("carrot.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/carrot,food",
+    expected: { caloriesKcal: 25, proteinG: 0.6, carbsG: 5.8, fatG: 0.1 },
     expectedSource: "USDA FoodData Central, one medium raw carrot, rounded.",
+    category: "vegetable",
   },
   {
     id: "white-bread-slice",
     name: "White bread slice",
     servingDescription: "One regular slice white bread.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/b/b2/Slice_of_bread_in_bowl.jpg",
-    imageSourceUrl:
-      "https://commons.wikimedia.org/wiki/File:Slice_of_bread_in_bowl.jpg",
-    expected: {
-      caloriesKcal: 75,
-      proteinG: 2.6,
-      carbsG: 13.8,
-      fatG: 1,
-    },
+    ...fixtureAsset("white-bread.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/toast,food",
+    expected: { caloriesKcal: 75, proteinG: 2.6, carbsG: 13.8, fatG: 1 },
     expectedSource: "USDA FoodData Central, one slice white bread, rounded.",
+    category: "grain",
   },
   {
     id: "cheddar-ounce",
     name: "Cheddar cheese",
     servingDescription: "One ounce cheddar cheese.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/c/c5/Isle_of_Mull_cheddar_cheese.jpg",
-    imageSourceUrl:
-      "https://commons.wikimedia.org/wiki/File:Isle_of_Mull_cheddar_cheese.jpg",
-    expected: {
-      caloriesKcal: 113,
-      proteinG: 6.4,
-      carbsG: 0.9,
-      fatG: 9.3,
-    },
+    ...fixtureAsset("cheddar.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/cheddar,food",
+    expected: { caloriesKcal: 113, proteinG: 6.4, carbsG: 0.9, fatG: 9.3 },
     expectedSource: "USDA FoodData Central, one ounce cheddar cheese, rounded.",
+    category: "dairy",
   },
   {
     id: "almonds-ounce",
     name: "Raw almonds",
     servingDescription: "One ounce raw almonds.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/b/bd/Liat_Portal_for_Foodie_Disorder_-_Raw_almonds_in_a_bowl.jpg",
-    imageSourceUrl:
-      "https://commons.wikimedia.org/wiki/File:Liat_Portal_for_Foodie_Disorder_-_Raw_almonds_in_a_bowl.jpg",
-    expected: {
-      caloriesKcal: 164,
-      proteinG: 6,
-      carbsG: 6.1,
-      fatG: 14.2,
-    },
+    ...fixtureAsset("almonds.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/almonds,food",
+    expected: { caloriesKcal: 164, proteinG: 6, carbsG: 6.1, fatG: 14.2 },
     expectedSource: "USDA FoodData Central, one ounce raw almonds, rounded.",
+    category: "fat",
   },
   {
     id: "rolled-oats-40g",
     name: "Rolled oats",
     servingDescription: "Forty grams dry rolled oats.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/c/c8/Rolled_oats_in_bowl_2.jpg",
-    imageSourceUrl:
-      "https://commons.wikimedia.org/wiki/File:Rolled_oats_in_bowl_2.jpg",
-    expected: {
-      caloriesKcal: 150,
-      proteinG: 5,
-      carbsG: 27,
-      fatG: 3,
-    },
+    ...fixtureAsset("oats.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/oats,food",
+    expected: { caloriesKcal: 150, proteinG: 5, carbsG: 27, fatG: 3 },
     expectedSource: "Common nutrition label serving, 40g dry rolled oats.",
+    category: "grain",
   },
   {
     id: "cooked-shrimp-100g",
     name: "Cooked shrimp",
     servingDescription: "One hundred grams cooked shrimp.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/a/ad/Cooked_shrimp.jpg",
-    imageSourceUrl: "https://commons.wikimedia.org/wiki/File:Cooked_shrimp.jpg",
-    expected: {
-      caloriesKcal: 99,
-      proteinG: 24,
-      carbsG: 0.2,
-      fatG: 0.3,
-    },
+    ...fixtureAsset("shrimp.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/prawn,food",
+    expected: { caloriesKcal: 99, proteinG: 24, carbsG: 0.2, fatG: 0.3 },
     expectedSource: "USDA FoodData Central, 100g cooked shrimp, rounded.",
+    category: "protein",
   },
   {
     id: "cooked-salmon-100g",
     name: "Cooked salmon",
     servingDescription: "One hundred grams cooked Atlantic salmon.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/1/10/Liat_Portal_for_Foodie_Disorder_-_Salmon_Fillet_with_Green_Chili_and_Garlic.jpg",
-    imageSourceUrl:
-      "https://commons.wikimedia.org/wiki/File:Liat_Portal_for_Foodie_Disorder_-_Salmon_Fillet_with_Green_Chili_and_Garlic.jpg",
-    expected: {
-      caloriesKcal: 206,
-      proteinG: 22.1,
-      carbsG: 0,
-      fatG: 12.4,
-    },
+    ...fixtureAsset("salmon.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/salmon,food",
+    expected: { caloriesKcal: 206, proteinG: 22.1, carbsG: 0, fatG: 12.4 },
     expectedSource: "USDA FoodData Central, 100g cooked Atlantic salmon, rounded.",
+    category: "protein",
   },
   {
     id: "cooked-lentils-cup",
     name: "Cooked lentils",
     servingDescription: "One cup cooked lentils.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/9/93/Liat_Portal_for_Foodie_Disorder_-_Cooked_Lentils_with_Caramelized_Onions.jpg",
-    imageSourceUrl:
-      "https://commons.wikimedia.org/wiki/File:Liat_Portal_for_Foodie_Disorder_-_Cooked_Lentils_with_Caramelized_Onions.jpg",
-    expected: {
-      caloriesKcal: 230,
-      proteinG: 17.9,
-      carbsG: 39.9,
-      fatG: 0.8,
-    },
+    ...fixtureAsset("lentils.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/lentils,food",
+    expected: { caloriesKcal: 230, proteinG: 17.9, carbsG: 39.9, fatG: 0.8 },
     expectedSource: "USDA FoodData Central, one cup cooked lentils, rounded.",
+    category: "legume",
   },
   {
     id: "whole-milk-cup",
     name: "Whole milk",
     servingDescription: "One cup whole milk.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/8/80/Bowl_milk_glass.jpg",
-    imageSourceUrl: "https://commons.wikimedia.org/wiki/File:Bowl_milk_glass.jpg",
-    expected: {
-      caloriesKcal: 149,
-      proteinG: 7.7,
-      carbsG: 11.7,
-      fatG: 7.9,
-    },
+    ...fixtureAsset("whole-milk.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/milk,food",
+    expected: { caloriesKcal: 149, proteinG: 7.7, carbsG: 11.7, fatG: 7.9 },
     expectedSource: "USDA FoodData Central, one cup whole milk, rounded.",
+    category: "dairy",
   },
   {
     id: "nonfat-greek-yogurt-170g",
     name: "Greek yogurt",
     servingDescription: "One 170g serving plain nonfat Greek yogurt.",
-    imageUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/e/ea/Turkish_strained_yogurt.jpg",
-    imageSourceUrl:
-      "https://commons.wikimedia.org/wiki/File:Turkish_strained_yogurt.jpg",
-    expected: {
-      caloriesKcal: 100,
-      proteinG: 17.3,
-      carbsG: 6.1,
-      fatG: 0.7,
-    },
+    ...fixtureAsset("greek-yogurt.jpg"),
+    imageSourceUrl: "https://loremflickr.com/512/512/yogurt,food",
+    expected: { caloriesKcal: 100, proteinG: 17.3, carbsG: 6.1, fatG: 0.7 },
     expectedSource: "USDA FoodData Central, 170g plain nonfat Greek yogurt, rounded.",
+    category: "dairy",
   },
 ];
 
@@ -368,35 +343,47 @@ function average(values: number[]) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function isProviderCapacityFailure(error: string | null) {
-  const lower = (error ?? "").toLowerCase();
-
-  return (
-    lower.includes("insufficient_quota") ||
-    lower.includes("insufficient funds") ||
-    lower.includes("balance is too low") ||
-    lower.includes("/billing") ||
-    lower.includes("rate-limit") ||
-    lower.includes("rate limited") ||
-    lower.includes("temporarily rate-limited")
-  );
-}
-
-function skippedModelResult(model: string, error: string): MacroBenchmarkModelCaseResult {
-  return {
-    model,
-    ok: false,
-    latencyMs: 0,
-    estimate: null,
-    absoluteError: null,
-    normalizedErrorPct: null,
-    error,
-    retryable: false,
-  };
+function delay(ms: number) {
+  return ms > 0
+    ? new Promise((resolve) => setTimeout(resolve, ms))
+    : Promise.resolve();
 }
 
 function macroKeys() {
   return ["caloriesKcal", "proteinG", "carbsG", "fatG"] as const;
+}
+
+function inferImageMimeType(assetFileName: string) {
+  const extension = path.extname(assetFileName).toLowerCase();
+
+  if (extension === ".jpg" || extension === ".jpeg") {
+    return "image/jpeg";
+  }
+
+  if (extension === ".png") {
+    return "image/png";
+  }
+
+  if (extension === ".webp") {
+    return "image/webp";
+  }
+
+  throw new Error(`Unsupported benchmark fixture image type: ${assetFileName}`);
+}
+
+export async function loadFixtureImageDataUrl(
+  fixture: MacroBenchmarkFixture,
+): Promise<string> {
+  const assetPath = path.join(
+    process.cwd(),
+    "public",
+    "benchmark-foods",
+    fixture.assetFileName,
+  );
+  const buffer = await readFile(assetPath);
+  return `data:${inferImageMimeType(fixture.assetFileName)};base64,${buffer.toString(
+    "base64",
+  )}`;
 }
 
 export function calculateMacroBenchmarkError(
@@ -429,16 +416,152 @@ export function calculateMacroBenchmarkError(
   };
 }
 
+function emptyFailureBreakdown() {
+  return Object.fromEntries([
+    ...FAILURE_KINDS.map((kind) => [kind, 0]),
+    ["skipped", 0],
+  ]) as Record<AnalyzeFoodPhotoFailureKind | "skipped", number>;
+}
+
+function emptyCategoryAverages() {
+  return Object.fromEntries(
+    CATEGORIES.map((category) => [category, null]),
+  ) as Record<MacroBenchmarkCategory, number | null>;
+}
+
+function createFailureResult(params: {
+  model: string;
+  error: string;
+  failureKind: AnalyzeFoodPhotoFailureKind;
+  latencyMs: number | null;
+  retryable?: boolean;
+  wasSkipped?: boolean;
+}): MacroBenchmarkModelCaseResult {
+  return {
+    model: params.model,
+    ok: false,
+    latencyMs: params.latencyMs,
+    estimate: null,
+    absoluteError: null,
+    normalizedErrorPct: null,
+    error: params.error,
+    failureKind: params.failureKind,
+    retryable: params.retryable,
+    wasSkipped: params.wasSkipped,
+  };
+}
+
+function skippedModelResult(
+  model: string,
+  failureKind: AnalyzeFoodPhotoFailureKind,
+): MacroBenchmarkModelCaseResult {
+  return createFailureResult({
+    model,
+    error: `Skipped after ${failureKind} on earlier fixture.`,
+    failureKind,
+    latencyMs: null,
+    retryable: false,
+    wasSkipped: true,
+  });
+}
+
+function isProviderCapacityFailure(
+  failureKind?: AnalyzeFoodPhotoFailureKind,
+) {
+  return (
+    failureKind === "provider_rate_limit" ||
+    failureKind === "provider_quota" ||
+    failureKind === "provider_image_access"
+  );
+}
+
+function shouldRetryFailure(failureKind?: AnalyzeFoodPhotoFailureKind) {
+  return (
+    failureKind === "provider_rate_limit" ||
+    failureKind === "provider_error" ||
+    failureKind === "empty_response" ||
+    failureKind === "invalid_json" ||
+    failureKind === "unknown"
+  );
+}
+
+function normalizeFixtureLimit(fixtureLimit: number | undefined) {
+  if (fixtureLimit === 4 || fixtureLimit === 8 || fixtureLimit === 12) {
+    return fixtureLimit;
+  }
+
+  if (fixtureLimit === 18) {
+    return MACRO_BENCHMARK_FIXTURES.length;
+  }
+
+  return 4;
+}
+
+function isValidModelResult(value: unknown): value is MacroBenchmarkModelCaseResult {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.model === "string" &&
+    typeof record.ok === "boolean" &&
+    (typeof record.latencyMs === "number" || record.latencyMs === null) &&
+    ("estimate" in record ? true : true) &&
+    ("absoluteError" in record ? true : true) &&
+    ("normalizedErrorPct" in record ? true : true) &&
+    ("error" in record ? true : true)
+  );
+}
+
+export function validateBenchmarkBaseline(params: {
+  baseline: MacroBenchmarkBaseline | undefined;
+  currentModel: string;
+  fixtures: MacroBenchmarkFixture[];
+}): MacroBenchmarkBaseline | null {
+  const { baseline, currentModel, fixtures } = params;
+
+  if (!baseline || baseline.currentModel !== currentModel) {
+    return null;
+  }
+
+  const createdAtMs = Date.parse(baseline.createdAt);
+  if (!Number.isFinite(createdAtMs) || Date.now() - createdAtMs > BASELINE_TTL_MS) {
+    return null;
+  }
+
+  if (
+    baseline.fixtureIds.length !== fixtures.length ||
+    baseline.results.length !== fixtures.length
+  ) {
+    return null;
+  }
+
+  if (
+    baseline.fixtureIds.some((fixtureId, index) => fixtureId !== fixtures[index]?.id)
+  ) {
+    return null;
+  }
+
+  if (!baseline.results.every(isValidModelResult)) {
+    return null;
+  }
+
+  return baseline;
+}
+
 async function runFixtureForModel(params: {
+  analyzeFoodPhotoImpl: AnalyzeFoodPhotoFn;
   fixture: MacroBenchmarkFixture;
+  imageDataUrl: string;
   model: string;
   userId: string;
 }): Promise<MacroBenchmarkModelCaseResult> {
   const startedAt = performance.now();
-  const result = await analyzeFoodPhoto({
+  const result: AnalyzeFoodPhotoResult = await params.analyzeFoodPhotoImpl({
     forceReady: true,
-    imageUrl: params.fixture.imageUrl,
-    maxAttempts: 2,
+    imageUrl: params.imageDataUrl,
+    maxAttempts: 1,
     model: params.model,
     userId: params.userId,
     clarification: `Benchmark fixture: ${params.fixture.servingDescription}`,
@@ -446,28 +569,23 @@ async function runFixtureForModel(params: {
   const latencyMs = Math.round(performance.now() - startedAt);
 
   if (!result.ok) {
-    return {
+    return createFailureResult({
       model: params.model,
-      ok: false,
-      latencyMs,
-      estimate: null,
-      absoluteError: null,
-      normalizedErrorPct: null,
       error: result.error,
+      failureKind: result.kind,
+      latencyMs,
       retryable: result.retryable,
-    };
+    });
   }
 
   if (result.analysis.status !== "ready") {
-    return {
+    return createFailureResult({
       model: params.model,
-      ok: false,
-      latencyMs,
-      estimate: null,
-      absoluteError: null,
-      normalizedErrorPct: null,
       error: result.analysis.question,
-    };
+      failureKind: "empty_response",
+      latencyMs,
+      retryable: true,
+    });
   }
 
   const error = calculateMacroBenchmarkError(
@@ -486,14 +604,74 @@ async function runFixtureForModel(params: {
   };
 }
 
+async function runModelCallWithRateLimit(params: {
+  analyzeFoodPhotoImpl: AnalyzeFoodPhotoFn;
+  fixture: MacroBenchmarkFixture;
+  imageDataUrl: string;
+  model: string;
+  userId: string;
+  requestDelayMs: number;
+  retryDelayMs: number;
+  hasMadeOpenRouterRequest: boolean;
+  markOpenRouterRequestMade: () => void;
+}) {
+  if (params.hasMadeOpenRouterRequest) {
+    await delay(params.requestDelayMs);
+  }
+
+  params.markOpenRouterRequestMade();
+  const firstResult = await runFixtureForModel(params);
+
+  if (
+    firstResult.retryable &&
+    shouldRetryFailure(firstResult.failureKind)
+  ) {
+    await delay(params.retryDelayMs);
+    params.markOpenRouterRequestMade();
+    return runFixtureForModel(params);
+  }
+
+  return firstResult;
+}
+
 function summarizeModel(
   model: string,
   results: MacroBenchmarkModelCaseResult[],
+  fixtures: MacroBenchmarkFixture[],
 ): MacroBenchmarkModelSummary {
   const successfulResults = results.filter(
     (result) => result.ok && result.normalizedErrorPct !== null,
   );
-  const averageLatencyMs = average(results.map((result) => result.latencyMs));
+  const attemptedResults = results.filter(
+    (result) => !result.wasSkipped && result.latencyMs !== null,
+  );
+  const failureBreakdown = emptyFailureBreakdown();
+  const categoryAverages = emptyCategoryAverages();
+
+  for (const result of results) {
+    if (result.wasSkipped) {
+      failureBreakdown.skipped += 1;
+    } else if (!result.ok) {
+      failureBreakdown[result.failureKind ?? "unknown"] += 1;
+    }
+  }
+
+  for (const category of CATEGORIES) {
+    const values = results
+      .map((result, index) =>
+        fixtures[index]?.category === category ? result.normalizedErrorPct : null,
+      )
+      .filter((value): value is number => typeof value === "number");
+    const categoryAverage = average(values);
+    categoryAverages[category] =
+      categoryAverage === null ? null : roundOne(categoryAverage);
+  }
+
+  const averageLatencyMs = average(
+    attemptedResults
+      .map((result) => result.latencyMs)
+      .filter((value): value is number => value !== null),
+  );
   const averageErrorPct = average(
     successfulResults
       .map((result) => result.normalizedErrorPct)
@@ -503,66 +681,179 @@ function summarizeModel(
   return {
     model,
     completedCases: successfulResults.length,
-    failedCases: results.length - successfulResults.length,
+    failedCases: results.filter((result) => !result.ok && !result.wasSkipped).length,
+    skippedCases: results.filter((result) => result.wasSkipped).length,
     averageLatencyMs:
       averageLatencyMs === null ? null : Math.round(averageLatencyMs),
     averageErrorPct: averageErrorPct === null ? null : roundOne(averageErrorPct),
+    reliabilityPct:
+      results.length === 0 ? 0 : roundOne((successfulResults.length / results.length) * 100),
+    failureBreakdown,
+    categoryAverages,
+  };
+}
+
+function createCaseResult(params: {
+  fixture: MacroBenchmarkFixture;
+  current: MacroBenchmarkModelCaseResult;
+  candidate: MacroBenchmarkModelCaseResult;
+}): MacroBenchmarkCaseResult {
+  return {
+    fixtureId: params.fixture.id,
+    fixtureName: params.fixture.name,
+    servingDescription: params.fixture.servingDescription,
+    thumbnailUrl: params.fixture.thumbnailUrl,
+    imageSourceUrl: params.fixture.imageSourceUrl,
+    expected: params.fixture.expected,
+    expectedSource: params.fixture.expectedSource,
+    category: params.fixture.category,
+    current: params.current,
+    candidate: params.candidate,
   };
 }
 
 export async function runMacroBenchmark(params: {
+  analyzeFoodPhotoImpl?: AnalyzeFoodPhotoFn;
+  baseline?: MacroBenchmarkBaseline;
   candidateModel: string;
+  currentModel?: string;
   fixtureLimit?: number;
+  mode?: MacroBenchmarkMode;
+  requestDelayMs?: number;
+  retryDelayMs?: number;
   userId: string;
 }): Promise<MacroBenchmarkResult> {
   const candidateModel = params.candidateModel.trim();
-  const currentModel = getConfiguredFoodPhotoModel();
-  const fixtureLimit =
-    typeof params.fixtureLimit === "number" && Number.isFinite(params.fixtureLimit)
-      ? Math.max(1, Math.min(MACRO_BENCHMARK_FIXTURES.length, params.fixtureLimit))
-      : MACRO_BENCHMARK_FIXTURES.length;
+  const currentModel = params.currentModel ?? getConfiguredFoodPhotoModel();
+  const analyzeFoodPhotoImpl = params.analyzeFoodPhotoImpl ?? analyzeFoodPhoto;
+  const fixtureLimit = normalizeFixtureLimit(params.fixtureLimit);
   const fixtures = MACRO_BENCHMARK_FIXTURES.slice(0, fixtureLimit);
+  const mode = params.mode ?? "compare";
+  const comparedSameModel = mode === "compare" && candidateModel === currentModel;
+  const baseline = validateBenchmarkBaseline({
+    baseline: params.baseline,
+    currentModel,
+    fixtures,
+  });
   const cases: MacroBenchmarkCaseResult[] = [];
-  let currentStopError: string | null = null;
-  let candidateStopError: string | null = null;
+  let currentStopKind: AnalyzeFoodPhotoFailureKind | null = null;
+  let candidateStopKind: AnalyzeFoodPhotoFailureKind | null = null;
+  let hasMadeOpenRouterRequest = false;
+  const requestDelayMs = params.requestDelayMs ?? BENCHMARK_REQUEST_DELAY_MS;
+  const retryDelayMs = params.retryDelayMs ?? BENCHMARK_RETRY_DELAY_MS;
+  const markOpenRouterRequestMade = () => {
+    hasMadeOpenRouterRequest = true;
+  };
 
-  for (const fixture of fixtures) {
-    const current = currentStopError
-      ? skippedModelResult(currentModel, currentStopError)
-      : await runFixtureForModel({
+  for (const [index, fixture] of fixtures.entries()) {
+    let current: MacroBenchmarkModelCaseResult | null =
+      mode === "compare" && baseline
+        ? baseline.results[index] ?? null
+        : null;
+    let candidate: MacroBenchmarkModelCaseResult | null = null;
+
+    if (comparedSameModel && current) {
+      candidate = current;
+    }
+
+    let imageDataUrl: string | null = null;
+    if (!current || !candidate) {
+      try {
+        imageDataUrl = await loadFixtureImageDataUrl(fixture);
+      } catch {
+        const error = `Fixture asset missing: /benchmark-foods/${fixture.assetFileName}`;
+        current ??= createFailureResult({
+          model: currentModel,
+          error,
+          failureKind: "invalid_image",
+          latencyMs: null,
+        });
+        candidate ??= createFailureResult({
+          model: candidateModel,
+          error,
+          failureKind: "invalid_image",
+          latencyMs: null,
+        });
+      }
+    }
+
+    if (mode === "candidate_only") {
+      current ??= createFailureResult({
+        model: currentModel,
+        error: "Not run in candidate-only mode.",
+        failureKind: "unknown",
+        latencyMs: null,
+        wasSkipped: true,
+      });
+    } else if (!current) {
+      if (currentStopKind) {
+        current = skippedModelResult(currentModel, currentStopKind);
+      } else if (imageDataUrl) {
+        current = await runModelCallWithRateLimit({
+          analyzeFoodPhotoImpl,
           fixture,
+          imageDataUrl,
           model: currentModel,
           userId: params.userId,
+          requestDelayMs,
+          retryDelayMs,
+          hasMadeOpenRouterRequest,
+          markOpenRouterRequestMade,
         });
-    const candidate = candidateStopError
-      ? skippedModelResult(candidateModel, candidateStopError)
-      : await runFixtureForModel({
+
+        if (!current.ok && isProviderCapacityFailure(current.failureKind)) {
+          currentStopKind = current.failureKind ?? "unknown";
+        }
+      }
+    }
+
+    if (!candidate) {
+      if (comparedSameModel && current) {
+        candidate = current;
+      } else if (candidateStopKind) {
+        candidate = skippedModelResult(candidateModel, candidateStopKind);
+      } else if (imageDataUrl) {
+        candidate = await runModelCallWithRateLimit({
+          analyzeFoodPhotoImpl,
           fixture,
+          imageDataUrl,
           model: candidateModel,
           userId: params.userId,
+          requestDelayMs,
+          retryDelayMs,
+          hasMadeOpenRouterRequest,
+          markOpenRouterRequestMade,
         });
 
-    if (!current.ok && isProviderCapacityFailure(current.error)) {
-      currentStopError =
-        "Skipped after provider capacity/quota failure on an earlier fixture.";
+        if (!candidate.ok && isProviderCapacityFailure(candidate.failureKind)) {
+          candidateStopKind = candidate.failureKind ?? "unknown";
+        }
+      }
     }
 
-    if (!candidate.ok && isProviderCapacityFailure(candidate.error)) {
-      candidateStopError =
-        "Skipped after provider capacity/quota failure on an earlier fixture.";
-    }
-
-    cases.push({
-      fixtureId: fixture.id,
-      fixtureName: fixture.name,
-      servingDescription: fixture.servingDescription,
-      imageUrl: fixture.imageUrl,
-      imageSourceUrl: fixture.imageSourceUrl,
-      expected: fixture.expected,
-      expectedSource: fixture.expectedSource,
-      current,
-      candidate,
-    });
+    cases.push(
+      createCaseResult({
+        fixture,
+        current:
+          current ??
+          createFailureResult({
+            model: currentModel,
+            error: "Current model was not run.",
+            failureKind: "unknown",
+            latencyMs: null,
+            wasSkipped: true,
+          }),
+        candidate:
+          candidate ??
+          createFailureResult({
+            model: candidateModel,
+            error: "Candidate model was not run.",
+            failureKind: "unknown",
+            latencyMs: null,
+            wasSkipped: true,
+          }),
+      }),
+    );
   }
 
   return {
@@ -570,16 +861,25 @@ export async function runMacroBenchmark(params: {
     candidateModel,
     fixtureCount: fixtures.length,
     totalFixtureCount: MACRO_BENCHMARK_FIXTURES.length,
+    comparedSameModel,
+    mode,
+    usedBaseline: mode === "compare" && Boolean(baseline),
+    baselineCreatedAt: mode === "compare" ? baseline?.createdAt ?? null : null,
     fixtures,
     cases,
     summaries: {
-      current: summarizeModel(
-        currentModel,
-        cases.map((item) => item.current),
-      ),
+      current:
+        mode === "candidate_only"
+          ? null
+          : summarizeModel(
+              currentModel,
+              cases.map((item) => item.current),
+              fixtures,
+            ),
       candidate: summarizeModel(
         candidateModel,
         cases.map((item) => item.candidate),
+        fixtures,
       ),
     },
   };
