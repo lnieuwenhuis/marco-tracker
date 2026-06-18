@@ -65,7 +65,6 @@ export type MacroBenchmarkResult = {
   };
 };
 
-const IMAGE_FETCH_TIMEOUT_MS = 15_000;
 const ERROR_DENOMINATORS: MacroBenchmarkMacros = {
   caloriesKcal: 50,
   proteinG: 5,
@@ -430,45 +429,15 @@ export function calculateMacroBenchmarkError(
   };
 }
 
-async function fetchFixtureImage(fixture: MacroBenchmarkFixture) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(fixture.imageUrl, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Macro Tracker AI benchmark",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Image fetch failed with status ${response.status}.`);
-    }
-
-    const contentType = response.headers.get("content-type") ?? "image/jpeg";
-    if (!contentType.startsWith("image/")) {
-      throw new Error(`Image URL returned ${contentType}.`);
-    }
-
-    return new File([await response.arrayBuffer()], `${fixture.id}.jpg`, {
-      type: contentType.split(";")[0]?.trim() || "image/jpeg",
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function runFixtureForModel(params: {
   fixture: MacroBenchmarkFixture;
-  image: File;
   model: string;
   userId: string;
 }): Promise<MacroBenchmarkModelCaseResult> {
   const startedAt = performance.now();
   const result = await analyzeFoodPhoto({
     forceReady: true,
-    image: params.image,
+    imageUrl: params.fixture.imageUrl,
     maxAttempts: 2,
     model: params.model,
     userId: params.userId,
@@ -558,12 +527,10 @@ export async function runMacroBenchmark(params: {
   let candidateStopError: string | null = null;
 
   for (const fixture of fixtures) {
-    const image = await fetchFixtureImage(fixture);
     const current = currentStopError
       ? skippedModelResult(currentModel, currentStopError)
       : await runFixtureForModel({
           fixture,
-          image,
           model: currentModel,
           userId: params.userId,
         });
@@ -571,7 +538,6 @@ export async function runMacroBenchmark(params: {
       ? skippedModelResult(candidateModel, candidateStopError)
       : await runFixtureForModel({
           fixture,
-          image,
           model: candidateModel,
           userId: params.userId,
         });
