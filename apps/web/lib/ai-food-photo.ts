@@ -373,7 +373,8 @@ async function readOpenRouterError(response: Response) {
 }
 
 export async function analyzeFoodPhoto(params: {
-  image: File;
+  image?: File;
+  imageUrl?: string;
   clarification?: string;
   forceReady?: boolean;
   maxAttempts?: number;
@@ -388,24 +389,52 @@ export async function analyzeFoodPhoto(params: {
     };
   }
 
-  if (!SUPPORTED_IMAGE_TYPES.has(params.image.type)) {
-    return {
-      ok: false,
-      error: "Upload a PNG, JPEG, WebP, or GIF image.",
-    };
+  let imageUrl = params.imageUrl?.trim();
+
+  if (imageUrl) {
+    try {
+      const parsedImageUrl = new URL(imageUrl);
+      if (parsedImageUrl.protocol !== "https:") {
+        return {
+          ok: false,
+          error: "Benchmark image URLs must use HTTPS.",
+        };
+      }
+    } catch {
+      return {
+        ok: false,
+        error: "Benchmark image URL is invalid.",
+      };
+    }
   }
 
-  if (params.image.size > MAX_IMAGE_BYTES) {
-    return {
-      ok: false,
-      error: "Image is too large. Use an image under 8 MB.",
-    };
-  }
+  if (!imageUrl) {
+    if (!params.image) {
+      return {
+        ok: false,
+        error: "A food photo is required.",
+      };
+    }
 
-  const imageDataUrl = imageBufferToDataUrl(
-    await params.image.arrayBuffer(),
-    params.image.type,
-  );
+    if (!SUPPORTED_IMAGE_TYPES.has(params.image.type)) {
+      return {
+        ok: false,
+        error: "Upload a PNG, JPEG, WebP, or GIF image.",
+      };
+    }
+
+    if (params.image.size > MAX_IMAGE_BYTES) {
+      return {
+        ok: false,
+        error: "Image is too large. Use an image under 8 MB.",
+      };
+    }
+
+    imageUrl = imageBufferToDataUrl(
+      await params.image.arrayBuffer(),
+      params.image.type,
+    );
+  }
   const model = params.model?.trim() || getConfiguredFoodPhotoModel();
   const maxAttempts = Math.max(1, params.maxAttempts ?? 2);
   const requestBody: Record<string, unknown> = {
