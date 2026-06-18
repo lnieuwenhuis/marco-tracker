@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { calculateMacroBenchmarkError } from "@/lib/ai-model-benchmark";
+import {
+  MACRO_BENCHMARK_FIXTURES,
+  calculateMacroBenchmarkError,
+} from "@/lib/ai-model-benchmark";
 
 describe("calculateMacroBenchmarkError", () => {
   it("computes absolute macro errors and normalized average error", () => {
@@ -28,5 +31,18 @@ describe("calculateMacroBenchmarkError", () => {
       },
       normalizedErrorPct: 29.4,
     });
+  });
+
+  it("keeps a broad fixture set with image and macro metadata", () => {
+    expect(MACRO_BENCHMARK_FIXTURES).toHaveLength(18);
+    expect(
+      MACRO_BENCHMARK_FIXTURES.every(
+        (fixture) =>
+          fixture.imageUrl.startsWith("https://") &&
+          fixture.imageSourceUrl.startsWith("https://") &&
+          fixture.expectedSource.length > 0 &&
+          fixture.expected.caloriesKcal > 0,
+      ),
+    ).toBe(true);
   });
 });
