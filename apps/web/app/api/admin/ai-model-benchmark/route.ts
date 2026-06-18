@@ -34,9 +34,15 @@ export async function POST(request: Request) {
   }
 
   const payload = (await request.json().catch(() => null)) as {
+    fixtureLimit?: unknown;
     model?: unknown;
   } | null;
   const candidateModel = parseModelName(payload?.model);
+  const fixtureLimit =
+    typeof payload?.fixtureLimit === "number" &&
+    Number.isInteger(payload.fixtureLimit)
+      ? payload.fixtureLimit
+      : undefined;
 
   if (!candidateModel) {
     return Response.json(
@@ -52,6 +58,7 @@ export async function POST(request: Request) {
   try {
     const result = await runMacroBenchmark({
       candidateModel,
+      fixtureLimit,
       userId: adminUser.id,
     });
 

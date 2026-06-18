@@ -113,6 +113,7 @@ function ResultCell({
 
 export function AdminAiBenchmarkClient() {
   const [model, setModel] = useState("");
+  const [fixtureLimit, setFixtureLimit] = useState(8);
   const [result, setResult] = useState<MacroBenchmarkResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -152,7 +153,7 @@ export function AdminAiBenchmarkClient() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ model }),
+        body: JSON.stringify({ fixtureLimit, model }),
       });
       const payload = (await response.json()) as ApiResponse;
 
@@ -175,7 +176,10 @@ export function AdminAiBenchmarkClient() {
 
   return (
     <div className="space-y-5">
-      <form className="grid gap-3 lg:grid-cols-[1fr_auto]" onSubmit={runBenchmark}>
+      <form
+        className="grid gap-3 lg:grid-cols-[1fr_12rem_auto]"
+        onSubmit={runBenchmark}
+      >
         <label className="block">
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
             Candidate OpenRouter model
@@ -188,6 +192,20 @@ export function AdminAiBenchmarkClient() {
             className="w-full rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 font-mono text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
           />
         </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
+            Fixture count
+          </span>
+          <select
+            value={fixtureLimit}
+            onChange={(event) => setFixtureLimit(Number(event.target.value))}
+            className="w-full rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
+          >
+            <option value={8}>8 quick</option>
+            <option value={12}>12 standard</option>
+            <option value={18}>18 full</option>
+          </select>
+        </label>
         <button
           type="submit"
           disabled={isRunning}
@@ -199,8 +217,9 @@ export function AdminAiBenchmarkClient() {
 
       <p className="text-sm text-[var(--color-muted)]">
         Each run compares the configured production model with the candidate
-        model on three public single-serving food images. Lower macro error and
-        lower latency are better.
+        model on a fixed food image fixture set with known serving-size macros.
+        The selected run makes {fixtureLimit * 2} OpenRouter calls. Lower macro
+        error and lower latency are better.
       </p>
 
       {error ? (
@@ -215,6 +234,13 @@ export function AdminAiBenchmarkClient() {
             <SummaryCard label="Current model" {...result.summaries.current} />
             <SummaryCard label="Candidate model" {...result.summaries.candidate} />
           </div>
+
+          <p className="text-xs text-[var(--color-muted)]">
+            Ran {result.fixtureCount} of {result.totalFixtureCount} available
+            fixtures. Provider quota or rate-limit failures are counted as
+            failures, but remaining cases for that model may be skipped to avoid
+            burning free-tier quota.
+          </p>
 
           {verdict ? (
             <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm font-semibold text-[var(--color-ink)]">
