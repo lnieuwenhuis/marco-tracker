@@ -26,7 +26,8 @@ export type AnalyzeFoodPhotoResult =
 
 const OPENROUTER_CHAT_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
-const DEFAULT_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
+export const DEFAULT_FOOD_PHOTO_MODEL =
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set([
   "image/png",
@@ -312,6 +313,7 @@ async function readOpenRouterError(response: Response) {
 export async function analyzeFoodPhoto(params: {
   image: File;
   clarification?: string;
+  model?: string;
   userId: string;
 }): Promise<AnalyzeFoodPhotoResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -340,7 +342,7 @@ export async function analyzeFoodPhoto(params: {
     await params.image.arrayBuffer(),
     params.image.type,
   );
-  const model = process.env.OPENROUTER_MODEL ?? DEFAULT_MODEL;
+  const model = params.model?.trim() || getConfiguredFoodPhotoModel();
   const requestBody: Record<string, unknown> = {
     model,
     messages: [
@@ -464,4 +466,8 @@ export async function analyzeFoodPhoto(params: {
       aiResponse: content,
     };
   }
+}
+
+export function getConfiguredFoodPhotoModel() {
+  return process.env.OPENROUTER_MODEL ?? DEFAULT_FOOD_PHOTO_MODEL;
 }
