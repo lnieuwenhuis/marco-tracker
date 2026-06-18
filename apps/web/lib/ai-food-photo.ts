@@ -457,7 +457,7 @@ export async function analyzeFoodPhoto(params: {
           {
             type: "image_url",
             image_url: {
-              url: imageDataUrl,
+              url: imageUrl,
             },
           },
         ],
