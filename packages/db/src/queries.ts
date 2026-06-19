@@ -2,8 +2,8 @@ import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte,
 
 import { computeStreaks, getPeriodRanges } from "./dates";
 import { getDb, type DatabaseClient } from "./client";
-import { adminAuditEvents, barcodeProducts, foodPresets, mealEntries, recipeIngredients, recipes, users, weightEntries } from "./schema";
-import { validateMealEntryInput, validateRecipeInput, validateWeightEntryInput } from "./validators";
+import { adminAuditEvents, barcodeProducts, foodPresets, foodProducts, mealEntries, mealGroups, recipeIngredients, recipes, users, weightEntries } from "./schema";
+import { validateFoodProductInput, validateMealEntryInput, validateRecipeInput, validateWeightEntryInput } from "./validators";
 import type {
   AdminAuditListPage,
   AdminAuditEvent,
@@ -20,13 +20,18 @@ import type {
   CustomBarcodeProductInput,
   DailyOverview,
   DailySummary,
+  FoodProduct,
+  FoodProductInput,
   FoodPreset,
+  MealEntryStatus,
+  MealGroup,
   MacroGoals,
   MacroNumbers,
   MealEntryInput,
   MealEntryRecord,
   PeriodAverage,
   QuickAddCandidate,
+  QuantityUnit,
   RecipeIngredientRecord,
   RecipeInput,
   RecipeRecord,
@@ -80,6 +85,10 @@ function roundToSingleDecimal(value: number) {
   return Math.round(value * 10) / 10;
 }
 
+function roundToTwoDecimals(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
 function toTimestampString(value: Date | string | null | undefined) {
   if (!value) {
     return "";
@@ -119,23 +128,118 @@ function mapMealRow(row: {
   userId: string;
   date?: string;
   entryDate?: string;
+  mealGroupId?: string | null;
+  status?: string;
+  productId?: string | null;
   label: string;
   sortOrder: number;
+  quantity?: string | number;
+  unit?: string;
+  servingMultiplier?: string | number;
   proteinG: string | number;
   carbsG: string | number;
   fatG: string | number;
   caloriesKcal: number;
+  clientMutationId?: string | null;
+  sourceLabel?: string | null;
 }): MealEntryRecord {
+  const status = isKnownMealEntryStatus(row.status) ? row.status : "eaten";
+  const unit = isKnownQuantityUnit(row.unit) ? row.unit : "serving";
+
   return {
     id: row.id,
     userId: row.userId,
     date: row.date ?? row.entryDate ?? "",
+    mealGroupId: row.mealGroupId ?? null,
+    status,
+    productId: row.productId ?? null,
     label: row.label,
     sortOrder: row.sortOrder,
+    quantity: roundToTwoDecimals(toNumber(row.quantity ?? 1)),
+    unit,
+    servingMultiplier: roundToTwoDecimals(toNumber(row.servingMultiplier ?? 1)),
     proteinG: roundToSingleDecimal(toNumber(row.proteinG)),
     carbsG: roundToSingleDecimal(toNumber(row.carbsG)),
     fatG: roundToSingleDecimal(toNumber(row.fatG)),
     caloriesKcal: row.caloriesKcal,
+    clientMutationId: row.clientMutationId ?? null,
+    sourceLabel: row.sourceLabel ?? null,
+  };
+}
+
+function isKnownMealEntryStatus(value: string | null | undefined): value is MealEntryStatus {
+  return value === "planned" || value === "eaten" || value === "skipped";
+}
+
+function isKnownQuantityUnit(value: string | null | undefined): value is QuantityUnit {
+  return value === "g" || value === "ml" || value === "serving" || value === "count";
+}
+
+function mapMealGroupRow(row: {
+  id: string;
+  userId: string;
+  label: string;
+  sortOrder: number;
+  isDefault: boolean;
+}): MealGroup {
+  return {
+    id: row.id,
+    userId: row.userId,
+    label: row.label,
+    sortOrder: row.sortOrder,
+    isDefault: row.isDefault,
+  };
+}
+
+function mapFoodProductRow(row: {
+  id: string;
+  ownerUserId: string | null;
+  scope: string;
+  source: string;
+  barcode: string | null;
+  name: string;
+  brand: string;
+  defaultServingQuantity: string | number;
+  defaultServingUnit: string;
+  proteinPer100: string | number;
+  carbsPer100: string | number;
+  fatPer100: string | number;
+  caloriesPer100: number;
+  servingWeightG: string | number | null;
+  servingVolumeMl: string | number | null;
+}): FoodProduct {
+  const scope =
+    row.scope === "global" || row.scope === "legacy" || row.scope === "personal"
+      ? row.scope
+      : "personal";
+  const source =
+    row.source === "barcode" ||
+    row.source === "ai_photo" ||
+    row.source === "legacy" ||
+    row.source === "recipe" ||
+    row.source === "manual"
+      ? row.source
+      : "manual";
+  return {
+    id: row.id,
+    ownerUserId: row.ownerUserId,
+    scope,
+    source,
+    barcode: row.barcode,
+    name: row.name,
+    brand: row.brand,
+    defaultServingQuantity: roundToTwoDecimals(toNumber(row.defaultServingQuantity)),
+    defaultServingUnit: isKnownQuantityUnit(row.defaultServingUnit)
+      ? row.defaultServingUnit
+      : "serving",
+    proteinPer100: roundToSingleDecimal(toNumber(row.proteinPer100)),
+    carbsPer100: roundToSingleDecimal(toNumber(row.carbsPer100)),
+    fatPer100: roundToSingleDecimal(toNumber(row.fatPer100)),
+    caloriesPer100: row.caloriesPer100,
+    servingWeightG:
+      row.servingWeightG != null ? roundToTwoDecimals(toNumber(row.servingWeightG)) : null,
+    servingVolumeMl:
+      row.servingVolumeMl != null ? roundToTwoDecimals(toNumber(row.servingVolumeMl)) : null,
   };
 }
 
@@ -162,7 +266,7 @@ async function getDailyTotalsForRange(
     .from(mealEntries)
     .where(
       and(
-        eq(mealEntries.userId, userId),
+        eatenEntryPredicate(userId),
         gte(mealEntries.entryDate, startDate),
         lte(mealEntries.entryDate, endDate),
       ),
@@ -301,45 +405,402 @@ export async function getUserById(userId: string, db?: DatabaseClient) {
   return user ? mapUserRow(user as UserSelectRow) : null;
 }
 
+const DEFAULT_MEAL_GROUP_LABELS = ["Breakfast", "Lunch", "Dinner", "Snack"] as const;
+
+export async function ensureDefaultMealGroups(userId: string, db?: DatabaseClient) {
+  const database = await resolveDb(db);
+  const existing = await database
+    .select({ id: mealGroups.id })
+    .from(mealGroups)
+    .where(and(eq(mealGroups.userId, userId), isNull(mealGroups.deletedAt)))
+    .limit(1);
+
+  if (existing.length > 0) {
+    return;
+  }
+
+  await database.insert(mealGroups).values(
+    DEFAULT_MEAL_GROUP_LABELS.map((label, index) => ({
+      id: crypto.randomUUID(),
+      userId,
+      label,
+      sortOrder: index,
+      isDefault: true,
+      updatedAt: new Date(),
+    })),
+  );
+}
+
+export async function getMealGroups(
+  userId: string,
+  db?: DatabaseClient,
+): Promise<MealGroup[]> {
+  const database = await resolveDb(db);
+  await ensureDefaultMealGroups(userId, database);
+  const rows = await database
+    .select({
+      id: mealGroups.id,
+      userId: mealGroups.userId,
+      label: mealGroups.label,
+      sortOrder: mealGroups.sortOrder,
+      isDefault: mealGroups.isDefault,
+    })
+    .from(mealGroups)
+    .where(and(eq(mealGroups.userId, userId), isNull(mealGroups.deletedAt)))
+    .orderBy(mealGroups.sortOrder, mealGroups.label);
+
+  return rows.map(mapMealGroupRow);
+}
+
+export async function createMealGroup(
+  userId: string,
+  input: { label: string },
+  db?: DatabaseClient,
+): Promise<MealGroup> {
+  const database = await resolveDb(db);
+  const label = input.label.trim();
+  if (!label) {
+    throw new Error("Meal group name is required.");
+  }
+
+  const [row] = await database
+    .select({ maxSortOrder: max(mealGroups.sortOrder) })
+    .from(mealGroups)
+    .where(and(eq(mealGroups.userId, userId), isNull(mealGroups.deletedAt)));
+
+  const [created] = await database
+    .insert(mealGroups)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      label,
+      sortOrder: (row?.maxSortOrder ?? -1) + 1,
+      isDefault: false,
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  return mapMealGroupRow(created);
+}
+
+export async function updateMealGroup(
+  userId: string,
+  groupId: string,
+  input: { label: string },
+  db?: DatabaseClient,
+): Promise<MealGroup> {
+  const database = await resolveDb(db);
+  const label = input.label.trim();
+  if (!label) {
+    throw new Error("Meal group name is required.");
+  }
+
+  const [updated] = await database
+    .update(mealGroups)
+    .set({ label, updatedAt: new Date() })
+    .where(and(eq(mealGroups.id, groupId), eq(mealGroups.userId, userId)))
+    .returning();
+
+  if (!updated) {
+    throw new Error("Meal group not found.");
+  }
+
+  return mapMealGroupRow(updated);
+}
+
+export async function deleteMealGroup(
+  userId: string,
+  groupId: string,
+  db?: DatabaseClient,
+): Promise<boolean> {
+  const database = await resolveDb(db);
+  const [deleted] = await database
+    .update(mealGroups)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(mealGroups.id, groupId), eq(mealGroups.userId, userId)))
+    .returning();
+
+  if (deleted) {
+    await database
+      .update(mealEntries)
+      .set({ mealGroupId: null, updatedAt: new Date() })
+      .where(and(eq(mealEntries.userId, userId), eq(mealEntries.mealGroupId, groupId)));
+  }
+
+  return Boolean(deleted);
+}
+
+export async function reorderMealGroups(
+  userId: string,
+  orderedGroupIds: string[],
+  db?: DatabaseClient,
+): Promise<MealGroup[]> {
+  const database = await resolveDb(db);
+  await database.transaction(async (tx) => {
+    for (const [index, groupId] of orderedGroupIds.entries()) {
+      await tx
+        .update(mealGroups)
+        .set({ sortOrder: index, updatedAt: new Date() })
+        .where(and(eq(mealGroups.id, groupId), eq(mealGroups.userId, userId)));
+    }
+  });
+
+  return getMealGroups(userId, database);
+}
+
 export async function getDailySummary(
   userId: string,
   selectedDate: string,
   db?: DatabaseClient,
 ): Promise<DailySummary> {
   const database = await resolveDb(db);
-  const rows = await database
-    .select({
-      id: mealEntries.id,
-      userId: mealEntries.userId,
-      date: mealEntries.entryDate,
-      label: mealEntries.label,
-      sortOrder: mealEntries.sortOrder,
-      proteinG: mealEntries.proteinG,
-      carbsG: mealEntries.carbsG,
-      fatG: mealEntries.fatG,
-      caloriesKcal: mealEntries.caloriesKcal,
-    })
-    .from(mealEntries)
-    .where(
-      and(eq(mealEntries.userId, userId), eq(mealEntries.entryDate, selectedDate)),
-    )
-    .orderBy(mealEntries.sortOrder, mealEntries.createdAt);
+  const [rows, groups] = await Promise.all([
+    database
+      .select({
+        id: mealEntries.id,
+        userId: mealEntries.userId,
+        date: mealEntries.entryDate,
+        mealGroupId: mealEntries.mealGroupId,
+        status: mealEntries.status,
+        productId: mealEntries.productId,
+        label: mealEntries.label,
+        sortOrder: mealEntries.sortOrder,
+        quantity: mealEntries.quantity,
+        unit: mealEntries.unit,
+        servingMultiplier: mealEntries.servingMultiplier,
+        proteinG: mealEntries.proteinG,
+        carbsG: mealEntries.carbsG,
+        fatG: mealEntries.fatG,
+        caloriesKcal: mealEntries.caloriesKcal,
+        clientMutationId: mealEntries.clientMutationId,
+        sourceLabel: foodProducts.name,
+      })
+      .from(mealEntries)
+      .leftJoin(foodProducts, eq(mealEntries.productId, foodProducts.id))
+      .where(
+        and(eq(mealEntries.userId, userId), eq(mealEntries.entryDate, selectedDate)),
+      )
+      .orderBy(mealEntries.sortOrder, mealEntries.createdAt),
+    getMealGroups(userId, database),
+  ]);
 
   const meals = rows.map((row) => mapMealRow(row));
-  const totals = meals.reduce(
-    (carry, meal) => ({
-      proteinG: roundToSingleDecimal(carry.proteinG + meal.proteinG),
-      carbsG: roundToSingleDecimal(carry.carbsG + meal.carbsG),
-      fatG: roundToSingleDecimal(carry.fatG + meal.fatG),
-      caloriesKcal: carry.caloriesKcal + meal.caloriesKcal,
-    }),
-    zeroMacros(),
-  );
+  const sumMeals = (status: MealEntryStatus) => meals
+    .filter((meal) => meal.status === status)
+    .reduce(
+      (carry, meal) => ({
+        proteinG: roundToSingleDecimal(carry.proteinG + meal.proteinG),
+        carbsG: roundToSingleDecimal(carry.carbsG + meal.carbsG),
+        fatG: roundToSingleDecimal(carry.fatG + meal.fatG),
+        caloriesKcal: carry.caloriesKcal + meal.caloriesKcal,
+      }),
+      zeroMacros(),
+    );
+  const totals = sumMeals("eaten");
+  const plannedTotals = sumMeals("planned");
+  const skippedTotals = sumMeals("skipped");
 
   return {
     date: selectedDate,
     totals,
+    plannedTotals,
+    skippedTotals,
     meals,
+    mealGroups: groups,
+  };
+}
+
+function eatenEntryPredicate(userId: string) {
+  return and(eq(mealEntries.userId, userId), eq(mealEntries.status, "eaten"));
+}
+
+function productAccessPredicate(userId: string) {
+  return and(
+    isNull(foodProducts.deletedAt),
+    or(eq(foodProducts.ownerUserId, userId), isNull(foodProducts.ownerUserId)),
+  );
+}
+
+export async function searchFoodProducts(
+  userId: string,
+  query: string,
+  db?: DatabaseClient,
+): Promise<FoodProduct[]> {
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return [];
+  }
+
+  const database = await resolveDb(db);
+  const wordConditions = words.map((word) =>
+    ilike(foodProducts.name, `%${escapeLikePattern(word)}%`),
+  );
+
+  const rows = await database
+    .select({
+      id: foodProducts.id,
+      ownerUserId: foodProducts.ownerUserId,
+      scope: foodProducts.scope,
+      source: foodProducts.source,
+      barcode: foodProducts.barcode,
+      name: foodProducts.name,
+      brand: foodProducts.brand,
+      defaultServingQuantity: foodProducts.defaultServingQuantity,
+      defaultServingUnit: foodProducts.defaultServingUnit,
+      proteinPer100: foodProducts.proteinPer100,
+      carbsPer100: foodProducts.carbsPer100,
+      fatPer100: foodProducts.fatPer100,
+      caloriesPer100: foodProducts.caloriesPer100,
+      servingWeightG: foodProducts.servingWeightG,
+      servingVolumeMl: foodProducts.servingVolumeMl,
+    })
+    .from(foodProducts)
+    .where(and(productAccessPredicate(userId), ...wordConditions))
+    .orderBy(
+      sql`case when ${foodProducts.ownerUserId} = ${userId} then 0 else 1 end`,
+      asc(foodProducts.name),
+    )
+    .limit(50);
+
+  return rows.map(mapFoodProductRow);
+}
+
+export async function createPersonalFoodProduct(
+  userId: string,
+  input: FoodProductInput,
+  db?: DatabaseClient,
+): Promise<FoodProduct> {
+  const database = await resolveDb(db);
+  const normalized = validateFoodProductInput({
+    ...input,
+    scope: input.scope ?? "personal",
+  });
+
+  const [created] = await database
+    .insert(foodProducts)
+    .values({
+      id: crypto.randomUUID(),
+      ownerUserId: normalized.scope === "global" ? null : userId,
+      scope: normalized.scope,
+      source: normalized.source,
+      barcode: normalized.barcode,
+      name: normalized.name,
+      brand: normalized.brand ?? "",
+      defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
+      defaultServingUnit: normalized.defaultServingUnit,
+      proteinPer100: normalized.proteinPer100.toFixed(2),
+      carbsPer100: normalized.carbsPer100.toFixed(2),
+      fatPer100: normalized.fatPer100.toFixed(2),
+      caloriesPer100: normalized.caloriesPer100,
+      servingWeightG: normalized.servingWeightG?.toFixed(2) ?? null,
+      servingVolumeMl: normalized.servingVolumeMl?.toFixed(2) ?? null,
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  return mapFoodProductRow(created);
+}
+
+async function getFoodProductByIdForUser(
+  userId: string,
+  productId: string,
+  db?: DatabaseClient,
+): Promise<FoodProduct | null> {
+  const database = await resolveDb(db);
+  const [row] = await database
+    .select({
+      id: foodProducts.id,
+      ownerUserId: foodProducts.ownerUserId,
+      scope: foodProducts.scope,
+      source: foodProducts.source,
+      barcode: foodProducts.barcode,
+      name: foodProducts.name,
+      brand: foodProducts.brand,
+      defaultServingQuantity: foodProducts.defaultServingQuantity,
+      defaultServingUnit: foodProducts.defaultServingUnit,
+      proteinPer100: foodProducts.proteinPer100,
+      carbsPer100: foodProducts.carbsPer100,
+      fatPer100: foodProducts.fatPer100,
+      caloriesPer100: foodProducts.caloriesPer100,
+      servingWeightG: foodProducts.servingWeightG,
+      servingVolumeMl: foodProducts.servingVolumeMl,
+    })
+    .from(foodProducts)
+    .where(and(eq(foodProducts.id, productId), productAccessPredicate(userId)))
+    .limit(1);
+
+  return row ? mapFoodProductRow(row) : null;
+}
+
+export async function updatePersonalFoodProduct(
+  userId: string,
+  productId: string,
+  input: FoodProductInput,
+  db?: DatabaseClient,
+): Promise<FoodProduct> {
+  const database = await resolveDb(db);
+  const normalized = validateFoodProductInput(input);
+  const [updated] = await database
+    .update(foodProducts)
+    .set({
+      source: normalized.source,
+      barcode: normalized.barcode,
+      name: normalized.name,
+      brand: normalized.brand ?? "",
+      defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
+      defaultServingUnit: normalized.defaultServingUnit,
+      proteinPer100: normalized.proteinPer100.toFixed(2),
+      carbsPer100: normalized.carbsPer100.toFixed(2),
+      fatPer100: normalized.fatPer100.toFixed(2),
+      caloriesPer100: normalized.caloriesPer100,
+      servingWeightG: normalized.servingWeightG?.toFixed(2) ?? null,
+      servingVolumeMl: normalized.servingVolumeMl?.toFixed(2) ?? null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(foodProducts.id, productId),
+        eq(foodProducts.ownerUserId, userId),
+        isNull(foodProducts.deletedAt),
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    throw new Error("Food product not found.");
+  }
+
+  return mapFoodProductRow(updated);
+}
+
+export function resolveProductNutritionForQuantity(
+  product: FoodProduct,
+  quantity: number,
+  unit: QuantityUnit,
+  servingMultiplier = 1,
+): MacroNumbers {
+  const safeQuantity = Number.isFinite(quantity) && quantity > 0 ? quantity : 1;
+  const safeMultiplier =
+    Number.isFinite(servingMultiplier) && servingMultiplier > 0
+      ? servingMultiplier
+      : 1;
+  let factor: number;
+
+  if (unit === "g") {
+    factor = safeQuantity / 100;
+  } else if (unit === "ml") {
+    factor = safeQuantity / 100;
+  } else {
+    const baseAmount =
+      product.servingWeightG ?? product.servingVolumeMl ?? 100;
+    factor = (safeQuantity * safeMultiplier * baseAmount) / 100;
+  }
+
+  return {
+    proteinG: roundToSingleDecimal(product.proteinPer100 * factor),
+    carbsG: roundToSingleDecimal(product.carbsPer100 * factor),
+    fatG: roundToSingleDecimal(product.fatPer100 * factor),
+    caloriesKcal: Math.round(product.caloriesPer100 * factor),
   };
 }
 
@@ -397,6 +858,7 @@ export async function getRecentDailyOverviews(
     .where(
       and(
         eq(mealEntries.userId, userId),
+        eq(mealEntries.status, "eaten"),
         lte(mealEntries.entryDate, selectedDate),
       ),
     )
@@ -440,6 +902,42 @@ export async function createMealEntry(
 ) {
   const database = await resolveDb(db);
 
+  if (input.clientMutationId) {
+    const [existing] = await database
+      .select({
+        id: mealEntries.id,
+        userId: mealEntries.userId,
+        date: mealEntries.entryDate,
+        mealGroupId: mealEntries.mealGroupId,
+        status: mealEntries.status,
+        productId: mealEntries.productId,
+        label: mealEntries.label,
+        sortOrder: mealEntries.sortOrder,
+        quantity: mealEntries.quantity,
+        unit: mealEntries.unit,
+        servingMultiplier: mealEntries.servingMultiplier,
+        proteinG: mealEntries.proteinG,
+        carbsG: mealEntries.carbsG,
+        fatG: mealEntries.fatG,
+        caloriesKcal: mealEntries.caloriesKcal,
+        clientMutationId: mealEntries.clientMutationId,
+        sourceLabel: foodProducts.name,
+      })
+      .from(mealEntries)
+      .leftJoin(foodProducts, eq(mealEntries.productId, foodProducts.id))
+      .where(
+        and(
+          eq(mealEntries.userId, userId),
+          eq(mealEntries.clientMutationId, input.clientMutationId),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      return mapMealRow(existing);
+    }
+  }
+
   let nextSortOrder = input.sortOrder;
   if (typeof nextSortOrder !== "number") {
     const [row] = await database
@@ -454,9 +952,26 @@ export async function createMealEntry(
     nextSortOrder = (row?.maxSortOrder ?? -1) + 1;
   }
 
+  let productMacros: MacroNumbers | null = null;
+  let productLabel: string | null = null;
+  if (input.productId) {
+    const product = await getFoodProductByIdForUser(userId, input.productId, database);
+    if (product) {
+      productMacros = resolveProductNutritionForQuantity(
+        product,
+        input.quantity ?? product.defaultServingQuantity,
+        input.unit ?? product.defaultServingUnit,
+        input.servingMultiplier ?? 1,
+      );
+      productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
+    }
+  }
+
   const normalized = validateMealEntryInput({
     ...input,
     sortOrder: nextSortOrder,
+    label: input.label || productLabel || "",
+    ...(productMacros ?? {}),
   });
 
   const [created] = await database
@@ -465,12 +980,19 @@ export async function createMealEntry(
       id: crypto.randomUUID(),
       userId,
       entryDate: normalized.date,
+      mealGroupId: normalized.mealGroupId,
+      status: normalized.status,
+      productId: normalized.productId,
       label: normalized.label,
       sortOrder: normalized.sortOrder,
+      quantity: normalized.quantity?.toFixed(2) ?? "1.00",
+      unit: normalized.unit ?? "serving",
+      servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
       proteinG: normalized.proteinG.toFixed(1),
       carbsG: normalized.carbsG.toFixed(1),
       fatG: normalized.fatG.toFixed(1),
       caloriesKcal: normalized.caloriesKcal,
+      clientMutationId: normalized.clientMutationId,
       updatedAt: new Date(),
     })
     .returning();
@@ -485,18 +1007,43 @@ export async function updateMealEntry(
   db?: DatabaseClient,
 ) {
   const database = await resolveDb(db);
-  const normalized = validateMealEntryInput(input);
+  let productMacros: MacroNumbers | null = null;
+  let productLabel: string | null = null;
+  if (input.productId) {
+    const product = await getFoodProductByIdForUser(userId, input.productId, database);
+    if (product) {
+      productMacros = resolveProductNutritionForQuantity(
+        product,
+        input.quantity ?? product.defaultServingQuantity,
+        input.unit ?? product.defaultServingUnit,
+        input.servingMultiplier ?? 1,
+      );
+      productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
+    }
+  }
+  const normalized = validateMealEntryInput({
+    ...input,
+    label: input.label || productLabel || "",
+    ...(productMacros ?? {}),
+  });
 
   const [updated] = await database
     .update(mealEntries)
     .set({
       entryDate: normalized.date,
+      mealGroupId: normalized.mealGroupId,
+      status: normalized.status,
+      productId: normalized.productId,
       label: normalized.label,
       sortOrder: normalized.sortOrder,
+      quantity: normalized.quantity?.toFixed(2) ?? "1.00",
+      unit: normalized.unit ?? "serving",
+      servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
       proteinG: normalized.proteinG.toFixed(1),
       carbsG: normalized.carbsG.toFixed(1),
       fatG: normalized.fatG.toFixed(1),
       caloriesKcal: normalized.caloriesKcal,
+      clientMutationId: normalized.clientMutationId,
       updatedAt: new Date(),
     })
     .where(and(eq(mealEntries.id, entryId), eq(mealEntries.userId, userId)))
@@ -521,6 +1068,30 @@ export async function deleteMealEntry(
     .returning();
 
   return Boolean(deleted);
+}
+
+export async function markMealEntryStatus(
+  userId: string,
+  entryId: string,
+  status: MealEntryStatus,
+  db?: DatabaseClient,
+) {
+  const database = await resolveDb(db);
+  if (!isKnownMealEntryStatus(status)) {
+    throw new Error("Meal status is invalid.");
+  }
+
+  const [updated] = await database
+    .update(mealEntries)
+    .set({ status, updatedAt: new Date() })
+    .where(and(eq(mealEntries.id, entryId), eq(mealEntries.userId, userId)))
+    .returning();
+
+  if (!updated) {
+    throw new Error("Meal entry not found.");
+  }
+
+  return mapMealRow(updated);
 }
 
 export async function getUserGoals(
@@ -580,7 +1151,7 @@ export async function listRecentMealEntries(userId: string, limit = 200, db?: Da
       caloriesKcal: mealEntries.caloriesKcal,
     })
     .from(mealEntries)
-    .where(eq(mealEntries.userId, userId))
+    .where(eatenEntryPredicate(userId))
     .orderBy(desc(mealEntries.entryDate), mealEntries.sortOrder)
     .limit(limit);
 }
@@ -614,7 +1185,7 @@ export async function searchMealEntries(
       caloriesKcal: mealEntries.caloriesKcal,
     })
     .from(mealEntries)
-    .where(and(eq(mealEntries.userId, userId), ...wordConditions))
+    .where(and(eatenEntryPredicate(userId), ...wordConditions))
     .orderBy(desc(mealEntries.entryDate), asc(mealEntries.sortOrder))
     .limit(100);
 
@@ -760,7 +1331,7 @@ export async function getStatsPageData(
 ): Promise<StatsPageData> {
   const database = await resolveDb(db);
 
-  const [dailyRows, labelRows] = await Promise.all([
+  const [dailyRows, labelRows, goals, weights, statusRows] = await Promise.all([
     database
       .select({
         entryDate: mealEntries.entryDate,
@@ -770,7 +1341,7 @@ export async function getStatsPageData(
         caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
       })
       .from(mealEntries)
-      .where(eq(mealEntries.userId, userId))
+      .where(eatenEntryPredicate(userId))
       .groupBy(mealEntries.entryDate)
       .orderBy(asc(mealEntries.entryDate)),
     database
@@ -779,10 +1350,20 @@ export async function getStatsPageData(
         count: sql<string>`count(*)`,
       })
       .from(mealEntries)
-      .where(eq(mealEntries.userId, userId))
+      .where(eatenEntryPredicate(userId))
       .groupBy(mealEntries.label)
       .orderBy(desc(sql`count(*)`))
       .limit(5),
+    getUserGoals(userId, database),
+    getWeightEntries(userId, database),
+    database
+      .select({
+        status: mealEntries.status,
+        count: sql<string>`count(*)`,
+      })
+      .from(mealEntries)
+      .where(eq(mealEntries.userId, userId))
+      .groupBy(mealEntries.status),
   ]);
 
   const sortedDates = dailyRows.map((r) => r.entryDate);
@@ -805,14 +1386,80 @@ export async function getStatsPageData(
     }
   }
 
-  return {
-    allDailyTotals: dailyRows.map((row) => ({
+  const allDailyTotals = dailyRows.map((row) => ({
       date: row.entryDate,
       proteinG: roundToSingleDecimal(toNumber(row.proteinG)),
       carbsG: roundToSingleDecimal(toNumber(row.carbsG)),
       fatG: roundToSingleDecimal(toNumber(row.fatG)),
       caloriesKcal: Math.round(toNumber(row.caloriesKcal)),
-    })),
+    }));
+  const averageForDays = (days: number) => {
+    const windowRows = allDailyTotals.slice(-days);
+    if (windowRows.length === 0) return zeroMacros();
+    const totals = windowRows.reduce(
+      (acc, row) => ({
+        proteinG: acc.proteinG + row.proteinG,
+        carbsG: acc.carbsG + row.carbsG,
+        fatG: acc.fatG + row.fatG,
+        caloriesKcal: acc.caloriesKcal + row.caloriesKcal,
+      }),
+      zeroMacros(),
+    );
+    return {
+      proteinG: roundToSingleDecimal(totals.proteinG / windowRows.length),
+      carbsG: roundToSingleDecimal(totals.carbsG / windowRows.length),
+      fatG: roundToSingleDecimal(totals.fatG / windowRows.length),
+      caloriesKcal: Math.round(totals.caloriesKcal / windowRows.length),
+    };
+  };
+  const hitRatesForDays = (days: number) => {
+    const windowRows = allDailyTotals.slice(-days);
+    const rate = (field: keyof MacroNumbers, goal: number | null) => {
+      if (!goal || windowRows.length === 0) return null;
+      const hits = windowRows.filter((row) => row[field] >= goal * 0.9).length;
+      return Math.round((hits / windowRows.length) * 100);
+    };
+    return {
+      proteinG: rate("proteinG", goals.proteinG),
+      carbsG: rate("carbsG", goals.carbsG),
+      fatG: rate("fatG", goals.fatG),
+      caloriesKcal: rate("caloriesKcal", goals.caloriesKcal),
+    };
+  };
+  const calorieDeviationRows =
+    goals.caloriesKcal != null
+      ? allDailyTotals.map((row) => Math.abs(row.caloriesKcal - goals.caloriesKcal!))
+      : [];
+  const calorieAvgAbsoluteDeviation =
+    calorieDeviationRows.length > 0
+      ? Math.round(
+          calorieDeviationRows.reduce((sum, value) => sum + value, 0) /
+            calorieDeviationRows.length,
+        )
+      : null;
+  const consistencyScore =
+    calorieAvgAbsoluteDeviation != null && goals.caloriesKcal
+      ? Math.max(0, Math.round(100 - (calorieAvgAbsoluteDeviation / goals.caloriesKcal) * 100))
+      : null;
+  const avgCalories = allDailyTotals.length > 0
+    ? Math.round(totalCaloriesKcal / allDailyTotals.length)
+    : 0;
+  const averageDailyDeltaKcal =
+    goals.caloriesKcal != null && allDailyTotals.length > 0
+      ? avgCalories - goals.caloriesKcal
+      : null;
+  const latestWeight = weights[weights.length - 1]?.weightKg ?? null;
+  const avgProtein = allDailyTotals.length > 0
+    ? totalProteinG / allDailyTotals.length
+    : 0;
+  const statusCounts = new Map(statusRows.map((row) => [row.status, toNumber(row.count)]));
+  const plannedCount = statusCounts.get("planned") ?? 0;
+  const eatenCount = statusCounts.get("eaten") ?? 0;
+  const skippedCount = statusCounts.get("skipped") ?? 0;
+  const plannedBase = plannedCount + eatenCount + skippedCount;
+
+  return {
+    allDailyTotals,
     totalDaysTracked: dailyRows.length,
     currentStreak,
     longestStreak,
@@ -822,16 +1469,53 @@ export async function getStatsPageData(
     totalCaloriesKcal: Math.round(totalCaloriesKcal),
     bestCalorieDay,
     topLabels: labelRows.map((r) => ({ label: r.label, count: toNumber(r.count) })),
+    goalHitRates: {
+      days7: hitRatesForDays(7),
+      days30: hitRatesForDays(30),
+      days90: hitRatesForDays(90),
+    },
+    macroConsistency: {
+      calorieAvgAbsoluteDeviation,
+      score: consistencyScore,
+    },
+    rollingAverages: {
+      days7: averageForDays(7),
+      days30: averageForDays(30),
+    },
+    estimatedEnergyBalance: {
+      averageDailyDeltaKcal,
+      estimatedWeeklyWeightChangeKg:
+        averageDailyDeltaKcal != null
+          ? roundToTwoDecimals((averageDailyDeltaKcal * 7) / 7700)
+          : null,
+    },
+    proteinPerKg:
+      latestWeight != null && latestWeight > 0
+        ? roundToTwoDecimals(avgProtein / latestWeight)
+        : null,
+    smoothedWeightTrend: weights.map((entry, index) => {
+      const window = weights.slice(Math.max(0, index - 6), index + 1);
+      const avg =
+        window.reduce((sum, value) => sum + value.weightKg, 0) / window.length;
+      return {
+        date: entry.date,
+        weightKg: entry.weightKg,
+        smoothedWeightKg: roundToTwoDecimals(avg),
+      };
+    }),
+    plannedAdherence: {
+      plannedCount,
+      eatenCount,
+      skippedCount,
+      adherencePct:
+        plannedBase > 0 ? Math.round((eatenCount / plannedBase) * 100) : null,
+    },
   };
 }
 
 // ---------------------------------------------------------------------------
 // Weight tracking
 // ---------------------------------------------------------------------------
-
-function roundToTwoDecimals(value: number) {
-  return Math.round(value * 100) / 100;
-}
 
 function mapWeightRow(row: {
   id: string;
@@ -1089,12 +1773,22 @@ export async function getWeightPageData(
 // ---------------------------------------------------------------------------
 
 function buildRecipeRecord(
-  recipe: { id: string; userId: string; label: string; portions: number },
+  recipe: {
+    id: string;
+    userId: string;
+    label: string;
+    portions: number;
+    totalCookedWeightG?: string | number | null;
+  },
   ingredientRows: Array<{
     id: string;
     recipeId: string;
+    productId?: string | null;
     sortOrder: number;
     label: string;
+    quantity?: string | number;
+    unit?: string;
+    servingMultiplier?: string | number;
     proteinG: string | number;
     carbsG: string | number;
     fatG: string | number;
@@ -1104,8 +1798,12 @@ function buildRecipeRecord(
   const ingredients: RecipeIngredientRecord[] = ingredientRows.map((row) => ({
     id: row.id,
     recipeId: row.recipeId,
+    productId: row.productId ?? null,
     sortOrder: row.sortOrder,
     label: row.label,
+    quantity: roundToTwoDecimals(toNumber(row.quantity ?? 1)),
+    unit: isKnownQuantityUnit(row.unit) ? row.unit : "serving",
+    servingMultiplier: roundToTwoDecimals(toNumber(row.servingMultiplier ?? 1)),
     proteinG: roundToSingleDecimal(toNumber(row.proteinG)),
     carbsG: roundToSingleDecimal(toNumber(row.carbsG)),
     fatG: roundToSingleDecimal(toNumber(row.fatG)),
@@ -1135,6 +1833,10 @@ function buildRecipeRecord(
     userId: recipe.userId,
     label: recipe.label,
     portions,
+    totalCookedWeightG:
+      recipe.totalCookedWeightG != null
+        ? roundToTwoDecimals(toNumber(recipe.totalCookedWeightG))
+        : null,
     ingredients,
     totalMacros,
     perPortionMacros,
@@ -1153,6 +1855,7 @@ export async function getRecipes(
       userId: recipes.userId,
       label: recipes.label,
       portions: recipes.portions,
+      totalCookedWeightG: recipes.totalCookedWeightG,
     })
     .from(recipes)
     .where(eq(recipes.userId, userId))
@@ -1165,8 +1868,12 @@ export async function getRecipes(
     .select({
       id: recipeIngredients.id,
       recipeId: recipeIngredients.recipeId,
+      productId: recipeIngredients.productId,
       sortOrder: recipeIngredients.sortOrder,
       label: recipeIngredients.label,
+      quantity: recipeIngredients.quantity,
+      unit: recipeIngredients.unit,
+      servingMultiplier: recipeIngredients.servingMultiplier,
       proteinG: recipeIngredients.proteinG,
       carbsG: recipeIngredients.carbsG,
       fatG: recipeIngredients.fatG,
@@ -1201,6 +1908,7 @@ export async function getRecipeById(
       userId: recipes.userId,
       label: recipes.label,
       portions: recipes.portions,
+      totalCookedWeightG: recipes.totalCookedWeightG,
     })
     .from(recipes)
     .where(and(eq(recipes.id, recipeId), eq(recipes.userId, userId)))
@@ -1212,8 +1920,12 @@ export async function getRecipeById(
     .select({
       id: recipeIngredients.id,
       recipeId: recipeIngredients.recipeId,
+      productId: recipeIngredients.productId,
       sortOrder: recipeIngredients.sortOrder,
       label: recipeIngredients.label,
+      quantity: recipeIngredients.quantity,
+      unit: recipeIngredients.unit,
+      servingMultiplier: recipeIngredients.servingMultiplier,
       proteinG: recipeIngredients.proteinG,
       carbsG: recipeIngredients.carbsG,
       fatG: recipeIngredients.fatG,
@@ -1243,6 +1955,10 @@ export async function createRecipe(
         userId,
         label: validated.label,
         portions: validated.portions,
+        totalCookedWeightG:
+          validated.totalCookedWeightG != null
+            ? validated.totalCookedWeightG.toFixed(2)
+            : null,
         updatedAt: new Date(),
       })
       .returning();
@@ -1259,8 +1975,12 @@ export async function createRecipe(
         .values({
           id: crypto.randomUUID(),
           recipeId,
+          productId: ing.productId ?? null,
           sortOrder: i,
           label: ing.label,
+          quantity: ing.quantity?.toFixed(2) ?? "1.00",
+          unit: ing.unit ?? "serving",
+          servingMultiplier: ing.servingMultiplier?.toFixed(2) ?? "1.00",
           proteinG: ing.proteinG.toFixed(1),
           carbsG: ing.carbsG.toFixed(1),
           fatG: ing.fatG.toFixed(1),
@@ -1300,6 +2020,10 @@ export async function updateRecipe(
       .set({
         label: validated.label,
         portions: validated.portions,
+        totalCookedWeightG:
+          validated.totalCookedWeightG != null
+            ? validated.totalCookedWeightG.toFixed(2)
+            : null,
         updatedAt: new Date(),
       })
       .where(and(eq(recipes.id, recipeId), eq(recipes.userId, userId)))
@@ -1308,6 +2032,7 @@ export async function updateRecipe(
         userId: recipes.userId,
         label: recipes.label,
         portions: recipes.portions,
+        totalCookedWeightG: recipes.totalCookedWeightG,
       });
 
     if (!updatedRecipe) {
@@ -1326,8 +2051,12 @@ export async function updateRecipe(
         .values({
           id: crypto.randomUUID(),
           recipeId,
+          productId: ing.productId ?? null,
           sortOrder: i,
           label: ing.label,
+          quantity: ing.quantity?.toFixed(2) ?? "1.00",
+          unit: ing.unit ?? "serving",
+          servingMultiplier: ing.servingMultiplier?.toFixed(2) ?? "1.00",
           proteinG: ing.proteinG.toFixed(1),
           carbsG: ing.carbsG.toFixed(1),
           fatG: ing.fatG.toFixed(1),
@@ -1386,7 +2115,7 @@ export async function getLeaderboardStats(
       entryCount: sql<string>`count(${mealEntries.id})`,
     })
     .from(mealEntries)
-    .where(eq(mealEntries.userId, userId))
+    .where(eatenEntryPredicate(userId))
     .groupBy(mealEntries.entryDate)
     .orderBy(asc(mealEntries.entryDate));
 
@@ -1509,6 +2238,25 @@ export async function saveCustomBarcodeProduct(
     })
     .returning();
 
+  await createPersonalFoodProduct(
+    addedByUserId,
+    {
+      scope: "global",
+      source: "barcode",
+      barcode: input.barcode,
+      name: input.name,
+      brand: input.brands,
+      defaultServingQuantity: 1,
+      defaultServingUnit: "serving",
+      proteinPer100: input.proteinG,
+      carbsPer100: input.carbsG,
+      fatPer100: input.fatG,
+      caloriesPer100: Math.round(input.caloriesKcal),
+      servingWeightG: input.servingSizeG ?? 100,
+    },
+    database,
+  );
+
   return mapBarcodeProductRow(created);
 }
 
@@ -1536,7 +2284,7 @@ export async function getRecentQuickAddCandidates(
       createdAt: mealEntries.createdAt,
     })
     .from(mealEntries)
-    .where(eq(mealEntries.userId, userId))
+    .where(eatenEntryPredicate(userId))
     .orderBy(desc(mealEntries.entryDate), desc(mealEntries.createdAt))
     .limit(400);
 

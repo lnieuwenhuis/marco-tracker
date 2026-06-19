@@ -1,13 +1,18 @@
 "use client";
 
+import type { MealEntryStatus, MealGroup, QuantityUnit } from "@macro-tracker/db";
 import { useState } from "react";
-
-import { ConfirmDeleteButton } from "./confirm-delete-button";
 
 type MealDraft = {
   clientId: string;
   id?: string;
+  mealGroupId?: string | null;
+  status: MealEntryStatus;
+  productId?: string | null;
   label: string;
+  quantity: string;
+  unit: QuantityUnit;
+  servingMultiplier: string;
   proteinG: string;
   carbsG: string;
   fatG: string;
@@ -21,6 +26,7 @@ type MealCardProps = {
   error?: string | null;
   /** True for ~2 s after a successful copy-to-today so the button can show confirmation. */
   isCopied?: boolean;
+  mealGroups?: MealGroup[];
   onChange: (
     clientId: string,
     field: keyof Omit<MealDraft, "clientId" | "id" | "sortOrder">,
@@ -29,7 +35,10 @@ type MealCardProps = {
   onSave: (clientId: string) => void;
   onDelete: (clientId: string) => void;
   onDuplicate: (clientId: string) => void;
+  onGroupChange?: (clientId: string, mealGroupId: string | null) => void;
+  onStatusChange?: (clientId: string, status: MealEntryStatus) => void;
   onCopyToToday?: (clientId: string) => void;
+  onDiscardChanges?: (clientId: string) => void;
 };
 
 function NumericInput({
@@ -71,9 +80,11 @@ function NumericInput({
   );
 }
 
-export function MealCard({ draft, busy, error, isCopied = false, onChange, onSave, onDelete, onDuplicate, onCopyToToday }: MealCardProps) {
+export function MealCard({ draft, busy, error, isCopied = false, mealGroups = [], onChange, onSave, onDelete, onDuplicate, onGroupChange, onStatusChange, onCopyToToday, onDiscardChanges }: MealCardProps) {
   const isSaved = Boolean(draft.id);
   const [isExpanded, setIsExpanded] = useState(!isSaved);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const heading = draft.label.trim() || "New item";
   // A macro chip is only worth showing when the value is meaningfully positive.
@@ -84,99 +95,228 @@ export function MealCard({ draft, busy, error, isCopied = false, onChange, onSav
     isPositive(draft.carbsG) ||
     isPositive(draft.fatG) ||
     isPositive(draft.caloriesKcal);
+  const canCollapse = isExpanded && isSaved;
+
+  function toggleExpanded() {
+    if (isExpanded) {
+      if (!canCollapse) return;
+      onDiscardChanges?.(draft.clientId);
+      setMenuOpen(false);
+      setConfirmingDelete(false);
+      setIsExpanded(false);
+      return;
+    }
+
+    setIsExpanded(true);
+  }
 
   return (
     <article className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-card-subtle)] shadow-[0_4px_16px_rgba(74,45,28,0.05)]">
       {/* Header — always visible */}
       <div
-        className={`px-4 py-3 ${!isExpanded ? "cursor-pointer" : ""}`}
-        onClick={!isExpanded ? () => setIsExpanded(true) : undefined}
-        role={!isExpanded ? "button" : undefined}
-        tabIndex={!isExpanded ? 0 : undefined}
+        className={`px-4 py-3 ${!isExpanded || canCollapse ? "cursor-pointer" : ""}`}
+        onClick={toggleExpanded}
+        role={!isExpanded || canCollapse ? "button" : undefined}
+        tabIndex={!isExpanded || canCollapse ? 0 : undefined}
         onKeyDown={
-          !isExpanded
+          !isExpanded || canCollapse
             ? (e) => {
-                if (e.key === "Enter" || e.key === " ") setIsExpanded(true);
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleExpanded();
+                }
               }
             : undefined
         }
       >
-        {/* Row 1: name + (when expanded) action buttons */}
+        {/* Row 1: name + contextual primary action + overflow */}
         <div className="flex items-center gap-2">
           <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-ink)]">
             {heading}
           </h3>
 
-          {/* When expanded: buttons sit next to the name as before */}
-          {isExpanded && (
-            <>
-              {onCopyToToday && isSaved && (
+          <span className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${
+            draft.status === "planned"
+              ? "bg-[var(--color-card-muted)] text-[var(--color-accent)]"
+              : draft.status === "skipped"
+                ? "bg-[var(--color-card-muted)] text-[var(--color-muted)]"
+                : "bg-[color-mix(in_srgb,var(--color-success)_14%,transparent)] text-[var(--color-success)]"
+          }`}>
+            {draft.status}
+          </span>
+
+          {isSaved && draft.status === "planned" && onStatusChange ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                onStatusChange(draft.clientId, "eaten");
+              }}
+              className="shrink-0 rounded-lg bg-[var(--color-accent)] px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              Mark eaten
+            </button>
+          ) : null}
+
+          {isSaved && draft.status === "skipped" && onStatusChange ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                onStatusChange(draft.clientId, "planned");
+              }}
+              className="shrink-0 rounded-lg border border-[var(--color-border-strong)] px-2.5 py-1 text-xs font-semibold text-[var(--color-muted)] disabled:opacity-50"
+            >
+              Restore
+            </button>
+          ) : null}
+
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen((open) => {
+                  if (open) setConfirmingDelete(false);
+                  return !open;
+                });
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-muted)] transition hover:bg-[var(--color-card-muted)] hover:text-[var(--color-ink)] disabled:opacity-50"
+              aria-label={`More actions for ${heading}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <circle cx="3.5" cy="8" r="1.3" />
+                <circle cx="8" cy="8" r="1.3" />
+                <circle cx="12.5" cy="8" r="1.3" />
+              </svg>
+            </button>
+            {menuOpen ? (
+              <div
+                role="menu"
+                className="absolute right-0 top-9 z-20 w-44 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] py-1 text-sm shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
                   type="button"
-                  disabled={busy || isCopied}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCopyToToday(draft.clientId);
+                  role="menuitem"
+                  onClick={() => {
+                    if (isExpanded) {
+                      onDiscardChanges?.(draft.clientId);
+                    }
+                    setIsExpanded((expanded) => !expanded);
+                    setMenuOpen(false);
                   }}
-                  className={`shrink-0 rounded-lg p-1 transition disabled:opacity-50 ${isCopied ? "text-[var(--color-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-accent)]"}`}
-                  aria-label={isCopied ? `${heading} copied to today` : `Copy ${heading} to today`}
-                  title={isCopied ? "Copied to today!" : "Copy to today"}
+                  className="block w-full px-3 py-2 text-left text-[var(--color-ink)] hover:bg-[var(--color-card-muted)]"
                 >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="3" width="12" height="10" rx="1.5" />
-                    <line x1="2" y1="7" x2="14" y2="7" />
-                    <line x1="5" y1="1" x2="5" y2="5" />
-                    <line x1="11" y1="1" x2="11" y2="5" />
-                    <line x1="8" y1="13" x2="8" y2="9" />
-                    <polyline points="6,11 8,9 10,11" />
-                  </svg>
+                  {isExpanded ? "Collapse" : "Edit details"}
                 </button>
-              )}
-
-              <button
-                type="button"
-                disabled={busy}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDuplicate(draft.clientId);
-                }}
-                className="shrink-0 rounded-lg p-1 text-[var(--color-muted)] transition hover:text-[var(--color-ink)] disabled:opacity-50"
-                aria-label={`Duplicate ${heading}`}
-                title="Duplicate"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="5" y="5" width="8" height="8" rx="1.5" />
-                  <path d="M3 11V4a1 1 0 0 1 1-1h7" />
-                </svg>
-              </button>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsExpanded(false);
-                }}
-                className="shrink-0 rounded-lg p-1 text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
-                aria-label="Collapse"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="4,10 8,6 12,10" />
-                </svg>
-              </button>
-
-              <ConfirmDeleteButton
-                disabled={busy}
-                onConfirm={() => onDelete(draft.clientId)}
-                ariaLabel={`Delete ${heading}`}
-                className="shrink-0 rounded-lg p-1 text-[var(--color-muted)] transition hover:text-[var(--color-danger)] disabled:opacity-50"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                  <line x1="4" y1="4" x2="12" y2="12" />
-                  <line x1="12" y1="4" x2="4" y2="12" />
-                </svg>
-              </ConfirmDeleteButton>
-            </>
-          )}
+                {onStatusChange && isSaved ? (
+                  <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        onStatusChange(draft.clientId, "planned");
+                        setMenuOpen(false);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-[var(--color-ink)] hover:bg-[var(--color-card-muted)]"
+                    >
+                      Mark planned
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        onStatusChange(draft.clientId, "eaten");
+                        setMenuOpen(false);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-[var(--color-ink)] hover:bg-[var(--color-card-muted)]"
+                    >
+                      Mark eaten
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        onStatusChange(draft.clientId, "skipped");
+                        setMenuOpen(false);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-[var(--color-ink)] hover:bg-[var(--color-card-muted)]"
+                    >
+                      Skip
+                    </button>
+                  </>
+                ) : null}
+                {onCopyToToday && isSaved ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={isCopied}
+                    onClick={() => {
+                      onCopyToToday(draft.clientId);
+                      setMenuOpen(false);
+                    }}
+                    className="block w-full px-3 py-2 text-left text-[var(--color-ink)] hover:bg-[var(--color-card-muted)] disabled:opacity-50"
+                  >
+                    {isCopied ? "Copied" : "Copy to today"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onDuplicate(draft.clientId);
+                    setMenuOpen(false);
+                  }}
+                  className="block w-full px-3 py-2 text-left text-[var(--color-ink)] hover:bg-[var(--color-card-muted)]"
+                >
+                  Duplicate
+                </button>
+                {confirmingDelete ? (
+                  <div className="mx-2 my-1 rounded-lg bg-[color-mix(in_srgb,var(--color-danger)_10%,transparent)] p-2">
+                    <p className="mb-2 text-xs font-semibold text-[var(--color-danger)]">
+                      Delete this item?
+                    </p>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDelete(false)}
+                        className="flex-1 rounded-md border border-[var(--color-border)] px-2 py-1 text-xs font-semibold text-[var(--color-muted)]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          onDelete(draft.clientId);
+                          setMenuOpen(false);
+                          setConfirmingDelete(false);
+                        }}
+                        className="flex-1 rounded-md bg-[var(--color-danger)] px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setConfirmingDelete(true)}
+                    className="block w-full px-3 py-2 text-left text-[var(--color-danger)] hover:bg-[var(--color-card-muted)]"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {/* Row 2 (collapsed only): macro chips + action buttons */}
@@ -208,74 +348,9 @@ export function MealCard({ draft, busy, error, isCopied = false, onChange, onSav
               </div>
             )}
 
-            {/* Buttons pushed to the right */}
-            <div className="ml-auto flex items-center gap-0.5">
-              {onCopyToToday && isSaved && (
-                <button
-                  type="button"
-                  disabled={busy || isCopied}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCopyToToday(draft.clientId);
-                  }}
-                  className={`shrink-0 rounded-lg p-1 transition disabled:opacity-50 ${isCopied ? "text-[var(--color-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-accent)]"}`}
-                  aria-label={isCopied ? `${heading} copied to today` : `Copy ${heading} to today`}
-                  title={isCopied ? "Copied to today!" : "Copy to today"}
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="3" width="12" height="10" rx="1.5" />
-                    <line x1="2" y1="7" x2="14" y2="7" />
-                    <line x1="5" y1="1" x2="5" y2="5" />
-                    <line x1="11" y1="1" x2="11" y2="5" />
-                    <line x1="8" y1="13" x2="8" y2="9" />
-                    <polyline points="6,11 8,9 10,11" />
-                  </svg>
-                </button>
-              )}
-
-              <button
-                type="button"
-                disabled={busy}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDuplicate(draft.clientId);
-                }}
-                className="shrink-0 rounded-lg p-1 text-[var(--color-muted)] transition hover:text-[var(--color-ink)] disabled:opacity-50"
-                aria-label={`Duplicate ${heading}`}
-                title="Duplicate"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="5" y="5" width="8" height="8" rx="1.5" />
-                  <path d="M3 11V4a1 1 0 0 1 1-1h7" />
-                </svg>
-              </button>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsExpanded(true);
-                }}
-                className="shrink-0 rounded-lg p-1 text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
-                aria-label="Expand"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="4,6 8,10 12,6" />
-                </svg>
-              </button>
-
-              <ConfirmDeleteButton
-                disabled={busy}
-                onConfirm={() => onDelete(draft.clientId)}
-                ariaLabel={`Delete ${heading}`}
-                className="shrink-0 rounded-lg p-1 text-[var(--color-muted)] transition hover:text-[var(--color-danger)] disabled:opacity-50"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                  <line x1="4" y1="4" x2="12" y2="12" />
-                  <line x1="12" y1="4" x2="4" y2="12" />
-                </svg>
-              </ConfirmDeleteButton>
-            </div>
+            <span className="ml-auto text-[10px] font-medium text-[var(--color-muted)]">
+              {draft.quantity} {draft.unit}
+            </span>
           </div>
         )}
       </div>
@@ -297,6 +372,59 @@ export function MealCard({ draft, busy, error, isCopied = false, onChange, onSav
               placeholder="Chicken breast, rice, banana..."
               autoFocus={!isSaved}
             />
+          </label>
+
+          <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+            <NumericInput
+              label="Quantity"
+              value={draft.quantity}
+              busy={busy}
+              step="0.01"
+              unit={draft.unit}
+              onChange={(value) => onChange(draft.clientId, "quantity", value)}
+            />
+            <label className="block min-w-28">
+              <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
+                Unit
+              </span>
+              <select
+                value={draft.unit}
+                disabled={busy}
+                onChange={(event) => onChange(draft.clientId, "unit", event.target.value)}
+                className="h-[42px] w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
+              >
+                <option value="g">g</option>
+                <option value="ml">ml</option>
+                <option value="serving">serving</option>
+                <option value="count">count</option>
+              </select>
+            </label>
+          </div>
+
+          <label className="mt-3 block">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
+              Group
+            </span>
+            <select
+              value={draft.mealGroupId ?? ""}
+              disabled={busy}
+              onChange={(event) => {
+                const nextGroupId = event.target.value || null;
+                if (onGroupChange) {
+                  onGroupChange(draft.clientId, nextGroupId);
+                } else {
+                  onChange(draft.clientId, "mealGroupId", event.target.value);
+                }
+              }}
+              className="h-[42px] w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
+            >
+              <option value="">Ungrouped</option>
+              {mealGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.label}
+                </option>
+              ))}
+            </select>
           </label>
 
           {/* Macro inputs — 2×2 grid */}

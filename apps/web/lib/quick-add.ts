@@ -218,7 +218,6 @@ export type RankCandidatesOptions = {
 
 function scoreCandidate(
   candidate: QuickAddCandidate,
-  remaining: RemainingMacros,
   currentHourUtc: number,
   referenceDate: string,
 ): number {
@@ -241,52 +240,18 @@ function scoreCandidate(
 
   score += Math.min(candidate.observedUseDays ?? 0, 6) * 6;
 
-  if (remaining.proteinG !== null) {
-    const proteinBudget = Math.max(0, remaining.proteinG);
-    const fill = Math.min(candidate.proteinG, proteinBudget);
-    const overshoot = Math.max(0, candidate.proteinG - proteinBudget);
-    score += fill * 2.5;
-    score -= overshoot * 0.4;
-  }
-
-  if (remaining.caloriesKcal !== null) {
-    const calBudget = Math.max(0, remaining.caloriesKcal);
-    if (candidate.caloriesKcal <= calBudget) {
-      const gap = calBudget - candidate.caloriesKcal;
-      score += Math.max(0, 300 - gap) * 0.2;
-    } else {
-      const overshoot = candidate.caloriesKcal - calBudget;
-      score -= Math.min(180, overshoot * 0.6);
-    }
-  }
-
-  if (remaining.carbsG !== null) {
-    const carbBudget = Math.max(0, remaining.carbsG);
-    const fill = Math.min(candidate.carbsG, carbBudget);
-    const overshoot = Math.max(0, candidate.carbsG - carbBudget);
-    score += fill * 0.75;
-    score -= overshoot * 1;
-  }
-
-  if (remaining.fatG !== null) {
-    const fatBudget = Math.max(0, remaining.fatG);
-    const fill = Math.min(candidate.fatG, fatBudget);
-    const overshoot = Math.max(0, candidate.fatG - fatBudget);
-    score += fill * 0.75;
-    score -= overshoot * 1.2;
-  }
-
   return score;
 }
 
 /**
  * Rank a mixed pool of preset + recent candidates.
- * Balances likelihood-to-log and macro fit, then resolves ties with recency,
- * observed repeat frequency, and original input order.
+ * Uses likelihood-to-log signals: time-of-day habits, recent use, observed
+ * repeat frequency, and original input order. Remaining macros are accepted for
+ * API compatibility but do not affect recommendation ranking.
  */
 export function rankCandidates(
   candidates: QuickAddCandidate[],
-  remaining: RemainingMacros,
+  _remaining: RemainingMacros,
   options: RankCandidatesOptions = {},
 ): QuickAddCandidate[] {
   const {
@@ -300,7 +265,7 @@ export function rankCandidates(
     .map((candidate, originalIndex) => ({
       candidate,
       originalIndex,
-      score: scoreCandidate(candidate, remaining, currentHourUtc, referenceDate),
+      score: scoreCandidate(candidate, currentHourUtc, referenceDate),
     }))
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;

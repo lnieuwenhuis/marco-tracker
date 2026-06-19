@@ -1,12 +1,18 @@
 import {
   computeStreaks,
+  createMealGroup,
   createRecipe,
   createMealEntry,
+  createPersonalFoodProduct,
   deleteMealEntry,
   getDailySummary,
+  getMealGroups,
   getPeriodAverages,
   getRecipeById,
   getRecentQuickAddCandidates,
+  markMealEntryStatus,
+  resolveProductNutritionForQuantity,
+  searchFoodProducts,
   updateRecipe,
   updateMealEntry,
   upsertUserFromShooProfile,
@@ -237,6 +243,109 @@ describe("database queries", () => {
       carbsG: 42,
       fatG: 11,
       caloriesKcal: 395,
+    });
+  });
+
+  it("tracks meal groups and excludes planned or skipped entries from eaten totals", async () => {
+    const groups = await getMealGroups(userId, runtime.db);
+    expect(groups.map((group) => group.label)).toEqual([
+      "Breakfast",
+      "Lunch",
+      "Dinner",
+      "Snack",
+    ]);
+
+    const supper = await createMealGroup(userId, { label: "Supper" }, runtime.db);
+    const eaten = await createMealEntry(
+      userId,
+      {
+        date: "2026-04-12",
+        mealGroupId: supper.id,
+        label: "Salmon bowl",
+        proteinG: 40,
+        carbsG: 50,
+        fatG: 18,
+        caloriesKcal: 520,
+      },
+      runtime.db,
+    );
+    const planned = await createMealEntry(
+      userId,
+      {
+        date: "2026-04-12",
+        status: "planned",
+        label: "Evening shake",
+        proteinG: 30,
+        carbsG: 10,
+        fatG: 2,
+        caloriesKcal: 180,
+      },
+      runtime.db,
+    );
+
+    let summary = await getDailySummary(userId, "2026-04-12", runtime.db);
+    expect(summary.totals.caloriesKcal).toBe(520);
+    expect(summary.plannedTotals.caloriesKcal).toBe(180);
+    expect(summary.meals.find((meal) => meal.id === eaten.id)?.mealGroupId).toBe(supper.id);
+
+    await markMealEntryStatus(userId, planned.id, "eaten", runtime.db);
+    summary = await getDailySummary(userId, "2026-04-12", runtime.db);
+    expect(summary.totals.caloriesKcal).toBe(700);
+    expect(summary.plannedTotals.caloriesKcal).toBe(0);
+  });
+
+  it("creates searchable products and resolves quantity-scaled nutrition", async () => {
+    const product = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Greek yogurt 2%",
+        source: "manual",
+        defaultServingQuantity: 150,
+        defaultServingUnit: "g",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+
+    const results = await searchFoodProducts(userId, "greek", runtime.db);
+    expect(results.map((item) => item.id)).toContain(product.id);
+    expect(resolveProductNutritionForQuantity(product, 150, "g")).toEqual({
+      proteinG: 15,
+      carbsG: 6,
+      fatG: 3,
+      caloriesKcal: 111,
+    });
+  });
+
+  it("preserves recipe cooked weight and ingredient quantity metadata", async () => {
+    const recipe = await createRecipe(
+      userId,
+      {
+        label: "Rice pot",
+        portions: 4,
+        totalCookedWeightG: 900,
+        ingredients: [
+          {
+            label: "Rice",
+            quantity: 250,
+            unit: "g",
+            proteinG: 18,
+            carbsG: 190,
+            fatG: 2,
+            caloriesKcal: 850,
+          },
+        ],
+      },
+      runtime.db,
+    );
+
+    expect(recipe.totalCookedWeightG).toBe(900);
+    expect(recipe.ingredients[0]).toMatchObject({
+      quantity: 250,
+      unit: "g",
     });
   });
 

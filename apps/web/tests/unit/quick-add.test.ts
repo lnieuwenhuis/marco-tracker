@@ -300,13 +300,34 @@ describe("rankCandidates", () => {
     caloriesKcal: 600,
   };
 
-  it("ranks higher-protein items first when protein is the main deficit", () => {
+  it("does not rank large macro-fitting meals ahead of stronger routine signals", () => {
+    const recentSnack: QuickAddCandidate = {
+      label: "Greek Yogurt",
+      proteinG: 17,
+      carbsG: 6,
+      fatG: 0,
+      caloriesKcal: 100,
+      source: "recent",
+      sourceDate: "2026-04-20",
+      observedUseDays: 3,
+    };
+    const hugeMeal: QuickAddCandidate = {
+      label: "BBQ Chicken Meatlovers Pizza",
+      proteinG: 80,
+      carbsG: 120,
+      fatG: 50,
+      caloriesKcal: 1250,
+      source: "recent",
+      sourceDate: "2026-04-10",
+      observedUseDays: 1,
+    };
+
     const ranked = rankCandidates(
-      [lowProteinItem, highProteinItem],
+      [hugeMeal, recentSnack],
       remaining,
       defaultRankOptions,
     );
-    expect(ranked[0]!.label).toBe("Chicken breast");
+    expect(ranked[0]!.label).toBe("Greek Yogurt");
   });
 
   it("respects the limit", () => {
@@ -374,7 +395,18 @@ describe("rankCandidates", () => {
       observedUseDays: 5,
     };
 
-    const ranked = rankCandidates([highProteinItem, habitOats], remaining, {
+    const moreRecentRoutine: QuickAddCandidate = {
+      label: "Chicken breast",
+      proteinG: 40,
+      carbsG: 0,
+      fatG: 5,
+      caloriesKcal: 205,
+      source: "recent",
+      sourceDate: "2026-04-16",
+      observedUseDays: 5,
+    };
+
+    const ranked = rankCandidates([habitOats, moreRecentRoutine], remaining, {
       ...defaultRankOptions,
       currentHourUtc: 20,
     });
@@ -395,11 +427,22 @@ describe("rankCandidates", () => {
       observedUseDays: 2,
     };
 
-    const ranked = rankCandidates([highProteinItem, weakHabit], remaining, {
+    const strongerRoutine: QuickAddCandidate = {
+      label: "Apple",
+      proteinG: 1,
+      carbsG: 20,
+      fatG: 0,
+      caloriesKcal: 80,
+      source: "recent",
+      sourceDate: "2026-04-20",
+      observedUseDays: 2,
+    };
+
+    const ranked = rankCandidates([weakHabit, strongerRoutine], remaining, {
       ...defaultRankOptions,
       currentHourUtc: 8,
     });
-    expect(ranked[0]!.label).toBe("Chicken breast");
+    expect(ranked[0]!.label).toBe("Apple");
   });
 
   it("lets a merged preset duplicate keep its habit bonus", () => {
@@ -509,18 +552,18 @@ describe("rankCandidates", () => {
     expect(ranked[0]!.label).toBe("Bagel");
   });
 
-  it("demotes items that overshoot carbs and fat heavily", () => {
-    const lowOvershootItem: QuickAddCandidate = {
+  it("keeps the same usage-driven order regardless of remaining macro budget", () => {
+    const routineItem: QuickAddCandidate = {
       label: "Greek Yogurt",
       proteinG: 20,
       carbsG: 5,
       fatG: 2,
       caloriesKcal: 120,
       source: "recent",
-      sourceDate: "2026-04-18",
-      observedUseDays: 2,
+      sourceDate: "2026-04-20",
+      observedUseDays: 4,
     };
-    const highOvershootItem: QuickAddCandidate = {
+    const occasionalLargeMeal: QuickAddCandidate = {
       label: "Pastry",
       proteinG: 20,
       carbsG: 40,
@@ -528,7 +571,7 @@ describe("rankCandidates", () => {
       caloriesKcal: 320,
       source: "recent",
       sourceDate: "2026-04-18",
-      observedUseDays: 2,
+      observedUseDays: 1,
     };
     const tightRemaining = {
       proteinG: null,
@@ -536,13 +579,26 @@ describe("rankCandidates", () => {
       fatG: 5,
       caloriesKcal: null,
     };
+    const generousRemaining = {
+      proteinG: 200,
+      carbsG: 300,
+      fatG: 100,
+      caloriesKcal: 2000,
+    };
 
-    const ranked = rankCandidates(
-      [highOvershootItem, lowOvershootItem],
+    const tightRanked = rankCandidates(
+      [occasionalLargeMeal, routineItem],
       tightRemaining,
       defaultRankOptions,
     );
-    expect(ranked[0]!.label).toBe("Greek Yogurt");
+    const generousRanked = rankCandidates(
+      [occasionalLargeMeal, routineItem],
+      generousRemaining,
+      defaultRankOptions,
+    );
+
+    expect(tightRanked[0]!.label).toBe("Greek Yogurt");
+    expect(generousRanked[0]!.label).toBe("Greek Yogurt");
   });
 
   it("still ranks no-goal users by usage signals", () => {

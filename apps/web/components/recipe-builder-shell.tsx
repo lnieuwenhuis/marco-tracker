@@ -62,13 +62,20 @@ export function RecipeBuilderShell({
   // Recipe fields
   const [label, setLabel] = useState(recipe?.label ?? "");
   const [portions, setPortions] = useState(String(recipe?.portions ?? 1));
+  const [totalCookedWeightG, setTotalCookedWeightG] = useState(
+    recipe?.totalCookedWeightG != null ? String(recipe.totalCookedWeightG) : "",
+  );
 
   // Ingredients
   const [ingredients, setIngredients] = useState<IngredientDraft[]>(() => {
     if (!recipe) return [];
     return recipe.ingredients.map((ing) => ({
       clientId: `ing-${ing.id}`,
+      productId: ing.productId ?? null,
       label: ing.label,
+      quantity: String(ing.quantity ?? 1),
+      unit: ing.unit ?? "serving",
+      servingMultiplier: String(ing.servingMultiplier ?? 1),
       proteinG: String(ing.proteinG),
       carbsG: String(ing.carbsG),
       fatG: String(ing.fatG),
@@ -103,6 +110,9 @@ export function RecipeBuilderShell({
       {
         clientId: `ing-${crypto.randomUUID()}`,
         label: "",
+        quantity: "1",
+        unit: "serving",
+        servingMultiplier: "1",
         proteinG: "",
         carbsG: "",
         fatG: "",
@@ -117,6 +127,9 @@ export function RecipeBuilderShell({
       {
         clientId: `ing-${crypto.randomUUID()}`,
         label: preset.label,
+        quantity: "1",
+        unit: "serving",
+        servingMultiplier: "1",
         proteinG: String(preset.proteinG),
         carbsG: String(preset.carbsG),
         fatG: String(preset.fatG),
@@ -159,8 +172,15 @@ export function RecipeBuilderShell({
         id: recipe?.id,
         label,
         portions: parsedPortions,
+        totalCookedWeightG: totalCookedWeightG.trim()
+          ? Math.max(toNumber(totalCookedWeightG), 0)
+          : null,
         ingredients: ingredients.map((ing) => ({
+          productId: ing.productId ?? null,
           label: ing.label,
+          quantity: toNumber(ing.quantity || "1"),
+          unit: ing.unit ?? "serving",
+          servingMultiplier: toNumber(ing.servingMultiplier || "1"),
           proteinG: toNumber(ing.proteinG),
           carbsG: toNumber(ing.carbsG),
           fatG: toNumber(ing.fatG),
@@ -277,6 +297,25 @@ export function RecipeBuilderShell({
               onChange={(e) => { setPortions(e.target.value); setError(null); }}
               className="w-28 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
             />
+          </label>
+          <label className="mt-3 block">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
+              Cooked weight
+            </span>
+            <div className="relative w-36">
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="1"
+                value={totalCookedWeightG}
+                disabled={isPending}
+                onChange={(e) => { setTotalCookedWeightG(e.target.value); setError(null); }}
+                placeholder="Optional"
+                className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-9 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--color-muted)]">g</span>
+            </div>
           </label>
         </section>
 
@@ -429,6 +468,9 @@ export function RecipeBuilderShell({
               {
                 clientId: `ing-${crypto.randomUUID()}`,
                 label: macros.label,
+                quantity: "1",
+                unit: "serving",
+                servingMultiplier: "1",
                 proteinG: String(macros.proteinG),
                 carbsG: String(macros.carbsG),
                 fatG: String(macros.fatG),

@@ -2,8 +2,11 @@
 
 import {
   createMealEntry,
+  createMealGroup,
+  createPersonalFoodProduct,
   createPreset,
   createRecipe,
+  deleteMealGroup,
   createWeightEntry,
   deleteMealEntry,
   deletePreset,
@@ -11,18 +14,23 @@ import {
   deleteWeightEntry,
   getLeaderboardStats,
   getRecipeById,
+  markMealEntryStatus,
+  reorderMealGroups,
   saveCustomBarcodeProduct,
   saveUserGoals,
   saveWeightGoal,
+  searchFoodProducts,
   searchMealEntries,
   touchPresetLastUsed,
+  updateMealGroup,
   updateMealEntry,
+  updatePersonalFoodProduct,
   updatePreset,
   updateRecipe,
   updateWeightEntry,
   isValidDateString,
 } from "@macro-tracker/db";
-import type { CustomBarcodeProduct, FoodPreset, LeaderboardStats, MealEntryRecord, RecipeRecord } from "@macro-tracker/db";
+import type { CustomBarcodeProduct, FoodPreset, FoodProduct, FoodProductInput, LeaderboardStats, MealEntryRecord, MealEntryStatus, MealGroup, QuantityUnit, RecipeRecord } from "@macro-tracker/db";
 import { revalidatePath } from "next/cache";
 
 import { requireSessionUser } from "./auth";
@@ -35,12 +43,19 @@ type ActionResult = {
 type SaveMealEntryInput = {
   id?: string;
   date: string;
+  mealGroupId?: string | null;
+  status?: MealEntryStatus;
+  productId?: string | null;
   label: string;
   sortOrder?: number;
+  quantity?: number;
+  unit?: QuantityUnit;
+  servingMultiplier?: number;
   proteinG: number;
   carbsG: number;
   fatG: number;
   caloriesKcal: number;
+  clientMutationId?: string | null;
 };
 
 function toActionError(error: unknown) {
@@ -66,21 +81,35 @@ export async function saveMealEntryAction(
     const entry = input.id
       ? await updateMealEntry(sessionUser.userId, input.id, {
           date: input.date,
+          mealGroupId: input.mealGroupId,
+          status: input.status,
+          productId: input.productId,
           label: input.label,
           sortOrder: input.sortOrder ?? 0,
+          quantity: input.quantity,
+          unit: input.unit,
+          servingMultiplier: input.servingMultiplier,
           proteinG: input.proteinG,
           carbsG: input.carbsG,
           fatG: input.fatG,
           caloriesKcal: input.caloriesKcal,
+          clientMutationId: input.clientMutationId,
         })
       : await createMealEntry(sessionUser.userId, {
           date: input.date,
+          mealGroupId: input.mealGroupId,
+          status: input.status,
+          productId: input.productId,
           label: input.label,
           sortOrder: input.sortOrder,
+          quantity: input.quantity,
+          unit: input.unit,
+          servingMultiplier: input.servingMultiplier,
           proteinG: input.proteinG,
           carbsG: input.carbsG,
           fatG: input.fatG,
           caloriesKcal: input.caloriesKcal,
+          clientMutationId: input.clientMutationId,
         });
 
     revalidatePath("/", "page");
@@ -90,6 +119,24 @@ export async function saveMealEntryAction(
       ok: false,
       error: toActionError(error),
     };
+  }
+}
+
+export async function markMealEntryStatusAction(
+  input: { id: string; status: MealEntryStatus },
+): Promise<SaveMealEntryResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const entry = await markMealEntryStatus(
+      sessionUser.userId,
+      input.id,
+      input.status,
+    );
+    revalidatePath("/", "page");
+    return { ok: true, entry };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
   }
 }
 
@@ -111,6 +158,65 @@ export async function deleteMealEntryAction(
       ok: false,
       error: toActionError(error),
     };
+  }
+}
+
+type MealGroupResult = ActionResult & { group?: MealGroup; groups?: MealGroup[] };
+
+export async function createMealGroupAction(
+  input: { label: string },
+): Promise<MealGroupResult> {
+  const sessionUser = await requireSessionUser();
+  try {
+    const group = await createMealGroup(sessionUser.userId, input);
+    revalidatePath("/", "page");
+    return { ok: true, group };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function updateMealGroupAction(
+  input: { id: string; label: string },
+): Promise<MealGroupResult> {
+  const sessionUser = await requireSessionUser();
+  try {
+    const group = await updateMealGroup(sessionUser.userId, input.id, {
+      label: input.label,
+    });
+    revalidatePath("/", "page");
+    return { ok: true, group };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function deleteMealGroupAction(
+  input: { id: string },
+): Promise<ActionResult> {
+  const sessionUser = await requireSessionUser();
+  try {
+    const deleted = await deleteMealGroup(sessionUser.userId, input.id);
+    if (!deleted) {
+      return { ok: false, error: "Meal group not found." };
+    }
+    revalidatePath("/", "page");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function reorderMealGroupsAction(
+  input: { orderedIds: string[] },
+): Promise<MealGroupResult> {
+  const sessionUser = await requireSessionUser();
+  try {
+    const groups = await reorderMealGroups(sessionUser.userId, input.orderedIds);
+    revalidatePath("/", "page");
+    return { ok: true, groups };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
   }
 }
 
@@ -295,8 +401,13 @@ type SaveRecipeInput = {
   id?: string;
   label: string;
   portions: number;
+  totalCookedWeightG?: number | null;
   ingredients: Array<{
+    productId?: string | null;
     label: string;
+    quantity?: number;
+    unit?: QuantityUnit;
+    servingMultiplier?: number;
     proteinG: number;
     carbsG: number;
     fatG: number;
@@ -355,9 +466,60 @@ export async function searchMealEntriesAction(
   }
 }
 
+type SearchFoodProductsResult = ActionResult & { products?: FoodProduct[] };
+
+export async function searchFoodProductsAction(
+  input: { query: string },
+): Promise<SearchFoodProductsResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const products = await searchFoodProducts(sessionUser.userId, input.query);
+    return { ok: true, products };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+type SaveFoodProductResult = ActionResult & { product?: FoodProduct };
+
+export async function createFoodProductAction(
+  input: FoodProductInput,
+): Promise<SaveFoodProductResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const product = await createPersonalFoodProduct(sessionUser.userId, input);
+    revalidatePath("/", "layout");
+    return { ok: true, product };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function updateFoodProductAction(
+  input: { id: string; product: FoodProductInput },
+): Promise<SaveFoodProductResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const product = await updatePersonalFoodProduct(
+      sessionUser.userId,
+      input.id,
+      input.product,
+    );
+    revalidatePath("/", "layout");
+    return { ok: true, product };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
 type LogRecipePortionInput = {
   recipeId: string;
   date: string;
+  portionCount?: number;
+  gramsConsumed?: number | null;
 };
 
 export async function logRecipePortionAction(
@@ -371,13 +533,27 @@ export async function logRecipePortionAction(
       throw new Error("Recipe not found.");
     }
 
+    const portionCount =
+      Number.isFinite(input.portionCount) && (input.portionCount ?? 0) > 0
+        ? input.portionCount!
+        : 1;
+    const factor =
+      input.gramsConsumed && recipe.totalCookedWeightG
+        ? (input.gramsConsumed / recipe.totalCookedWeightG) * recipe.portions
+        : portionCount;
+
     await createMealEntry(sessionUser.userId, {
       date: input.date,
-      label: `${recipe.label} (1 portion)`,
-      proteinG: recipe.perPortionMacros.proteinG,
-      carbsG: recipe.perPortionMacros.carbsG,
-      fatG: recipe.perPortionMacros.fatG,
-      caloriesKcal: recipe.perPortionMacros.caloriesKcal,
+      label:
+        input.gramsConsumed && recipe.totalCookedWeightG
+          ? `${recipe.label} (${input.gramsConsumed}g)`
+          : `${recipe.label} (${portionCount} portion${portionCount === 1 ? "" : "s"})`,
+      quantity: input.gramsConsumed ?? portionCount,
+      unit: input.gramsConsumed ? "g" : "serving",
+      proteinG: Math.round(recipe.perPortionMacros.proteinG * factor * 10) / 10,
+      carbsG: Math.round(recipe.perPortionMacros.carbsG * factor * 10) / 10,
+      fatG: Math.round(recipe.perPortionMacros.fatG * factor * 10) / 10,
+      caloriesKcal: Math.round(recipe.perPortionMacros.caloriesKcal * factor),
     });
 
     revalidatePath("/", "page");

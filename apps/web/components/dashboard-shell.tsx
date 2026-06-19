@@ -1,10 +1,10 @@
 "use client";
 
-import type { DailySummary, FoodPreset, MacroGoals, MealEntryRecord, QuickAddCandidate, RecipeRecord } from "@macro-tracker/db";
+import type { DailySummary, FoodPreset, MacroGoals, MealEntryRecord, MealEntryStatus, MealGroup, QuickAddCandidate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useMemo, useRef, useState, useTransition } from "react";
 
-import { deletePresetAction, deleteMealEntryAction, savePresetAction, saveMealEntryAction, touchPresetAction, updatePresetAction } from "@/lib/actions";
+import { createMealGroupAction, deleteMealGroupAction, deletePresetAction, deleteMealEntryAction, markMealEntryStatusAction, savePresetAction, saveMealEntryAction, touchPresetAction, updateMealGroupAction, updatePresetAction } from "@/lib/actions";
 import {
   getDailyMutationCacheKeys,
   getPresetMutationCacheKeys,
@@ -52,7 +52,13 @@ function mealToDraft(meal: MealEntryRecord): MealDraft {
   return {
     clientId: meal.id,
     id: meal.id,
+    mealGroupId: meal.mealGroupId,
+    status: meal.status,
+    productId: meal.productId,
     label: meal.label,
+    quantity: String(meal.quantity),
+    unit: meal.unit,
+    servingMultiplier: String(meal.servingMultiplier),
     // Use String() unconditionally: a falsy check like `meal.proteinG ? ...`
     // incorrectly converts a legitimate 0 value into an empty string.
     proteinG: String(meal.proteinG),
@@ -63,10 +69,14 @@ function mealToDraft(meal: MealEntryRecord): MealDraft {
   };
 }
 
-function createEmptyDraft(sortOrder: number): MealDraft {
+function createEmptyDraft(sortOrder: number, status: MealEntryStatus): MealDraft {
   return {
     clientId: `draft-${crypto.randomUUID()}`,
+    status,
     label: "",
+    quantity: "1",
+    unit: "serving",
+    servingMultiplier: "1",
     proteinG: "",
     carbsG: "",
     fatG: "",
@@ -75,10 +85,14 @@ function createEmptyDraft(sortOrder: number): MealDraft {
   };
 }
 
-function createDraftFromPreset(preset: FoodPreset, sortOrder: number): MealDraft {
+function createDraftFromPreset(preset: FoodPreset, sortOrder: number, status: MealEntryStatus): MealDraft {
   return {
     clientId: `draft-${crypto.randomUUID()}`,
+    status,
     label: preset.label,
+    quantity: "1",
+    unit: "serving",
+    servingMultiplier: "1",
     proteinG: String(preset.proteinG),
     carbsG: String(preset.carbsG),
     fatG: String(preset.fatG),
@@ -90,10 +104,15 @@ function createDraftFromPreset(preset: FoodPreset, sortOrder: number): MealDraft
 function createDraftFromCandidate(
   candidate: QuickAddCandidate,
   sortOrder: number,
+  status: MealEntryStatus,
 ): MealDraft {
   return {
     clientId: `draft-${crypto.randomUUID()}`,
+    status,
     label: candidate.label,
+    quantity: "1",
+    unit: "serving",
+    servingMultiplier: "1",
     proteinG: String(candidate.proteinG),
     carbsG: String(candidate.carbsG),
     fatG: String(candidate.fatG),
@@ -136,6 +155,13 @@ export function DashboardShell({
   const [localPresets, setLocalPresets] = useState<FoodPreset[]>(initialPresets);
   const [presetMutation, setPresetMutation] = useState<PresetMutationState | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
+  const [localMealGroups, setLocalMealGroups] = useState<MealGroup[]>(
+    dailySummary.mealGroups,
+  );
+  const [showGroupManager, setShowGroupManager] = useState(false);
+  const [newGroupLabel, setNewGroupLabel] = useState("");
+  const [groupError, setGroupError] = useState<string | null>(null);
+  const [groupMutationId, setGroupMutationId] = useState<string | null>(null);
 
   // Recipe picker state
   const [showRecipePickerModal, setShowRecipePickerModal] = useState(false);
@@ -165,6 +191,8 @@ export function DashboardShell({
     [liveTotals, goals],
   );
   const todayStr = useMemo(() => getLocalDateString(), []);
+  const defaultEntryStatus: MealEntryStatus =
+    selectedDate > todayStr ? "planned" : "eaten";
 
   // ---------------------------------------------------------------------------
   // Quick-add rails
@@ -184,8 +212,7 @@ export function DashboardShell({
     return [...presetCandidates, ...recentCandidates];
   }, [localPresets, recentCandidates]);
 
-  // Single unified quick-add list: always ranked, with usage signals carrying
-  // no-goal users and macro fit contributing when goals exist.
+  // Single unified quick-add list: ranked by routine signals, not macro fit.
   const quickAddItems = useMemo(
     () =>
       rankCandidates(allCandidates, remaining, {
@@ -211,7 +238,12 @@ export function DashboardShell({
   ) {
     setDrafts((currentDrafts) =>
       currentDrafts.map((draft) =>
-        draft.clientId === clientId ? { ...draft, [field]: value } : draft,
+        draft.clientId === clientId
+          ? {
+              ...draft,
+              [field]: field === "mealGroupId" && value === "" ? null : value,
+            }
+          : draft,
       ),
     );
     setErrors((currentErrors) => ({
@@ -220,14 +252,89 @@ export function DashboardShell({
     }));
   }
 
+  function isOnlyGroupDirty(draft: MealDraft, nextGroupId: string | null) {
+    if (!draft.id) return false;
+    const saved = dailySummary.meals.find((meal) => meal.id === draft.id);
+    if (!saved) return false;
+
+    const sameNumber = (draftValue: string, savedValue: number) =>
+      Math.abs(toNumber(draftValue) - savedValue) < 0.01;
+
+    return (
+      (saved.mealGroupId ?? null) !== nextGroupId &&
+      draft.label.trim() === saved.label &&
+      draft.status === saved.status &&
+      (draft.productId ?? null) === (saved.productId ?? null) &&
+      sameNumber(draft.quantity, saved.quantity) &&
+      draft.unit === saved.unit &&
+      sameNumber(draft.servingMultiplier, saved.servingMultiplier) &&
+      sameNumber(draft.proteinG, saved.proteinG) &&
+      sameNumber(draft.carbsG, saved.carbsG) &&
+      sameNumber(draft.fatG, saved.fatG) &&
+      Math.round(toNumber(draft.caloriesKcal)) === saved.caloriesKcal &&
+      draft.sortOrder === saved.sortOrder
+    );
+  }
+
+  function handleGroupChange(clientId: string, mealGroupId: string | null) {
+    const draft = drafts.find((entry) => entry.clientId === clientId);
+    if (!draft) return;
+
+    setDrafts((currentDrafts) =>
+      currentDrafts.map((item) =>
+        item.clientId === clientId ? { ...item, mealGroupId } : item,
+      ),
+    );
+    setErrors((currentErrors) => ({
+      ...currentErrors,
+      [clientId]: null,
+    }));
+
+    if (!draft.id || !isOnlyGroupDirty(draft, mealGroupId)) {
+      return;
+    }
+
+    setActiveMutation(clientId);
+    beginMutation(async () => {
+      const result = await saveMealEntryAction({
+        id: draft.id,
+        date: selectedDate,
+        mealGroupId,
+        status: draft.status,
+        productId: draft.productId ?? null,
+        label: draft.label,
+        sortOrder: draft.sortOrder,
+        quantity: toNumber(draft.quantity, 1),
+        unit: draft.unit,
+        servingMultiplier: toNumber(draft.servingMultiplier, 1),
+        proteinG: toNumber(draft.proteinG),
+        carbsG: toNumber(draft.carbsG),
+        fatG: toNumber(draft.fatG),
+        caloriesKcal: Math.round(toNumber(draft.caloriesKcal)),
+      });
+
+      if (!result.ok) {
+        setErrors((currentErrors) => ({
+          ...currentErrors,
+          [clientId]: result.error ?? "Unable to update group.",
+        }));
+        setActiveMutation(null);
+        return;
+      }
+
+      invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
+      router.refresh();
+    });
+  }
+
   function addCustomDraft() {
-    setDrafts((currentDrafts) => [...currentDrafts, createEmptyDraft(nextSortOrder())]);
+    setDrafts((currentDrafts) => [...currentDrafts, createEmptyDraft(nextSortOrder(), defaultEntryStatus)]);
   }
 
   function addDraftFromPreset(preset: FoodPreset) {
     setDrafts((currentDrafts) => [
       ...currentDrafts,
-      createDraftFromPreset(preset, nextSortOrder()),
+      createDraftFromPreset(preset, nextSortOrder(), defaultEntryStatus),
     ]);
     setPresetError(null);
     // Fire-and-forget: mark this preset as most-recently-used so the next time
@@ -243,7 +350,11 @@ export function DashboardShell({
       ...currentDrafts,
       {
         clientId: `draft-${crypto.randomUUID()}`,
+        status: defaultEntryStatus,
         label: `${recipe.label} (1 portion)`,
+        quantity: "1",
+        unit: "serving",
+        servingMultiplier: "1",
         proteinG: String(macros.proteinG),
         carbsG: String(macros.carbsG),
         fatG: String(macros.fatG),
@@ -258,7 +369,7 @@ export function DashboardShell({
   function addDraftFromCandidate(candidate: QuickAddCandidate) {
     setDrafts((currentDrafts) => [
       ...currentDrafts,
-      createDraftFromCandidate(candidate, nextSortOrder()),
+      createDraftFromCandidate(candidate, nextSortOrder(), defaultEntryStatus),
     ]);
 
     // If this was a preset candidate, touch it so its sort order floats up.
@@ -278,6 +389,28 @@ export function DashboardShell({
     });
   }
 
+  function discardDraftChanges(clientId: string) {
+    const draft = drafts.find((entry) => entry.clientId === clientId);
+    if (!draft?.id) {
+      return;
+    }
+
+    const saved = dailySummary.meals.find((meal) => meal.id === draft.id);
+    if (!saved) {
+      return;
+    }
+
+    setDrafts((currentDrafts) =>
+      currentDrafts.map((currentDraft) =>
+        currentDraft.clientId === clientId ? mealToDraft(saved) : currentDraft,
+      ),
+    );
+    setErrors((currentErrors) => ({
+      ...currentErrors,
+      [clientId]: null,
+    }));
+  }
+
   function handleSave(clientId: string) {
     const draft = drafts.find((entry) => entry.clientId === clientId);
     if (!draft) {
@@ -289,8 +422,14 @@ export function DashboardShell({
       const result = await saveMealEntryAction({
         id: draft.id,
         date: selectedDate,
+        mealGroupId: draft.mealGroupId ?? null,
+        status: draft.status,
+        productId: draft.productId ?? null,
         label: draft.label,
         sortOrder: draft.sortOrder,
+        quantity: toNumber(draft.quantity, 1),
+        unit: draft.unit,
+        servingMultiplier: toNumber(draft.servingMultiplier, 1),
         proteinG: toNumber(draft.proteinG),
         carbsG: toNumber(draft.carbsG),
         fatG: toNumber(draft.fatG),
@@ -347,6 +486,43 @@ export function DashboardShell({
         return;
       }
 
+      invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
+      router.refresh();
+    });
+  }
+
+  function handleStatusChange(clientId: string, status: MealEntryStatus) {
+    const draft = drafts.find((entry) => entry.clientId === clientId);
+    if (!draft?.id) {
+      setDrafts((currentDrafts) =>
+        currentDrafts.map((item) =>
+          item.clientId === clientId ? { ...item, status } : item,
+        ),
+      );
+      return;
+    }
+
+    setActiveMutation(clientId);
+    beginMutation(async () => {
+      const result = await markMealEntryStatusAction({
+        id: draft.id!,
+        status,
+      });
+
+      if (!result.ok) {
+        setErrors((currentErrors) => ({
+          ...currentErrors,
+          [clientId]: result.error ?? "Unable to update status.",
+        }));
+        setActiveMutation(null);
+        return;
+      }
+
+      setDrafts((currentDrafts) =>
+        currentDrafts.map((item) =>
+          item.clientId === clientId ? { ...item, status } : item,
+        ),
+      );
       invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
       router.refresh();
     });
@@ -420,8 +596,77 @@ export function DashboardShell({
     }
   }
 
+  async function handleCreateMealGroup() {
+    const label = newGroupLabel.trim();
+    if (!label) return;
+
+    setGroupError(null);
+    setGroupMutationId("new");
+    try {
+      const result = await createMealGroupAction({ label });
+      if (!result.ok || !result.group) {
+        setGroupError(result.error ?? "Unable to create group.");
+        return;
+      }
+
+      setLocalMealGroups((groups) => [...groups, result.group!]);
+      setNewGroupLabel("");
+    } finally {
+      setGroupMutationId(null);
+    }
+  }
+
+  async function handleRenameMealGroup(groupId: string, label: string) {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+
+    const previousGroups = localMealGroups;
+    setLocalMealGroups((groups) =>
+      groups.map((group) =>
+        group.id === groupId ? { ...group, label: trimmed } : group,
+      ),
+    );
+    setGroupError(null);
+    setGroupMutationId(groupId);
+    try {
+      const result = await updateMealGroupAction({ id: groupId, label: trimmed });
+      if (!result.ok || !result.group) {
+        setLocalMealGroups(previousGroups);
+        setGroupError(result.error ?? "Unable to rename group.");
+      }
+    } finally {
+      setGroupMutationId(null);
+    }
+  }
+
+  async function handleDeleteMealGroup(groupId: string) {
+    const previousGroups = localMealGroups;
+    setLocalMealGroups((groups) => groups.filter((group) => group.id !== groupId));
+    setDrafts((currentDrafts) =>
+      currentDrafts.map((draft) =>
+        draft.mealGroupId === groupId ? { ...draft, mealGroupId: null } : draft,
+      ),
+    );
+    setGroupError(null);
+    setGroupMutationId(groupId);
+    try {
+      const result = await deleteMealGroupAction({ id: groupId });
+      if (!result.ok) {
+        setLocalMealGroups(previousGroups);
+        setGroupError(result.error ?? "Unable to delete group.");
+      }
+    } finally {
+      setGroupMutationId(null);
+    }
+  }
+
   const isViewingToday = selectedDate === todayStr;
   const isExperimental = uiMode === "experimental";
+  const groupedDrafts = localMealGroups.map((group) => ({
+    group,
+    drafts: drafts.filter((draft) => draft.mealGroupId === group.id),
+  }));
+  const ungroupedDrafts = drafts.filter((draft) => !draft.mealGroupId);
 
   function handleDuplicate(clientId: string) {
     setDrafts((currentDrafts) => {
@@ -437,7 +682,13 @@ export function DashboardShell({
         ...currentDrafts,
         {
           clientId: `draft-${crypto.randomUUID()}`,
+          mealGroupId: draft.mealGroupId,
+          status: defaultEntryStatus,
+          productId: draft.productId,
           label: draft.label,
+          quantity: draft.quantity,
+          unit: draft.unit,
+          servingMultiplier: draft.servingMultiplier,
           proteinG: draft.proteinG,
           carbsG: draft.carbsG,
           fatG: draft.fatG,
@@ -456,7 +707,13 @@ export function DashboardShell({
     beginMutation(async () => {
       const result = await saveMealEntryAction({
         date: todayStr,
+        mealGroupId: draft.mealGroupId ?? null,
+        status: "eaten",
+        productId: draft.productId ?? null,
         label: draft.label,
+        quantity: toNumber(draft.quantity, 1),
+        unit: draft.unit,
+        servingMultiplier: toNumber(draft.servingMultiplier, 1),
         proteinG: toNumber(draft.proteinG),
         carbsG: toNumber(draft.carbsG),
         fatG: toNumber(draft.fatG),
@@ -564,6 +821,18 @@ export function DashboardShell({
             caloriesKcal={liveTotals.caloriesKcal}
             goals={goals}
           />
+          {dailySummary.plannedTotals.caloriesKcal > 0 || dailySummary.skippedTotals.caloriesKcal > 0 ? (
+            <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl bg-[var(--color-card-muted)] px-3 py-2">
+                <span className="font-semibold text-[var(--color-muted-strong)]">Planned</span>
+                <span className="ml-2 tabular-nums text-[var(--color-ink)]">{dailySummary.plannedTotals.caloriesKcal} kcal</span>
+              </div>
+              <div className="rounded-xl bg-[var(--color-card-muted)] px-3 py-2">
+                <span className="font-semibold text-[var(--color-muted-strong)]">Skipped</span>
+                <span className="ml-2 tabular-nums text-[var(--color-ink)]">{dailySummary.skippedTotals.caloriesKcal} kcal</span>
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -615,6 +884,16 @@ export function DashboardShell({
                 <line x1="11.5" y1="11.5" x2="15" y2="15" />
               </svg>
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setGroupError(null);
+                setShowGroupManager((open) => !open);
+              }}
+              className="flex h-9 items-center rounded-xl px-3 text-xs font-semibold text-[var(--color-muted)] transition hover:bg-[var(--color-card-muted)] hover:text-[var(--color-ink)]"
+            >
+              Groups
+            </button>
             {!isExperimental ? (
               <AddFoodButton
                 onCustom={addCustomDraft}
@@ -659,8 +938,88 @@ export function DashboardShell({
           </div>
         ) : null}
 
-        <div className="space-y-3">
-          {drafts.map((draft) => {
+        {showGroupManager ? (
+          <div className="mb-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
+                Meal Groups
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowGroupManager(false)}
+                className="text-xs font-semibold text-[var(--color-muted)] hover:text-[var(--color-ink)]"
+              >
+                Done
+              </button>
+            </div>
+            <div className="space-y-2">
+              {localMealGroups.map((group) => (
+                <div key={group.id} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    defaultValue={group.label}
+                    disabled={groupMutationId === group.id}
+                    onBlur={(event) => {
+                      if (event.target.value.trim() !== group.label) {
+                        void handleRenameMealGroup(group.id, event.target.value);
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.currentTarget.blur();
+                      }
+                    }}
+                    className="min-w-0 flex-1 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)] disabled:opacity-60"
+                  />
+                  <button
+                    type="button"
+                    disabled={groupMutationId === group.id}
+                    onClick={() => void handleDeleteMealGroup(group.id)}
+                    className="rounded-xl px-3 py-2 text-xs font-semibold text-[var(--color-danger)] transition hover:bg-[color-mix(in_srgb,var(--color-danger)_10%,transparent)] disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <input
+                type="text"
+                value={newGroupLabel}
+                onChange={(event) => setNewGroupLabel(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    void handleCreateMealGroup();
+                  }
+                }}
+                placeholder="New group"
+                className="min-w-0 flex-1 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
+              />
+              <button
+                type="button"
+                disabled={!newGroupLabel.trim() || groupMutationId === "new"}
+                onClick={() => void handleCreateMealGroup()}
+                className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+            {groupError ? (
+              <p className="mt-3 text-sm text-[var(--color-danger)]">{groupError}</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="space-y-5">
+          {[...groupedDrafts, { group: null, drafts: ungroupedDrafts }].map(({ group, drafts: groupDrafts }) => {
+            if (groupDrafts.length === 0) return null;
+            return (
+              <div key={group?.id ?? "ungrouped"} className="space-y-2">
+                <h3 className="px-1 text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
+                  {group?.label ?? "Ungrouped"}
+                </h3>
+                <div className="space-y-3">
+                  {groupDrafts.map((draft) => {
             const busy = isPending && activeMutation === draft.clientId;
 
             return (
@@ -670,12 +1029,20 @@ export function DashboardShell({
                 busy={busy}
                 error={errors[draft.clientId]}
                 isCopied={copiedCardIds.has(draft.clientId)}
+                mealGroups={localMealGroups}
                 onChange={updateDraft}
                 onSave={handleSave}
                 onDelete={handleDelete}
                 onDuplicate={handleDuplicate}
+                onGroupChange={handleGroupChange}
+                onStatusChange={handleStatusChange}
                 onCopyToToday={isViewingToday ? undefined : handleCopyToToday}
+                onDiscardChanges={discardDraftChanges}
               />
+            );
+                  })}
+                </div>
+              </div>
             );
           })}
         </div>
@@ -752,7 +1119,11 @@ export function DashboardShell({
               ...currentDrafts,
               {
                 clientId: `draft-${crypto.randomUUID()}`,
+                status: defaultEntryStatus,
                 label: macros.label,
+                quantity: "1",
+                unit: "serving",
+                servingMultiplier: "1",
                 proteinG: String(macros.proteinG),
                 carbsG: String(macros.carbsG),
                 fatG: String(macros.fatG),
@@ -794,7 +1165,11 @@ export function DashboardShell({
               ...currentDrafts,
               {
                 clientId: `draft-${crypto.randomUUID()}`,
+                status: defaultEntryStatus,
                 label: macros.label,
+                quantity: "1",
+                unit: "serving",
+                servingMultiplier: "1",
                 proteinG: String(macros.proteinG),
                 carbsG: String(macros.carbsG),
                 fatG: String(macros.fatG),

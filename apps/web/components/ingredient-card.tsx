@@ -1,8 +1,14 @@
 "use client";
 
+import type { QuantityUnit } from "@macro-tracker/db";
+
 type IngredientDraft = {
   clientId: string;
+  productId?: string | null;
   label: string;
+  quantity?: string;
+  unit?: QuantityUnit;
+  servingMultiplier?: string;
   proteinG: string;
   carbsG: string;
   fatG: string;

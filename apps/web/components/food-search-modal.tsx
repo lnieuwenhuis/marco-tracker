@@ -1,9 +1,9 @@
 "use client";
 
-import type { MealEntryRecord } from "@macro-tracker/db";
+import type { FoodProduct, MealEntryRecord } from "@macro-tracker/db";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { saveMealEntryAction, searchMealEntriesAction } from "@/lib/actions";
+import { saveMealEntryAction, searchFoodProductsAction, searchMealEntriesAction } from "@/lib/actions";
 import { getDailyMutationCacheKeys } from "@/lib/app-warmup";
 import { formatSelectedDate } from "@/lib/formatting";
 import { getLocalDateString } from "@/lib/startup-date";
@@ -18,6 +18,7 @@ type FoodSearchModalProps = {
 export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MealEntryRecord[]>([]);
+  const [products, setProducts] = useState<FoodProduct[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
@@ -60,10 +61,15 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
         if (cancelled) return;
         if (result.ok && result.results) {
           setResults(result.results);
+          const productResult = await searchFoodProductsAction({ query: query.trim() });
+          if (!cancelled && productResult.ok && productResult.products) {
+            setProducts(productResult.products);
+          }
           setError(null);
         } else {
           setError(result.error ?? "Search failed.");
           setResults([]);
+          setProducts([]);
         }
       } finally {
         if (!cancelled) setIsSearching(false);
@@ -99,6 +105,40 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
             return next;
           });
         }, 2500);
+        return;
+      }
+
+      setError(result.error ?? "Unable to add this food to today.");
+    } finally {
+      setCopyingId(null);
+    }
+  }
+
+  async function handleAddProduct(product: FoodProduct) {
+    setCopyingId(product.id);
+    setError(null);
+    try {
+      const quantity = product.defaultServingQuantity || 1;
+      const base =
+        product.defaultServingUnit === "g" || product.defaultServingUnit === "ml"
+          ? quantity / 100
+          : ((product.servingWeightG ?? product.servingVolumeMl ?? 100) * quantity) / 100;
+      const result = await saveMealEntryAction({
+        date: todayStr,
+        status: "eaten",
+        productId: product.id,
+        label: product.brand ? `${product.name} (${product.brand})` : product.name,
+        quantity,
+        unit: product.defaultServingUnit,
+        proteinG: Math.round(product.proteinPer100 * base * 10) / 10,
+        carbsG: Math.round(product.carbsPer100 * base * 10) / 10,
+        fatG: Math.round(product.fatPer100 * base * 10) / 10,
+        caloriesKcal: Math.round(product.caloriesPer100 * base),
+      });
+
+      if (result.ok) {
+        invalidateAppDataCache(getDailyMutationCacheKeys(todayStr));
+        setCopiedIds((prev) => new Set([...prev, product.id]));
         return;
       }
 
@@ -178,10 +218,41 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
         )}
 
         {/* No results */}
-        {query.trim() && !isSearching && results.length === 0 && !error && (
+        {query.trim() && !isSearching && results.length === 0 && products.length === 0 && !error && (
           <p className="py-4 text-center text-sm text-[var(--color-muted)]">
             No food items found for &ldquo;{query}&rdquo;.
           </p>
+        )}
+
+        {products.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
+              Products
+            </p>
+            {products.map((product) => (
+              <div
+                key={product.id}
+                className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-card-subtle)] px-3 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-[var(--color-ink)]">
+                    {product.name}
+                  </p>
+                  <p className="text-[10px] text-[var(--color-muted)]">
+                    {product.brand || product.scope} · {product.caloriesPer100} kcal / 100
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddProduct(product)}
+                  disabled={copyingId === product.id || copiedIds.has(product.id)}
+                  className="rounded-lg bg-[var(--color-accent)] px-3 py-1 text-xs font-semibold text-white transition hover:-translate-y-0.5 disabled:opacity-70"
+                >
+                  {copiedIds.has(product.id) ? "Added" : "Add"}
+                </button>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* Results */}
