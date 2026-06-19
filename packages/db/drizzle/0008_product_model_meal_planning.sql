@@ -97,10 +97,10 @@ WHERE NOT EXISTS (
   SELECT 1 FROM "meal_groups" WHERE "meal_groups"."user_id" = "users"."id"
 );
 --> statement-breakpoint
-WITH legacy_foods AS (
+WITH legacy_food_candidates AS (
   SELECT DISTINCT
     "meal_entries"."user_id" AS owner_user_id,
-    "meal_entries"."label" AS name,
+    trim("meal_entries"."label") AS name,
     "meal_entries"."protein_g" AS protein_per_100,
     "meal_entries"."carbs_g" AS carbs_per_100,
     "meal_entries"."fat_g" AS fat_per_100,
@@ -114,6 +114,18 @@ WITH legacy_foods AS (
       "meal_entries"."calories_kcal"::text
     ) AS hash
   FROM "meal_entries"
+),
+legacy_foods AS (
+  SELECT DISTINCT ON (hash)
+    owner_user_id,
+    name,
+    protein_per_100,
+    carbs_per_100,
+    fat_per_100,
+    calories_per_100,
+    hash
+  FROM legacy_food_candidates
+  ORDER BY hash, name
 )
 INSERT INTO "food_products" (
   "id",
@@ -144,12 +156,13 @@ SELECT
   fat_per_100,
   calories_per_100,
   '100'
-FROM legacy_foods;
+FROM legacy_foods
+ON CONFLICT ("id") DO NOTHING;
 --> statement-breakpoint
-WITH legacy_ingredients AS (
+WITH legacy_ingredient_candidates AS (
   SELECT DISTINCT
     "recipes"."user_id" AS owner_user_id,
-    "recipe_ingredients"."label" AS name,
+    trim("recipe_ingredients"."label") AS name,
     "recipe_ingredients"."protein_g" AS protein_per_100,
     "recipe_ingredients"."carbs_g" AS carbs_per_100,
     "recipe_ingredients"."fat_g" AS fat_per_100,
@@ -164,6 +177,18 @@ WITH legacy_ingredients AS (
     ) AS hash
   FROM "recipe_ingredients"
   INNER JOIN "recipes" ON "recipes"."id" = "recipe_ingredients"."recipe_id"
+),
+legacy_ingredients AS (
+  SELECT DISTINCT ON (hash)
+    owner_user_id,
+    name,
+    protein_per_100,
+    carbs_per_100,
+    fat_per_100,
+    calories_per_100,
+    hash
+  FROM legacy_ingredient_candidates
+  ORDER BY hash, name
 )
 INSERT INTO "food_products" (
   "id",
@@ -204,7 +229,8 @@ WHERE NOT EXISTS (
     substr(legacy_ingredients.hash, 17, 4) || '-' ||
     substr(legacy_ingredients.hash, 21, 12)
   )::uuid
-);
+)
+ON CONFLICT ("id") DO NOTHING;
 --> statement-breakpoint
 UPDATE "recipe_ingredients"
 SET "product_id" = (
