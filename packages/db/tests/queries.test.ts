@@ -12,10 +12,12 @@ import {
   getPeriodAverages,
   getRecipeById,
   getRecentQuickAddCandidates,
+  getStatsPageData,
   lookupCustomBarcodeProduct,
   markMealEntryStatus,
   resolveProductNutritionForQuantity,
   saveCustomBarcodeProduct,
+  saveUserGoals,
   searchFoodProducts,
   updateRecipe,
   updateMealEntry,
@@ -249,6 +251,47 @@ describe("database queries", () => {
     expect(month?.averages.caloriesKcal).toBe(385);
     expect(rolling7?.loggedDays).toBe(2);
     expect(rolling30?.loggedDays).toBe(3);
+  });
+
+  it("does not count calorie overshoots as goal hits", async () => {
+    await saveUserGoals(
+      userId,
+      {
+        caloriesKcal: 2000,
+        proteinG: null,
+        carbsG: null,
+        fatG: null,
+      },
+      runtime.db,
+    );
+    await createMealEntry(
+      userId,
+      {
+        date: "2026-03-18",
+        label: "Target day",
+        proteinG: 120,
+        carbsG: 220,
+        fatG: 70,
+        caloriesKcal: 2000,
+      },
+      runtime.db,
+    );
+    await createMealEntry(
+      userId,
+      {
+        date: "2026-03-19",
+        label: "Overshoot day",
+        proteinG: 150,
+        carbsG: 300,
+        fatG: 90,
+        caloriesKcal: 2300,
+      },
+      runtime.db,
+    );
+
+    const stats = await getStatsPageData(userId, "2026-03-19", runtime.db);
+
+    expect(stats.goalHitRates.days7.caloriesKcal).toBe(50);
   });
 
   it("creates, updates, and deletes meal entries while keeping totals in sync", async () => {

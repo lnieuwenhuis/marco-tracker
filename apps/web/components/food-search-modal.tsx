@@ -98,6 +98,9 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
 
       if (result.ok) {
         invalidateAppDataCache(getDailyMutationCacheKeys(todayStr));
+        if (result.entry) {
+          onEntrySaved?.(result.entry);
+        }
         setCopiedIds((prev) => new Set([...prev, entry.id]));
         setTimeout(() => {
           setCopiedIds((prev) => {

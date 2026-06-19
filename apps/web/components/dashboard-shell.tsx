@@ -82,6 +82,19 @@ function upsertSavedMeal(meals: MealEntryRecord[], entry: MealEntryRecord) {
   return meals.map((meal) => (meal.id === entry.id ? entry : meal));
 }
 
+function reconcileDraftsWithSavedMeals(
+  currentDrafts: MealDraft[],
+  meals: MealEntryRecord[],
+) {
+  const savedDrafts = meals.map((meal) => {
+    const existingDraft = currentDrafts.find((draft) => draft.id === meal.id);
+    return mealToDraftWithClientId(meal, existingDraft?.clientId ?? meal.id);
+  });
+  const unsavedDrafts = currentDrafts.filter((draft) => !draft.id);
+
+  return [...savedDrafts, ...unsavedDrafts];
+}
+
 function createEmptyDraft(sortOrder: number, status: MealEntryStatus): MealDraft {
   return {
     clientId: `draft-${crypto.randomUUID()}`,
@@ -157,6 +170,7 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const router = useRouter();
   const composeHandledRef = useRef<string | null>(null);
+  const selectedDateRef = useRef(selectedDate);
   const [drafts, setDrafts] = useState<MealDraft[]>(() =>
     dailySummary.meals.map(mealToDraft),
   );
@@ -191,7 +205,15 @@ export function DashboardShell({
 
   useEffect(() => {
     setSavedMeals(dailySummary.meals);
-  }, [dailySummary.meals]);
+    setDrafts((currentDrafts) => {
+      if (selectedDateRef.current !== selectedDate) {
+        return dailySummary.meals.map(mealToDraft);
+      }
+
+      return reconcileDraftsWithSavedMeals(currentDrafts, dailySummary.meals);
+    });
+    selectedDateRef.current = selectedDate;
+  }, [dailySummary.meals, selectedDate]);
 
   // Tracks cards that were recently copied to today so the button can give
   // brief visual confirmation before returning to its normal state.
@@ -343,6 +365,17 @@ export function DashboardShell({
         return;
       }
 
+      if (result.entry) {
+        const savedEntry = result.entry;
+        setSavedMeals((meals) => upsertSavedMeal(meals, savedEntry));
+        setDrafts((currentDrafts) =>
+          currentDrafts.map((item) =>
+            item.clientId === clientId
+              ? mealToDraftWithClientId(savedEntry, clientId)
+              : item,
+          ),
+        );
+      }
       invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
       router.refresh();
     });
@@ -539,6 +572,8 @@ export function DashboardShell({
         return;
       }
 
+      setSavedMeals((meals) => meals.filter((meal) => meal.id !== draft.id));
+      removeLocalDraft(clientId);
       invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
       router.refresh();
     });
@@ -571,11 +606,23 @@ export function DashboardShell({
         return;
       }
 
-      setDrafts((currentDrafts) =>
-        currentDrafts.map((item) =>
-          item.clientId === clientId ? { ...item, status } : item,
-        ),
-      );
+      if (result.entry) {
+        const savedEntry = result.entry;
+        setSavedMeals((meals) => upsertSavedMeal(meals, savedEntry));
+        setDrafts((currentDrafts) =>
+          currentDrafts.map((item) =>
+            item.clientId === clientId
+              ? mealToDraftWithClientId(savedEntry, clientId)
+              : item,
+          ),
+        );
+      } else {
+        setDrafts((currentDrafts) =>
+          currentDrafts.map((item) =>
+            item.clientId === clientId ? { ...item, status } : item,
+          ),
+        );
+      }
       invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
       router.refresh();
     });

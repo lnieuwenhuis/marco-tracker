@@ -1548,16 +1548,23 @@ export async function getStatsPageData(
   };
   const hitRatesForDays = (days: number) => {
     const windowRows = allDailyTotals.slice(-days);
-    const rate = (field: keyof MacroNumbers, goal: number | null) => {
-      if (!goal || windowRows.length === 0) return null;
+    const minimumRate = (field: keyof MacroNumbers, goal: number | null) => {
+      if (goal == null || goal <= 0 || windowRows.length === 0) return null;
       const hits = windowRows.filter((row) => row[field] >= goal * 0.9).length;
       return Math.round((hits / windowRows.length) * 100);
     };
+    const targetBandRate = (field: keyof MacroNumbers, goal: number | null) => {
+      if (goal == null || goal <= 0 || windowRows.length === 0) return null;
+      const hits = windowRows.filter(
+        (row) => row[field] >= goal * 0.9 && row[field] <= goal * 1.1,
+      ).length;
+      return Math.round((hits / windowRows.length) * 100);
+    };
     return {
-      proteinG: rate("proteinG", goals.proteinG),
-      carbsG: rate("carbsG", goals.carbsG),
-      fatG: rate("fatG", goals.fatG),
-      caloriesKcal: rate("caloriesKcal", goals.caloriesKcal),
+      proteinG: minimumRate("proteinG", goals.proteinG),
+      carbsG: minimumRate("carbsG", goals.carbsG),
+      fatG: minimumRate("fatG", goals.fatG),
+      caloriesKcal: targetBandRate("caloriesKcal", goals.caloriesKcal),
     };
   };
   const calorieDeviationRows =

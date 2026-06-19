@@ -539,9 +539,24 @@ export async function logRecipePortionAction(
       Number.isFinite(input.portionCount) && (input.portionCount ?? 0) > 0
         ? input.portionCount!
         : 1;
+    const gramsConsumed = input.gramsConsumed ?? null;
+    if (
+      gramsConsumed != null &&
+      (!Number.isFinite(gramsConsumed) || gramsConsumed <= 0)
+    ) {
+      throw new Error("Grams consumed must be greater than 0.");
+    }
+    if (
+      gramsConsumed != null &&
+      (recipe.totalCookedWeightG == null || recipe.totalCookedWeightG <= 0)
+    ) {
+      throw new Error("Recipe cooked weight is required to log grams.");
+    }
+
+    const hasGramsConsumed = gramsConsumed != null;
     const factor =
-      input.gramsConsumed && recipe.totalCookedWeightG
-        ? (input.gramsConsumed / recipe.totalCookedWeightG) * recipe.portions
+      hasGramsConsumed
+        ? (gramsConsumed / recipe.totalCookedWeightG!) * recipe.portions
         : portionCount;
 
     await createMealEntry(sessionUser.userId, {
@@ -550,11 +565,11 @@ export async function logRecipePortionAction(
         input.status ??
         (input.date > getLocalDateString() ? "planned" : "eaten"),
       label:
-        input.gramsConsumed && recipe.totalCookedWeightG
-          ? `${recipe.label} (${input.gramsConsumed}g)`
+        hasGramsConsumed
+          ? `${recipe.label} (${gramsConsumed}g)`
           : `${recipe.label} (${portionCount} portion${portionCount === 1 ? "" : "s"})`,
-      quantity: input.gramsConsumed ?? portionCount,
-      unit: input.gramsConsumed ? "g" : "serving",
+      quantity: gramsConsumed ?? portionCount,
+      unit: hasGramsConsumed ? "g" : "serving",
       proteinG: Math.round(recipe.perPortionMacros.proteinG * factor * 10) / 10,
       carbsG: Math.round(recipe.perPortionMacros.carbsG * factor * 10) / 10,
       fatG: Math.round(recipe.perPortionMacros.fatG * factor * 10) / 10,

@@ -62,6 +62,7 @@ import {
   deleteRecipeAction,
   deleteWeightEntryAction,
   fetchLeaderboardStatsAction,
+  logRecipePortionAction,
 } from "@/lib/actions";
 
 describe("server actions", () => {
@@ -156,4 +157,43 @@ describe("server actions", () => {
     expect(result).toEqual({ ok: false, error });
     expect(mocked.revalidatePath).not.toHaveBeenCalled();
   });
+
+  it.each([0, -10, Number.NaN])(
+    "rejects invalid recipe grams before creating a meal",
+    async (gramsConsumed) => {
+      mocked.getRecipeById.mockResolvedValue({
+        id: "recipe-1",
+        userId: "user-1",
+        label: "Rice bowl",
+        portions: 4,
+        totalCookedWeightG: 800,
+        perPortionMacros: {
+          proteinG: 20,
+          carbsG: 60,
+          fatG: 10,
+          caloriesKcal: 420,
+        },
+        totalMacros: {
+          proteinG: 80,
+          carbsG: 240,
+          fatG: 40,
+          caloriesKcal: 1680,
+        },
+        ingredients: [],
+      });
+
+      const result = await logRecipePortionAction({
+        recipeId: "recipe-1",
+        date: "2026-05-10",
+        gramsConsumed,
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        error: "Grams consumed must be greater than 0.",
+      });
+      expect(mocked.createMealEntry).not.toHaveBeenCalled();
+      expect(mocked.revalidatePath).not.toHaveBeenCalled();
+    },
+  );
 });

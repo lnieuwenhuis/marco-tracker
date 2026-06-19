@@ -30,6 +30,22 @@ export function RecipeCard({ recipe, selectedDate }: RecipeCardProps) {
 
   function handleLogPortion() {
     setError(null);
+    const parsedPortionCount = Number(portionCount);
+    const safePortionCount =
+      Number.isFinite(parsedPortionCount) && parsedPortionCount > 0
+        ? parsedPortionCount
+        : 1;
+    const trimmedGrams = gramsConsumed.trim();
+    const parsedGrams = trimmedGrams ? Number(trimmedGrams) : null;
+
+    if (
+      parsedGrams != null &&
+      (!Number.isFinite(parsedGrams) || parsedGrams <= 0)
+    ) {
+      setError("Enter grams greater than 0.");
+      return;
+    }
+
     startTransition(async () => {
       const status: MealEntryStatus =
         selectedDate > getLocalDateString() ? "planned" : "eaten";
@@ -37,8 +53,8 @@ export function RecipeCard({ recipe, selectedDate }: RecipeCardProps) {
         recipeId: recipe.id,
         date: selectedDate,
         status,
-        portionCount: Number(portionCount) || 1,
-        gramsConsumed: gramsConsumed.trim() ? Number(gramsConsumed) : null,
+        portionCount: safePortionCount,
+        gramsConsumed: parsedGrams,
       });
       if (!result.ok) {
         setError(result.error ?? "Unable to log portion.");
@@ -252,7 +268,8 @@ export function RecipeCard({ recipe, selectedDate }: RecipeCardProps) {
                 <input
                   type="number"
                   inputMode="decimal"
-                  min="0"
+                  min="0.1"
+                  step="any"
                   value={gramsConsumed}
                   onChange={(event) => setGramsConsumed(event.target.value)}
                   placeholder="Optional"
