@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { saveMealEntryAction, searchFoodProductsAction, searchMealEntriesAction } from "@/lib/actions";
 import { getDailyMutationCacheKeys } from "@/lib/app-warmup";
 import { formatSelectedDate } from "@/lib/formatting";
+import { buildMealEntryCopyInput } from "@/lib/meal-entry-copy";
 import { getLocalDateString } from "@/lib/startup-date";
 import { invalidateAppDataCache } from "./app-data-cache";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
@@ -91,14 +92,9 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
     setCopyingId(entry.id);
     setError(null);
     try {
-      const result = await saveMealEntryAction({
-        date: todayStr,
-        label: entry.label,
-        proteinG: entry.proteinG,
-        carbsG: entry.carbsG,
-        fatG: entry.fatG,
-        caloriesKcal: entry.caloriesKcal,
-      });
+      const result = await saveMealEntryAction(
+        buildMealEntryCopyInput(entry, todayStr),
+      );
 
       if (result.ok) {
         invalidateAppDataCache(getDailyMutationCacheKeys(todayStr));

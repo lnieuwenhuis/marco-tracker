@@ -507,6 +507,7 @@ export function DashboardShell({
       }
 
       invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
+      router.refresh();
     } finally {
       setSavingClientId(null);
     }
