@@ -737,40 +737,6 @@ export async function createPersonalFoodProduct(
   return mapFoodProductRow(created);
 }
 
-async function createGlobalFoodProduct(
-  input: FoodProductInput,
-  db: DatabaseClient,
-): Promise<FoodProduct> {
-  const normalized = validateFoodProductInput({
-    ...input,
-    scope: "global",
-  });
-
-  const [created] = await db
-    .insert(foodProducts)
-    .values({
-      id: crypto.randomUUID(),
-      ownerUserId: null,
-      scope: normalized.scope,
-      source: normalized.source,
-      barcode: normalized.barcode,
-      name: normalized.name,
-      brand: normalized.brand ?? "",
-      defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
-      defaultServingUnit: normalized.defaultServingUnit,
-      proteinPer100: normalized.proteinPer100.toFixed(2),
-      carbsPer100: normalized.carbsPer100.toFixed(2),
-      fatPer100: normalized.fatPer100.toFixed(2),
-      caloriesPer100: normalized.caloriesPer100,
-      servingWeightG: normalized.servingWeightG?.toFixed(2) ?? null,
-      servingVolumeMl: normalized.servingVolumeMl?.toFixed(2) ?? null,
-      updatedAt: new Date(),
-    })
-    .returning();
-
-  return mapFoodProductRow(created);
-}
-
 async function getFoodProductByIdForUser(
   userId: string,
   productId: string,
@@ -800,6 +766,23 @@ async function getFoodProductByIdForUser(
     .limit(1);
 
   return row ? mapFoodProductRow(row) : null;
+}
+
+async function assertFoodProductsAccessibleForUser(
+  userId: string,
+  productIds: Array<string | null | undefined>,
+  db: DatabaseClient,
+) {
+  const uniqueProductIds = Array.from(
+    new Set(productIds.filter((productId): productId is string => Boolean(productId))),
+  );
+
+  for (const productId of uniqueProductIds) {
+    const product = await getFoodProductByIdForUser(userId, productId, db);
+    if (!product) {
+      throw new Error("Food product not found.");
+    }
+  }
 }
 
 async function assertMealGroupAccessibleForUser(
@@ -2087,6 +2070,12 @@ export async function createRecipe(
   const recipeId = crypto.randomUUID();
 
   return (database as any).transaction(async (tx: any) => {
+    await assertFoodProductsAccessibleForUser(
+      userId,
+      validated.ingredients.map((ingredient) => ingredient.productId),
+      tx,
+    );
+
     const [created] = await tx
       .insert(recipes)
       .values({
@@ -2153,6 +2142,12 @@ export async function updateRecipe(
     if (!existing) {
       throw new Error("Recipe not found.");
     }
+
+    await assertFoodProductsAccessibleForUser(
+      userId,
+      validated.ingredients.map((ingredient) => ingredient.productId),
+      tx,
+    );
 
     const [updatedRecipe] = await tx
       .update(recipes)
@@ -2330,6 +2325,111 @@ function mapBarcodeProductRow(row: {
   };
 }
 
+type BarcodeFoodProductSyncRow = {
+  barcode: string;
+  name: string;
+  brands: string;
+  proteinG: string | number;
+  carbsG: string | number;
+  fatG: string | number;
+  caloriesKcal: string | number;
+  servingSizeG: string | number | null;
+  deletedAt?: Date | string | null;
+};
+
+function normalizeBarcodeProductDeletedAt(value: Date | string | null | undefined) {
+  return typeof value === "string" ? new Date(value) : value ?? null;
+}
+
+function barcodeFoodProductValues(
+  row: BarcodeFoodProductSyncRow,
+  updatedAt = new Date(),
+) {
+  return {
+    ownerUserId: null,
+    scope: "global",
+    source: "barcode",
+    barcode: row.barcode.trim(),
+    name: row.name.trim(),
+    brand: row.brands.trim(),
+    defaultServingQuantity: "1.00",
+    defaultServingUnit: "serving",
+    proteinPer100: toNumber(row.proteinG).toFixed(2),
+    carbsPer100: toNumber(row.carbsG).toFixed(2),
+    fatPer100: toNumber(row.fatG).toFixed(2),
+    caloriesPer100: Math.round(toNumber(row.caloriesKcal)),
+    servingWeightG:
+      row.servingSizeG != null ? toNumber(row.servingSizeG).toFixed(2) : "100.00",
+    servingVolumeMl: null,
+    updatedAt,
+    deletedAt: normalizeBarcodeProductDeletedAt(row.deletedAt),
+  };
+}
+
+async function syncGlobalBarcodeFoodProduct(
+  row: BarcodeFoodProductSyncRow,
+  db: DatabaseClient,
+  previousBarcode?: string,
+) {
+  const barcode = row.barcode.trim();
+  const oldBarcode = previousBarcode?.trim();
+  const lookupBarcodes =
+    oldBarcode && oldBarcode !== barcode ? [oldBarcode, barcode] : [barcode];
+  const existingRows = await db
+    .select({
+      id: foodProducts.id,
+      barcode: foodProducts.barcode,
+    })
+    .from(foodProducts)
+    .where(
+      and(
+        isNull(foodProducts.ownerUserId),
+        eq(foodProducts.source, "barcode"),
+        inArray(foodProducts.barcode, lookupBarcodes),
+      ),
+    );
+  const target =
+    oldBarcode && oldBarcode !== barcode
+      ? existingRows.find((existing) => existing.barcode === oldBarcode) ??
+        existingRows.find((existing) => existing.barcode === barcode)
+      : existingRows.find((existing) => existing.barcode === barcode);
+  const values = barcodeFoodProductValues(row);
+
+  let targetId = target?.id ?? null;
+  if (targetId) {
+    await db.update(foodProducts).set(values).where(eq(foodProducts.id, targetId));
+  } else {
+    const [created] = await db
+      .insert(foodProducts)
+      .values({
+        id: crypto.randomUUID(),
+        ...values,
+      })
+      .returning();
+    targetId = created?.id ?? null;
+  }
+
+  if (!targetId) {
+    throw new Error("Unable to sync barcode food product.");
+  }
+
+  const duplicateDeletedAt = normalizeBarcodeProductDeletedAt(row.deletedAt) ?? new Date();
+  await db
+    .update(foodProducts)
+    .set({
+      deletedAt: duplicateDeletedAt,
+      updatedAt: duplicateDeletedAt,
+    })
+    .where(
+      and(
+        isNull(foodProducts.ownerUserId),
+        eq(foodProducts.source, "barcode"),
+        inArray(foodProducts.barcode, lookupBarcodes),
+        ne(foodProducts.id, targetId),
+      ),
+    );
+}
+
 export async function lookupCustomBarcodeProduct(
   barcode: string,
   db?: DatabaseClient,
@@ -2357,45 +2457,35 @@ export async function saveCustomBarcodeProduct(
 ): Promise<CustomBarcodeProduct> {
   const database = await resolveDb(db);
 
-  const [created] = await database
-    .insert(barcodeProducts)
-    .values({
-      id: crypto.randomUUID(),
-      barcode: input.barcode.trim(),
-      name: input.name.trim(),
-      brands: input.brands.trim(),
-      proteinG: input.proteinG.toFixed(1),
-      carbsG: input.carbsG.toFixed(1),
-      fatG: input.fatG.toFixed(1),
-      caloriesKcal: Math.round(input.caloriesKcal),
-      servingSizeG:
-        input.servingSizeG != null ? input.servingSizeG.toFixed(1) : null,
-      addedByUserId,
-      updatedAt: new Date(),
-      deletedAt: null,
-      deletedByUserId: null,
-    })
-    .returning();
+  return (database as any).transaction(async (tx: any) => {
+    const [created] = await tx
+      .insert(barcodeProducts)
+      .values({
+        id: crypto.randomUUID(),
+        barcode: input.barcode.trim(),
+        name: input.name.trim(),
+        brands: input.brands.trim(),
+        proteinG: input.proteinG.toFixed(1),
+        carbsG: input.carbsG.toFixed(1),
+        fatG: input.fatG.toFixed(1),
+        caloriesKcal: Math.round(input.caloriesKcal),
+        servingSizeG:
+          input.servingSizeG != null ? input.servingSizeG.toFixed(1) : null,
+        addedByUserId,
+        updatedAt: new Date(),
+        deletedAt: null,
+        deletedByUserId: null,
+      })
+      .returning();
 
-  await createGlobalFoodProduct(
-    {
-      scope: "global",
-      source: "barcode",
-      barcode: input.barcode,
-      name: input.name,
-      brand: input.brands,
-      defaultServingQuantity: 1,
-      defaultServingUnit: "serving",
-      proteinPer100: input.proteinG,
-      carbsPer100: input.carbsG,
-      fatPer100: input.fatG,
-      caloriesPer100: Math.round(input.caloriesKcal),
-      servingWeightG: input.servingSizeG ?? 100,
-    },
-    database,
-  );
+    if (!created) {
+      throw new Error("Unable to save barcode product.");
+    }
 
-  return mapBarcodeProductRow(created);
+    await syncGlobalBarcodeFoodProduct(created, tx);
+
+    return mapBarcodeProductRow(created);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3220,6 +3310,12 @@ export async function createAdminBarcodeProduct(
       })
       .returning();
 
+    if (!created) {
+      throw new Error("Unable to create barcode product.");
+    }
+
+    await syncGlobalBarcodeFoodProduct(created, tx);
+
     await insertAdminAuditEvent(tx, {
       actorUserId: actor.id,
       actorRole: actor.role,
@@ -3273,6 +3369,12 @@ export async function updateAdminBarcodeProduct(
       .where(eq(barcodeProducts.id, barcodeProductId))
       .returning();
 
+    if (!updated) {
+      throw new Error("Barcode product not found.");
+    }
+
+    await syncGlobalBarcodeFoodProduct(updated, tx, before.barcode);
+
     await insertAdminAuditEvent(tx, {
       actorUserId: actor.id,
       actorRole: actor.role,
@@ -3319,6 +3421,7 @@ export async function softDeleteAdminBarcodeProduct(
     }
 
     if (existing.deletedAt) {
+      await syncGlobalBarcodeFoodProduct(existing, tx);
       return existing;
     }
 
@@ -3332,6 +3435,12 @@ export async function softDeleteAdminBarcodeProduct(
       })
       .where(eq(barcodeProducts.id, barcodeProductId))
       .returning();
+
+    if (!updated) {
+      throw new Error("Barcode product not found.");
+    }
+
+    await syncGlobalBarcodeFoodProduct(updated, tx);
 
     await insertAdminAuditEvent(tx, {
       actorUserId: actor.id,
@@ -3369,6 +3478,7 @@ export async function restoreAdminBarcodeProduct(
     }
 
     if (!existing.deletedAt) {
+      await syncGlobalBarcodeFoodProduct(existing, tx);
       return existing;
     }
 
@@ -3381,6 +3491,12 @@ export async function restoreAdminBarcodeProduct(
       })
       .where(eq(barcodeProducts.id, barcodeProductId))
       .returning();
+
+    if (!updated) {
+      throw new Error("Barcode product not found.");
+    }
+
+    await syncGlobalBarcodeFoodProduct(updated, tx);
 
     await insertAdminAuditEvent(tx, {
       actorUserId: actor.id,

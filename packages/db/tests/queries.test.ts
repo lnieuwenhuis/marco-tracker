@@ -12,15 +12,17 @@ import {
   getPeriodAverages,
   getRecipeById,
   getRecentQuickAddCandidates,
+  lookupCustomBarcodeProduct,
   markMealEntryStatus,
   resolveProductNutritionForQuantity,
+  saveCustomBarcodeProduct,
   searchFoodProducts,
   updateRecipe,
   updateMealEntry,
   upsertUserFromShooProfile,
   type DatabaseRuntime,
 } from "../src";
-import { foodProducts, mealEntries, recipeIngredients, recipes } from "../src/schema";
+import { barcodeProducts, foodProducts, mealEntries, recipeIngredients, recipes } from "../src/schema";
 import { createTestDatabase } from "../src/testing";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -91,6 +93,34 @@ describe("database queries", () => {
                 if (ingredientInsertCount === failOnIngredientInsertNumber) {
                   throw new Error("Forced ingredient insert failure.");
                 }
+              }
+
+              return target.insert(table);
+            };
+          }
+
+          if (prop === "transaction") {
+            return async (callback: (tx: unknown) => unknown) =>
+              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
+          }
+
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }
+
+    return wrapClient(runtime.db as any);
+  }
+
+  function createFailingBarcodeFoodProductDb() {
+    function wrapClient(client: any) {
+      return new Proxy(client, {
+        get(target, prop, receiver) {
+          if (prop === "insert") {
+            return (table: unknown) => {
+              if (table === foodProducts) {
+                throw new Error("Forced barcode food product insert failure.");
               }
 
               return target.insert(table);
@@ -532,6 +562,189 @@ describe("database queries", () => {
     expect(summary.meals[0]?.sourceLabel).toBeNull();
   });
 
+  it("rejects inaccessible recipe ingredient products on create", async () => {
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's oats",
+        source: "manual",
+        proteinPer100: 12,
+        carbsPer100: 60,
+        fatPer100: 7,
+        caloriesPer100: 351,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      createRecipe(
+        userId,
+        {
+          label: "Cross-user recipe",
+          portions: 2,
+          ingredients: [
+            {
+              productId: otherProduct.id,
+              label: "Oats",
+              proteinG: 12,
+              carbsG: 60,
+              fatG: 7,
+              caloriesKcal: 351,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const deletedProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Deleted recipe product",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+    await runtime.db
+      .update(foodProducts)
+      .set({ deletedAt: new Date() })
+      .where(eq(foodProducts.id, deletedProduct.id));
+
+    await expect(
+      createRecipe(
+        userId,
+        {
+          label: "Deleted product recipe",
+          portions: 2,
+          ingredients: [
+            {
+              productId: deletedProduct.id,
+              label: "Deleted product",
+              proteinG: 10,
+              carbsG: 4,
+              fatG: 2,
+              caloriesKcal: 74,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    expect(await runtime.db.select().from(recipes)).toHaveLength(0);
+    expect(await runtime.db.select().from(recipeIngredients)).toHaveLength(0);
+  });
+
+  it("rejects inaccessible recipe ingredient products on update", async () => {
+    const original = await createRecipe(
+      userId,
+      {
+        label: "Original recipe",
+        portions: 2,
+        ingredients: [
+          {
+            label: "Eggs",
+            proteinG: 12,
+            carbsG: 1,
+            fatG: 10,
+            caloriesKcal: 140,
+          },
+        ],
+      },
+      runtime.db,
+    );
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's yogurt",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      updateRecipe(
+        userId,
+        original.id,
+        {
+          label: "Invalid update",
+          portions: 3,
+          ingredients: [
+            {
+              productId: otherProduct.id,
+              label: "Yogurt",
+              proteinG: 15,
+              carbsG: 6,
+              fatG: 3,
+              caloriesKcal: 111,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const deletedProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Deleted yogurt",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+    await runtime.db
+      .update(foodProducts)
+      .set({ deletedAt: new Date() })
+      .where(eq(foodProducts.id, deletedProduct.id));
+
+    await expect(
+      updateRecipe(
+        userId,
+        original.id,
+        {
+          label: "Invalid deleted update",
+          portions: 3,
+          ingredients: [
+            {
+              productId: deletedProduct.id,
+              label: "Deleted yogurt",
+              proteinG: 15,
+              carbsG: 6,
+              fatG: 3,
+              caloriesKcal: 111,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const stored = await getRecipeById(userId, original.id, runtime.db);
+    expect(stored).toMatchObject({
+      label: "Original recipe",
+      portions: 2,
+    });
+    expect(stored?.ingredients).toHaveLength(1);
+    expect(stored?.ingredients[0]).toMatchObject({
+      label: "Eggs",
+      productId: null,
+    });
+  });
+
   it("preserves manual macro edits for legacy product-linked meals", async () => {
     const legacyProduct = await createPersonalFoodProduct(
       userId,
@@ -695,6 +908,56 @@ describe("database queries", () => {
       carbsG: 6,
       fatG: 3,
       caloriesKcal: 111,
+    });
+  });
+
+  it("creates community barcode products and searchable food products atomically", async () => {
+    const input = {
+      barcode: "8712345000001",
+      name: "Community Protein Drink",
+      brands: "Macro Lab",
+      proteinG: 20,
+      carbsG: 8,
+      fatG: 2,
+      caloriesKcal: 130,
+      servingSizeG: 250,
+    };
+
+    await expect(
+      saveCustomBarcodeProduct(userId, input, createFailingBarcodeFoodProductDb()),
+    ).rejects.toThrow("Forced barcode food product insert failure.");
+
+    expect(await lookupCustomBarcodeProduct(input.barcode, runtime.db)).toBeNull();
+    expect(await runtime.db.select().from(barcodeProducts)).toHaveLength(0);
+    expect(await searchFoodProducts(userId, "Community Protein", runtime.db)).toEqual(
+      [],
+    );
+
+    const saved = await saveCustomBarcodeProduct(userId, input, runtime.db);
+    expect(saved).toMatchObject({
+      barcode: input.barcode,
+      name: input.name,
+      addedByUserId: userId,
+    });
+
+    const products = await searchFoodProducts(
+      userId,
+      "Community Protein",
+      runtime.db,
+    );
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({
+      ownerUserId: null,
+      scope: "global",
+      source: "barcode",
+      barcode: input.barcode,
+      name: input.name,
+      brand: input.brands,
+      proteinPer100: 20,
+      carbsPer100: 8,
+      fatPer100: 2,
+      caloriesPer100: 130,
+      servingWeightG: 250,
     });
   });
 

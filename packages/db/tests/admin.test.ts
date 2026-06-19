@@ -6,6 +6,7 @@ import {
   listAdminBarcodeProducts,
   listAdminUsers,
   lookupCustomBarcodeProduct,
+  searchFoodProducts,
   setUserRole,
   softDeleteAdminBarcodeProduct,
   restoreAdminBarcodeProduct,
@@ -120,12 +121,21 @@ describe("admin queries", () => {
     expect(await lookupCustomBarcodeProduct("9900000000001", runtime.db)).toMatchObject({
       name: "Admin Peanut Butter",
     });
+    expect(
+      await searchFoodProducts(userId, "Admin Peanut Butter", runtime.db),
+    ).toMatchObject([
+      {
+        barcode: "9900000000001",
+        name: "Admin Peanut Butter",
+        source: "barcode",
+      },
+    ]);
 
     const updated = await updateAdminBarcodeProduct(
       adminId,
       created.id,
       {
-        barcode: "9900000000001",
+        barcode: "9900000000002",
         name: "Admin Peanut Butter Deluxe",
         brands: "Macro Lab",
         proteinG: 26,
@@ -138,6 +148,25 @@ describe("admin queries", () => {
     );
 
     expect(updated.name).toBe("Admin Peanut Butter Deluxe");
+    expect(await lookupCustomBarcodeProduct("9900000000001", runtime.db)).toBeNull();
+    expect(await lookupCustomBarcodeProduct("9900000000002", runtime.db)).toMatchObject({
+      name: "Admin Peanut Butter Deluxe",
+    });
+    expect(await searchFoodProducts(userId, "Deluxe", runtime.db)).toMatchObject([
+      {
+        barcode: "9900000000002",
+        name: "Admin Peanut Butter Deluxe",
+        proteinPer100: 26,
+        carbsPer100: 17,
+        fatPer100: 49,
+        caloriesPer100: 615,
+      },
+    ]);
+    expect(
+      (await searchFoodProducts(userId, "Admin Peanut Butter", runtime.db)).map(
+        (product) => product.barcode,
+      ),
+    ).toEqual(["9900000000002"]);
 
     const deleted = await softDeleteAdminBarcodeProduct(
       adminId,
@@ -146,6 +175,8 @@ describe("admin queries", () => {
     );
     expect(deleted.status).toBe("deleted");
     expect(await lookupCustomBarcodeProduct("9900000000001", runtime.db)).toBeNull();
+    expect(await lookupCustomBarcodeProduct("9900000000002", runtime.db)).toBeNull();
+    expect(await searchFoodProducts(userId, "Deluxe", runtime.db)).toEqual([]);
 
     const deletedOnly = await listAdminBarcodeProducts(
       {
@@ -162,9 +193,15 @@ describe("admin queries", () => {
       runtime.db,
     );
     expect(restored.status).toBe("active");
-    expect(await lookupCustomBarcodeProduct("9900000000001", runtime.db)).toMatchObject({
+    expect(await lookupCustomBarcodeProduct("9900000000002", runtime.db)).toMatchObject({
       name: "Admin Peanut Butter Deluxe",
     });
+    expect(await searchFoodProducts(userId, "Deluxe", runtime.db)).toMatchObject([
+      {
+        barcode: "9900000000002",
+        name: "Admin Peanut Butter Deluxe",
+      },
+    ]);
 
     const detail = await getAdminBarcodeProductById(created.id, runtime.db);
     expect(detail?.deletedAt).toBeNull();

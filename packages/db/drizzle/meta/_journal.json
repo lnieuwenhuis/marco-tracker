@@ -64,6 +64,13 @@
       "when": 1780185600000,
       "tag": "0008_product_model_meal_planning",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781827200000,
+      "tag": "0009_sync_barcode_food_products",
+      "breakpoints": true
     }
   ]
 }

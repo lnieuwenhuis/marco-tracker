@@ -147,6 +147,9 @@ export function DashboardShell({
   const [drafts, setDrafts] = useState<MealDraft[]>(() =>
     dailySummary.meals.map(mealToDraft),
   );
+  const [savedMeals, setSavedMeals] = useState<MealEntryRecord[]>(
+    dailySummary.meals,
+  );
   const [errors, setErrors] = useState<ErrorState>({});
   const [activeMutation, setActiveMutation] = useState<string | null>(null);
   const [isPending, beginMutation] = useTransition();
@@ -171,6 +174,10 @@ export function DashboardShell({
 
   // AI photo estimate state
   const [showPhotoModal, setShowPhotoModal] = useState(false);
+
+  useEffect(() => {
+    setSavedMeals(dailySummary.meals);
+  }, [dailySummary.meals]);
 
   // Tracks cards that were recently copied to today so the button can give
   // brief visual confirmation before returning to its normal state.
@@ -254,7 +261,7 @@ export function DashboardShell({
 
   function isOnlyGroupDirty(draft: MealDraft, nextGroupId: string | null) {
     if (!draft.id) return false;
-    const saved = dailySummary.meals.find((meal) => meal.id === draft.id);
+    const saved = savedMeals.find((meal) => meal.id === draft.id);
     if (!saved) return false;
 
     const sameNumber = (draftValue: string, savedValue: number) =>
@@ -395,14 +402,20 @@ export function DashboardShell({
       return;
     }
 
-    const saved = dailySummary.meals.find((meal) => meal.id === draft.id);
+    const saved = savedMeals.find((meal) => meal.id === draft.id);
     if (!saved) {
       return;
     }
 
+    const knownGroupIds = new Set(localMealGroups.map((group) => group.id));
+    const restored = mealToDraft(saved);
+    if (restored.mealGroupId && !knownGroupIds.has(restored.mealGroupId)) {
+      restored.mealGroupId = null;
+    }
+
     setDrafts((currentDrafts) =>
       currentDrafts.map((currentDraft) =>
-        currentDraft.clientId === clientId ? mealToDraft(saved) : currentDraft,
+        currentDraft.clientId === clientId ? restored : currentDraft,
       ),
     );
     setErrors((currentErrors) => ({
@@ -656,7 +669,16 @@ export function DashboardShell({
         setLocalMealGroups(previousGroups);
         setDrafts(previousDrafts);
         setGroupError(result.error ?? "Unable to delete group.");
+        return;
       }
+
+      setSavedMeals((meals) =>
+        meals.map((meal) =>
+          meal.mealGroupId === groupId ? { ...meal, mealGroupId: null } : meal,
+        ),
+      );
+      invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
+      router.refresh();
     } finally {
       setGroupMutationId(null);
     }
@@ -664,11 +686,14 @@ export function DashboardShell({
 
   const isViewingToday = selectedDate === todayStr;
   const isExperimental = uiMode === "experimental";
+  const localMealGroupIds = new Set(localMealGroups.map((group) => group.id));
   const groupedDrafts = localMealGroups.map((group) => ({
     group,
     drafts: drafts.filter((draft) => draft.mealGroupId === group.id),
   }));
-  const ungroupedDrafts = drafts.filter((draft) => !draft.mealGroupId);
+  const ungroupedDrafts = drafts.filter(
+    (draft) => !draft.mealGroupId || !localMealGroupIds.has(draft.mealGroupId),
+  );
 
   function handleDuplicate(clientId: string) {
     setDrafts((currentDrafts) => {
