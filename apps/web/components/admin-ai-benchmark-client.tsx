@@ -64,6 +64,7 @@ function isFreshBaseline(value: unknown): value is MacroBenchmarkBaseline & {
   const record = value as Record<string, unknown>;
   const createdAt =
     typeof record.createdAt === "string" ? Date.parse(record.createdAt) : NaN;
+  const now = Date.now();
 
   return (
     typeof record.currentModel === "string" &&
@@ -71,11 +72,12 @@ function isFreshBaseline(value: unknown): value is MacroBenchmarkBaseline & {
     Array.isArray(record.fixtureIds) &&
     Array.isArray(record.results) &&
     Number.isFinite(createdAt) &&
-    Date.now() - createdAt <= BASELINE_TTL_MS
+    createdAt <= now &&
+    now - createdAt <= BASELINE_TTL_MS
   );
 }
 
-function readCachedBaseline(fixtureLimit: number) {
+export function readCachedBaseline(fixtureLimit: number, currentModel: string) {
   if (typeof window === "undefined") {
     return null;
   }
@@ -89,7 +91,11 @@ function readCachedBaseline(fixtureLimit: number) {
 
     try {
       const parsed = JSON.parse(window.localStorage.getItem(key) ?? "null");
-      if (!isFreshBaseline(parsed) || parsed.fixtureLimit !== fixtureLimit) {
+      if (
+        !isFreshBaseline(parsed) ||
+        parsed.fixtureLimit !== fixtureLimit ||
+        parsed.currentModel !== currentModel
+      ) {
         continue;
       }
 
@@ -107,6 +113,26 @@ function readCachedBaseline(fixtureLimit: number) {
   return newest;
 }
 
+export function shouldCacheBenchmarkBaseline(result: MacroBenchmarkResult) {
+  if (result.mode === "candidate_only" || !result.summaries.current) {
+    return false;
+  }
+
+  if (result.cases.length === 0) {
+    return false;
+  }
+
+  if (result.cases.some((item) => !item.current.ok)) {
+    return false;
+  }
+
+  return (
+    result.summaries.current.completedCases === result.cases.length &&
+    result.summaries.current.failedCases === 0 &&
+    result.summaries.current.skippedCases === 0
+  );
+}
+
 export function getBaselineCacheCreatedAt(
   result: Pick<MacroBenchmarkResult, "baselineCreatedAt" | "usedBaseline">,
   createdAt = new Date().toISOString(),
@@ -114,8 +140,30 @@ export function getBaselineCacheCreatedAt(
   return result.usedBaseline ? result.baselineCreatedAt : createdAt;
 }
 
+export function getBenchmarkCallCountText(params: {
+  cachedBaseline: MacroBenchmarkBaseline | null;
+  candidateOnly: boolean;
+  currentModel: string;
+  fixtureLimit: number;
+  model: string;
+}) {
+  if (params.candidateOnly) {
+    return `This run will make up to ${params.fixtureLimit} OpenRouter calls.`;
+  }
+
+  if (params.cachedBaseline?.currentModel === params.currentModel) {
+    if (params.model.trim() === params.currentModel) {
+      return "This run can use the cached baseline and may make 0 OpenRouter calls.";
+    }
+
+    return `This run will make up to ${params.fixtureLimit} OpenRouter calls using a cached baseline.`;
+  }
+
+  return `This run will make up to ${params.fixtureLimit * 2} OpenRouter calls. Same-model runs are deduplicated automatically.`;
+}
+
 function writeBaselineCache(result: MacroBenchmarkResult) {
-  if (typeof window === "undefined" || result.mode === "candidate_only") {
+  if (typeof window === "undefined" || !shouldCacheBenchmarkBaseline(result)) {
     return;
   }
 
@@ -255,7 +303,11 @@ function ResultCell({ result }: { result: MacroBenchmarkModelCaseResult }) {
   );
 }
 
-export function AdminAiBenchmarkClient() {
+export function AdminAiBenchmarkClient({
+  currentModel,
+}: {
+  currentModel: string;
+}) {
   const [model, setModel] = useState("");
   const [fixtureLimit, setFixtureLimit] = useState(4);
   const [reuseBaseline, setReuseBaseline] = useState(true);
@@ -265,25 +317,22 @@ export function AdminAiBenchmarkClient() {
   const [isRunning, setIsRunning] = useState(false);
 
   const cachedBaseline = useMemo(
-    () => (reuseBaseline && !candidateOnly ? readCachedBaseline(fixtureLimit) : null),
-    [candidateOnly, fixtureLimit, reuseBaseline],
+    () =>
+      reuseBaseline && !candidateOnly
+        ? readCachedBaseline(fixtureLimit, currentModel)
+        : null,
+    [candidateOnly, currentModel, fixtureLimit, reuseBaseline],
   );
 
   const callCountText = useMemo(() => {
-    if (candidateOnly) {
-      return `This run will make up to ${fixtureLimit} OpenRouter calls.`;
-    }
-
-    if (cachedBaseline) {
-      if (model.trim() === cachedBaseline.currentModel) {
-        return "This run can use the cached baseline and may make 0 OpenRouter calls.";
-      }
-
-      return `This run will make up to ${fixtureLimit} OpenRouter calls using a cached baseline.`;
-    }
-
-    return `This run will make up to ${fixtureLimit * 2} OpenRouter calls. Same-model runs are deduplicated automatically.`;
-  }, [cachedBaseline, candidateOnly, fixtureLimit, model]);
+    return getBenchmarkCallCountText({
+      cachedBaseline,
+      candidateOnly,
+      currentModel,
+      fixtureLimit,
+      model,
+    });
+  }, [cachedBaseline, candidateOnly, currentModel, fixtureLimit, model]);
 
   const verdict = useMemo(() => {
     if (!result || result.mode === "candidate_only") {
@@ -342,7 +391,9 @@ export function AdminAiBenchmarkClient() {
 
     try {
       const baseline =
-        reuseBaseline && !candidateOnly ? readCachedBaseline(fixtureLimit) : null;
+        reuseBaseline && !candidateOnly
+          ? readCachedBaseline(fixtureLimit, currentModel)
+          : null;
       const response = await fetch("/api/admin/ai-model-benchmark", {
         method: "POST",
         headers: {

@@ -448,6 +448,7 @@ export async function analyzeFoodPhoto(params: {
   forceReady?: boolean;
   maxAttempts?: number;
   model?: string;
+  signal?: AbortSignal;
   userId: string;
 }): Promise<AnalyzeFoodPhotoResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
@@ -586,6 +587,7 @@ export async function analyzeFoodPhoto(params: {
         "X-OpenRouter-Experimental-Metadata": "enabled",
       },
       body: JSON.stringify(requestBody),
+      signal: params.signal,
     });
 
     if (!response.ok) {

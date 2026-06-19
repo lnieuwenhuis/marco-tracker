@@ -110,9 +110,20 @@ const ERROR_DENOMINATORS: MacroBenchmarkMacros = {
 
 export const BENCHMARK_REQUEST_DELAY_MS = 3500;
 export const BENCHMARK_RETRY_DELAY_MS = 8000;
+export const BENCHMARK_MODEL_CALL_TIMEOUT_MS = 20_000;
+export const BENCHMARK_ROUTE_RUNTIME_BUDGET_MS = 270_000;
 const BASELINE_TTL_MS = 24 * 60 * 60 * 1000;
+const BENCHMARK_RUNTIME_BUFFER_MS = 1000;
+const BENCHMARK_RETRYABLE_ERROR_LIMIT = 2;
 
 type AnalyzeFoodPhotoFn = typeof analyzeFoodPhoto;
+type BenchmarkRuntimeBudget = {
+  deadlineMs: number;
+  modelCallTimeoutMs: number;
+} | null;
+type BenchmarkRetryState = {
+  consecutiveRetryableErrors: number;
+};
 
 const FAILURE_KINDS: AnalyzeFoodPhotoFailureKind[] = [
   "missing_api_key",
@@ -349,6 +360,20 @@ function delay(ms: number) {
     : Promise.resolve();
 }
 
+function hasRuntimeBudgetForCall(
+  runtimeBudget: BenchmarkRuntimeBudget,
+  delayMs: number,
+) {
+  if (!runtimeBudget) {
+    return true;
+  }
+
+  return (
+    runtimeBudget.deadlineMs - performance.now() >
+    delayMs + runtimeBudget.modelCallTimeoutMs + BENCHMARK_RUNTIME_BUFFER_MS
+  );
+}
+
 function macroKeys() {
   return ["caloriesKcal", "proteinG", "carbsG", "fatG"] as const;
 }
@@ -465,6 +490,17 @@ function skippedModelResult(
   });
 }
 
+function runtimeBudgetSkippedResult(model: string): MacroBenchmarkModelCaseResult {
+  return createFailureResult({
+    model,
+    error: "Skipped to keep the benchmark within the route runtime budget.",
+    failureKind: "unknown",
+    latencyMs: null,
+    retryable: false,
+    wasSkipped: true,
+  });
+}
+
 function isProviderCapacityFailure(
   failureKind?: AnalyzeFoodPhotoFailureKind,
 ) {
@@ -497,20 +533,175 @@ function normalizeFixtureLimit(fixtureLimit: number | undefined) {
   return 4;
 }
 
-function isValidModelResult(value: unknown): value is MacroBenchmarkModelCaseResult {
+function isRecord(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object") {
     return false;
   }
 
-  const record = value as Record<string, unknown>;
+  return true;
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isValidLatencyMs(value: unknown): value is number | null {
+  return value === null || isNonNegativeFiniteNumber(value);
+}
+
+function isValidMacros(value: unknown): value is MacroBenchmarkMacros {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return macroKeys().every((key) => isNonNegativeFiniteNumber(value[key]));
+}
+
+function macrosEqual(
+  left: MacroBenchmarkMacros,
+  right: MacroBenchmarkMacros,
+) {
+  return macroKeys().every((key) => left[key] === right[key]);
+}
+
+function isValidEstimate(value: unknown): value is FoodPhotoEstimate {
+  if (!isRecord(value)) {
+    return false;
+  }
+
   return (
-    typeof record.model === "string" &&
-    typeof record.ok === "boolean" &&
-    (typeof record.latencyMs === "number" || record.latencyMs === null) &&
-    ("estimate" in record ? true : true) &&
-    ("absoluteError" in record ? true : true) &&
-    ("normalizedErrorPct" in record ? true : true) &&
-    ("error" in record ? true : true)
+    typeof value.label === "string" &&
+    value.label.trim().length > 0 &&
+    isNonNegativeFiniteNumber(value.caloriesKcal) &&
+    isNonNegativeFiniteNumber(value.proteinG) &&
+    isNonNegativeFiniteNumber(value.carbsG) &&
+    isNonNegativeFiniteNumber(value.fatG) &&
+    typeof value.confidence === "number" &&
+    Number.isFinite(value.confidence) &&
+    value.confidence >= 0 &&
+    value.confidence <= 1 &&
+    Array.isArray(value.notes) &&
+    value.notes.every((note) => typeof note === "string")
+  );
+}
+
+function isFailureKind(value: unknown): value is AnalyzeFoodPhotoFailureKind {
+  return FAILURE_KINDS.includes(value as AnalyzeFoodPhotoFailureKind);
+}
+
+function validateModelResultForFixture(
+  value: unknown,
+  currentModel: string,
+  fixture: MacroBenchmarkFixture,
+): MacroBenchmarkModelCaseResult | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (
+    value.model !== currentModel ||
+    typeof value.ok !== "boolean" ||
+    !isValidLatencyMs(value.latencyMs)
+  ) {
+    return null;
+  }
+
+  if (value.ok) {
+    if (
+      typeof value.latencyMs !== "number" ||
+      !isValidEstimate(value.estimate) ||
+      !isValidMacros(value.absoluteError) ||
+      typeof value.normalizedErrorPct !== "number" ||
+      !Number.isFinite(value.normalizedErrorPct) ||
+      value.normalizedErrorPct < 0 ||
+      value.error !== null ||
+      value.failureKind !== undefined ||
+      value.retryable !== undefined ||
+      value.wasSkipped !== undefined
+    ) {
+      return null;
+    }
+
+    const expectedError = calculateMacroBenchmarkError(
+      value.estimate,
+      fixture.expected,
+    );
+    if (
+      !macrosEqual(value.absoluteError, expectedError.absoluteError) ||
+      value.normalizedErrorPct !== expectedError.normalizedErrorPct
+    ) {
+      return null;
+    }
+
+    return {
+      model: currentModel,
+      ok: true,
+      latencyMs: value.latencyMs,
+      estimate: value.estimate,
+      absoluteError: value.absoluteError,
+      normalizedErrorPct: value.normalizedErrorPct,
+      error: null,
+    };
+  }
+
+  if (
+    value.estimate !== null ||
+    value.absoluteError !== null ||
+    value.normalizedErrorPct !== null ||
+    typeof value.error !== "string" ||
+    value.error.trim().length === 0 ||
+    !isFailureKind(value.failureKind) ||
+    (value.retryable !== undefined && typeof value.retryable !== "boolean") ||
+    (value.wasSkipped !== undefined && typeof value.wasSkipped !== "boolean")
+  ) {
+    return null;
+  }
+
+  return {
+    model: currentModel,
+    ok: false,
+    latencyMs: value.latencyMs,
+    estimate: null,
+    absoluteError: null,
+    normalizedErrorPct: null,
+    error: value.error,
+    failureKind: value.failureKind,
+    retryable: value.retryable,
+    wasSkipped: value.wasSkipped,
+  };
+}
+
+function isReusableBaselineResultSet(results: MacroBenchmarkModelCaseResult[]) {
+  if (results.length === 0) {
+    return false;
+  }
+
+  return results.every((result) => result.ok);
+}
+
+function isRetryableBenchmarkFailure(result: MacroBenchmarkModelCaseResult) {
+  return Boolean(result.retryable && shouldRetryFailure(result.failureKind));
+}
+
+function recordRetryState(
+  retryState: BenchmarkRetryState,
+  result: MacroBenchmarkModelCaseResult,
+) {
+  if (isRetryableBenchmarkFailure(result)) {
+    retryState.consecutiveRetryableErrors += 1;
+    return;
+  }
+
+  retryState.consecutiveRetryableErrors = 0;
+}
+
+function canRetryAfterResult(
+  retryState: BenchmarkRetryState,
+  result: MacroBenchmarkModelCaseResult,
+) {
+  return (
+    isRetryableBenchmarkFailure(result) &&
+    retryState.consecutiveRetryableErrors < BENCHMARK_RETRYABLE_ERROR_LIMIT
   );
 }
 
@@ -521,12 +712,24 @@ export function validateBenchmarkBaseline(params: {
 }): MacroBenchmarkBaseline | null {
   const { baseline, currentModel, fixtures } = params;
 
-  if (!baseline || baseline.currentModel !== currentModel) {
+  if (
+    !baseline ||
+    typeof baseline.currentModel !== "string" ||
+    typeof baseline.createdAt !== "string" ||
+    baseline.currentModel !== currentModel ||
+    !Array.isArray(baseline.fixtureIds) ||
+    !Array.isArray(baseline.results)
+  ) {
     return null;
   }
 
   const createdAtMs = Date.parse(baseline.createdAt);
-  if (!Number.isFinite(createdAtMs) || Date.now() - createdAtMs > BASELINE_TTL_MS) {
+  const now = Date.now();
+  if (
+    !Number.isFinite(createdAtMs) ||
+    createdAtMs > now ||
+    now - createdAtMs > BASELINE_TTL_MS
+  ) {
     return null;
   }
 
@@ -543,29 +746,70 @@ export function validateBenchmarkBaseline(params: {
     return null;
   }
 
-  if (!baseline.results.every(isValidModelResult)) {
+  const results = baseline.results.map((result, index) =>
+    validateModelResultForFixture(result, currentModel, fixtures[index]),
+  );
+
+  if (results.some((result) => result === null)) {
     return null;
   }
 
-  return baseline;
+  const validatedResults = results as MacroBenchmarkModelCaseResult[];
+  if (!isReusableBaselineResultSet(validatedResults)) {
+    return null;
+  }
+
+  return {
+    currentModel,
+    createdAt: baseline.createdAt,
+    fixtureIds: [...baseline.fixtureIds],
+    results: validatedResults,
+  };
 }
 
 async function runFixtureForModel(params: {
   analyzeFoodPhotoImpl: AnalyzeFoodPhotoFn;
   fixture: MacroBenchmarkFixture;
   imageDataUrl: string;
+  modelCallTimeoutMs: number;
   model: string;
   userId: string;
 }): Promise<MacroBenchmarkModelCaseResult> {
   const startedAt = performance.now();
-  const result: AnalyzeFoodPhotoResult = await params.analyzeFoodPhotoImpl({
-    forceReady: true,
-    imageUrl: params.imageDataUrl,
-    maxAttempts: 1,
-    model: params.model,
-    userId: params.userId,
-    clarification: `Benchmark fixture: ${params.fixture.servingDescription}`,
-  });
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(
+    () => abortController.abort(),
+    params.modelCallTimeoutMs,
+  );
+  let result: AnalyzeFoodPhotoResult;
+
+  try {
+    result = await params.analyzeFoodPhotoImpl({
+      forceReady: true,
+      imageUrl: params.imageDataUrl,
+      maxAttempts: 1,
+      model: params.model,
+      signal: abortController.signal,
+      userId: params.userId,
+      clarification: `Benchmark fixture: ${params.fixture.servingDescription}`,
+    });
+  } catch (error) {
+    const latencyMs = Math.round(performance.now() - startedAt);
+    return createFailureResult({
+      model: params.model,
+      error: abortController.signal.aborted
+        ? `Benchmark model call timed out after ${params.modelCallTimeoutMs}ms.`
+        : error instanceof Error
+          ? error.message
+          : "Benchmark model call failed.",
+      failureKind: "provider_error",
+      latencyMs,
+      retryable: abortController.signal.aborted,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
   const latencyMs = Math.round(performance.now() - startedAt);
 
   if (!result.ok) {
@@ -612,23 +856,36 @@ async function runModelCallWithRateLimit(params: {
   userId: string;
   requestDelayMs: number;
   retryDelayMs: number;
+  modelCallTimeoutMs: number;
+  runtimeBudget: BenchmarkRuntimeBudget;
+  retryState: BenchmarkRetryState;
   hasMadeOpenRouterRequest: boolean;
   markOpenRouterRequestMade: () => void;
 }) {
+  const requestDelay = params.hasMadeOpenRouterRequest
+    ? params.requestDelayMs
+    : 0;
+  if (!hasRuntimeBudgetForCall(params.runtimeBudget, requestDelay)) {
+    return runtimeBudgetSkippedResult(params.model);
+  }
+
   if (params.hasMadeOpenRouterRequest) {
     await delay(params.requestDelayMs);
   }
 
   params.markOpenRouterRequestMade();
   const firstResult = await runFixtureForModel(params);
+  recordRetryState(params.retryState, firstResult);
 
   if (
-    firstResult.retryable &&
-    shouldRetryFailure(firstResult.failureKind)
+    canRetryAfterResult(params.retryState, firstResult) &&
+    hasRuntimeBudgetForCall(params.runtimeBudget, params.retryDelayMs)
   ) {
     await delay(params.retryDelayMs);
     params.markOpenRouterRequestMade();
-    return runFixtureForModel(params);
+    const retryResult = await runFixtureForModel(params);
+    recordRetryState(params.retryState, retryResult);
+    return retryResult;
   }
 
   return firstResult;
@@ -719,8 +976,10 @@ export async function runMacroBenchmark(params: {
   currentModel?: string;
   fixtureLimit?: number;
   mode?: MacroBenchmarkMode;
+  modelCallTimeoutMs?: number;
   requestDelayMs?: number;
   retryDelayMs?: number;
+  runtimeBudgetMs?: number;
   userId: string;
 }): Promise<MacroBenchmarkResult> {
   const candidateModel = params.candidateModel.trim();
@@ -738,9 +997,26 @@ export async function runMacroBenchmark(params: {
   const cases: MacroBenchmarkCaseResult[] = [];
   let currentStopKind: AnalyzeFoodPhotoFailureKind | null = null;
   let candidateStopKind: AnalyzeFoodPhotoFailureKind | null = null;
+  const currentRetryState: BenchmarkRetryState = {
+    consecutiveRetryableErrors: 0,
+  };
+  const candidateRetryState: BenchmarkRetryState = {
+    consecutiveRetryableErrors: 0,
+  };
   let hasMadeOpenRouterRequest = false;
   const requestDelayMs = params.requestDelayMs ?? BENCHMARK_REQUEST_DELAY_MS;
   const retryDelayMs = params.retryDelayMs ?? BENCHMARK_RETRY_DELAY_MS;
+  const modelCallTimeoutMs = Math.max(
+    1000,
+    params.modelCallTimeoutMs ?? BENCHMARK_MODEL_CALL_TIMEOUT_MS,
+  );
+  const runtimeBudget: BenchmarkRuntimeBudget =
+    params.runtimeBudgetMs && params.runtimeBudgetMs > 0
+      ? {
+          deadlineMs: performance.now() + params.runtimeBudgetMs,
+          modelCallTimeoutMs,
+        }
+      : null;
   const markOpenRouterRequestMade = () => {
     hasMadeOpenRouterRequest = true;
   };
@@ -797,6 +1073,9 @@ export async function runMacroBenchmark(params: {
           userId: params.userId,
           requestDelayMs,
           retryDelayMs,
+          modelCallTimeoutMs,
+          runtimeBudget,
+          retryState: currentRetryState,
           hasMadeOpenRouterRequest,
           markOpenRouterRequestMade,
         });
@@ -821,6 +1100,9 @@ export async function runMacroBenchmark(params: {
           userId: params.userId,
           requestDelayMs,
           retryDelayMs,
+          modelCallTimeoutMs,
+          runtimeBudget,
+          retryState: candidateRetryState,
           hasMadeOpenRouterRequest,
           markOpenRouterRequestMade,
         });
