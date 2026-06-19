@@ -1,5 +1,6 @@
 import {
   date,
+  boolean,
   index,
   integer,
   jsonb,
@@ -92,6 +93,80 @@ export const adminAuditEvents = pgTable(
   ],
 );
 
+export const foodProducts = pgTable(
+  "food_products",
+  {
+    id: uuid("id").primaryKey().notNull(),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    scope: text("scope").notNull().default("personal"),
+    source: text("source").notNull().default("manual"),
+    barcode: text("barcode"),
+    name: text("name").notNull(),
+    brand: text("brand").notNull().default(""),
+    defaultServingQuantity: numeric("default_serving_quantity", {
+      precision: 8,
+      scale: 2,
+    })
+      .notNull()
+      .default("1"),
+    defaultServingUnit: text("default_serving_unit").notNull().default("serving"),
+    proteinPer100: numeric("protein_per_100", {
+      precision: 7,
+      scale: 2,
+    }).notNull(),
+    carbsPer100: numeric("carbs_per_100", {
+      precision: 7,
+      scale: 2,
+    }).notNull(),
+    fatPer100: numeric("fat_per_100", {
+      precision: 7,
+      scale: 2,
+    }).notNull(),
+    caloriesPer100: integer("calories_per_100").notNull(),
+    servingWeightG: numeric("serving_weight_g", { precision: 8, scale: 2 }),
+    servingVolumeMl: numeric("serving_volume_ml", { precision: 8, scale: 2 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("food_products_owner_name_idx").on(table.ownerUserId, table.name),
+    index("food_products_barcode_idx").on(table.barcode),
+    index("food_products_scope_source_idx").on(table.scope, table.source),
+    index("food_products_deleted_at_idx").on(table.deletedAt),
+  ],
+);
+
+export const mealGroups = pgTable(
+  "meal_groups",
+  {
+    id: uuid("id").primaryKey().notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("meal_groups_user_sort_idx").on(table.userId, table.sortOrder),
+    index("meal_groups_deleted_at_idx").on(table.deletedAt),
+  ],
+);
+
 export const mealEntries = pgTable(
   "meal_entries",
   {
@@ -100,12 +175,27 @@ export const mealEntries = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     entryDate: date("entry_date").notNull(),
+    mealGroupId: uuid("meal_group_id").references(() => mealGroups.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").notNull().default("eaten"),
+    productId: uuid("product_id").references(() => foodProducts.id, {
+      onDelete: "set null",
+    }),
     label: text("label").notNull(),
     sortOrder: integer("sort_order").notNull(),
+    quantity: numeric("quantity", { precision: 8, scale: 2 })
+      .notNull()
+      .default("1"),
+    unit: text("unit").notNull().default("serving"),
+    servingMultiplier: numeric("serving_multiplier", { precision: 8, scale: 2 })
+      .notNull()
+      .default("1"),
     proteinG: numeric("protein_g", { precision: 6, scale: 1 }).notNull(),
     carbsG: numeric("carbs_g", { precision: 6, scale: 1 }).notNull(),
     fatG: numeric("fat_g", { precision: 6, scale: 1 }).notNull(),
     caloriesKcal: integer("calories_kcal").notNull(),
+    clientMutationId: text("client_mutation_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -115,6 +205,17 @@ export const mealEntries = pgTable(
   },
   (table) => [
     index("meal_entries_user_date_idx").on(table.userId, table.entryDate),
+    index("meal_entries_user_date_status_idx").on(
+      table.userId,
+      table.entryDate,
+      table.status,
+    ),
+    index("meal_entries_meal_group_idx").on(table.mealGroupId),
+    index("meal_entries_product_idx").on(table.productId),
+    uniqueIndex("meal_entries_user_client_mutation_key").on(
+      table.userId,
+      table.clientMutationId,
+    ),
     index("meal_entries_user_date_sort_idx").on(
       table.userId,
       table.entryDate,
@@ -185,6 +286,10 @@ export const recipes = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     label: text("label").notNull(),
     portions: integer("portions").notNull().default(1),
+    totalCookedWeightG: numeric("total_cooked_weight_g", {
+      precision: 8,
+      scale: 2,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -204,8 +309,18 @@ export const recipeIngredients = pgTable(
     recipeId: uuid("recipe_id")
       .notNull()
       .references(() => recipes.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => foodProducts.id, {
+      onDelete: "set null",
+    }),
     sortOrder: integer("sort_order").notNull(),
     label: text("label").notNull(),
+    quantity: numeric("quantity", { precision: 8, scale: 2 })
+      .notNull()
+      .default("1"),
+    unit: text("unit").notNull().default("serving"),
+    servingMultiplier: numeric("serving_multiplier", { precision: 8, scale: 2 })
+      .notNull()
+      .default("1"),
     proteinG: numeric("protein_g", { precision: 6, scale: 1 }).notNull(),
     carbsG: numeric("carbs_g", { precision: 6, scale: 1 }).notNull(),
     fatG: numeric("fat_g", { precision: 6, scale: 1 }).notNull(),
@@ -216,6 +331,7 @@ export const recipeIngredients = pgTable(
   },
   (table) => [
     index("recipe_ingredients_recipe_idx").on(table.recipeId),
+    index("recipe_ingredients_product_idx").on(table.productId),
   ],
 );
 
@@ -229,5 +345,9 @@ export type RecipeIngredientRow = typeof recipeIngredients.$inferSelect;
 export type NewRecipeIngredientRow = typeof recipeIngredients.$inferInsert;
 export type BarcodeProductRow = typeof barcodeProducts.$inferSelect;
 export type NewBarcodeProductRow = typeof barcodeProducts.$inferInsert;
+export type FoodProductRow = typeof foodProducts.$inferSelect;
+export type NewFoodProductRow = typeof foodProducts.$inferInsert;
+export type MealGroupRow = typeof mealGroups.$inferSelect;
+export type NewMealGroupRow = typeof mealGroups.$inferInsert;
 export type AdminAuditEventRow = typeof adminAuditEvents.$inferSelect;
 export type NewAdminAuditEventRow = typeof adminAuditEvents.$inferInsert;

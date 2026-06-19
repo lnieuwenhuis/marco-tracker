@@ -1,6 +1,6 @@
 "use client";
 
-import type { RecipeRecord } from "@macro-tracker/db";
+import type { MealEntryStatus, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
@@ -10,6 +10,7 @@ import {
   getRecipeMutationCacheKeys,
 } from "@/lib/app-warmup";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
+import { getLocalDateString } from "@/lib/startup-date";
 
 import { invalidateAppDataCache } from "./app-data-cache";
 import { ConfirmDeleteButton } from "./confirm-delete-button";
@@ -24,13 +25,36 @@ export function RecipeCard({ recipe, selectedDate }: RecipeCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [portionCount, setPortionCount] = useState("1");
+  const [gramsConsumed, setGramsConsumed] = useState("");
 
   function handleLogPortion() {
     setError(null);
+    const parsedPortionCount = Number(portionCount);
+    const safePortionCount =
+      Number.isFinite(parsedPortionCount) && parsedPortionCount > 0
+        ? parsedPortionCount
+        : 1;
+    const trimmedGrams = gramsConsumed.trim();
+    const parsedGrams = trimmedGrams ? Number(trimmedGrams) : null;
+
+    if (
+      parsedGrams != null &&
+      (!Number.isFinite(parsedGrams) || parsedGrams <= 0)
+    ) {
+      setError("Enter grams greater than 0.");
+      return;
+    }
+
     startTransition(async () => {
+      const status: MealEntryStatus =
+        selectedDate > getLocalDateString() ? "planned" : "eaten";
       const result = await logRecipePortionAction({
         recipeId: recipe.id,
         date: selectedDate,
+        status,
+        portionCount: safePortionCount,
+        gramsConsumed: parsedGrams,
       });
       if (!result.ok) {
         setError(result.error ?? "Unable to log portion.");
@@ -47,8 +71,13 @@ export function RecipeCard({ recipe, selectedDate }: RecipeCardProps) {
       const result = await saveRecipeAction({
         label: `${recipe.label} (copy)`,
         portions: recipe.portions,
+        totalCookedWeightG: recipe.totalCookedWeightG,
         ingredients: recipe.ingredients.map((ing) => ({
+          productId: ing.productId ?? null,
           label: ing.label,
+          quantity: ing.quantity ?? 1,
+          unit: ing.unit ?? "serving",
+          servingMultiplier: ing.servingMultiplier ?? 1,
           proteinG: ing.proteinG,
           carbsG: ing.carbsG,
           fatG: ing.fatG,
@@ -214,6 +243,42 @@ export function RecipeCard({ recipe, selectedDate }: RecipeCardProps) {
             <p className="mb-3 text-sm text-[var(--color-danger)]">{error}</p>
           ) : null}
 
+          {/* Log controls */}
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <label>
+              <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-muted-strong)]">
+                Portions
+              </span>
+              <select
+                value={portionCount}
+                onChange={(event) => setPortionCount(event.target.value)}
+                className="h-10 w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 text-sm text-[var(--color-ink)] outline-none"
+              >
+                <option value="0.5">0.5</option>
+                <option value="1">1</option>
+                <option value="1.5">1.5</option>
+                <option value="2">2</option>
+              </select>
+            </label>
+            {recipe.totalCookedWeightG ? (
+              <label>
+                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-muted-strong)]">
+                  Grams
+                </span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0.1"
+                  step="any"
+                  value={gramsConsumed}
+                  onChange={(event) => setGramsConsumed(event.target.value)}
+                  placeholder="Optional"
+                  className="h-10 w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 text-sm text-[var(--color-ink)] outline-none"
+                />
+              </label>
+            ) : null}
+          </div>
+
           {/* Action buttons */}
           <div className="flex gap-2">
             <button
@@ -222,7 +287,7 @@ export function RecipeCard({ recipe, selectedDate }: RecipeCardProps) {
               onClick={handleLogPortion}
               className="flex-1 rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 disabled:cursor-wait disabled:opacity-70"
             >
-              {isPending ? "Saving..." : "Log 1 portion"}
+              {isPending ? "Saving..." : "Log..."}
             </button>
             <button
               type="button"

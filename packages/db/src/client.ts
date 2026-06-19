@@ -167,20 +167,80 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
     ),
   );
   await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "food_products" (
+      "id" uuid PRIMARY KEY NOT NULL,
+      "owner_user_id" uuid REFERENCES "users"("id") ON DELETE cascade,
+      "scope" text DEFAULT 'personal' NOT NULL,
+      "source" text DEFAULT 'manual' NOT NULL,
+      "barcode" text,
+      "name" text NOT NULL,
+      "brand" text DEFAULT '' NOT NULL,
+      "default_serving_quantity" numeric(8, 2) DEFAULT '1' NOT NULL,
+      "default_serving_unit" text DEFAULT 'serving' NOT NULL,
+      "protein_per_100" numeric(7, 2) NOT NULL,
+      "carbs_per_100" numeric(7, 2) NOT NULL,
+      "fat_per_100" numeric(7, 2) NOT NULL,
+      "calories_per_100" integer NOT NULL,
+      "serving_weight_g" numeric(8, 2),
+      "serving_volume_ml" numeric(8, 2),
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "deleted_at" timestamp with time zone
+    )
+  `));
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_owner_name_idx" ON "food_products" USING btree ("owner_user_id","name")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_barcode_idx" ON "food_products" USING btree ("barcode")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_scope_source_idx" ON "food_products" USING btree ("scope","source")`),
+  );
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "meal_groups" (
+      "id" uuid PRIMARY KEY NOT NULL,
+      "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+      "label" text NOT NULL,
+      "sort_order" integer NOT NULL,
+      "is_default" boolean DEFAULT false NOT NULL,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "deleted_at" timestamp with time zone
+    )
+  `));
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "meal_groups_user_sort_idx" ON "meal_groups" USING btree ("user_id","sort_order")`),
+  );
+  await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS "meal_entries" (
       "id" uuid PRIMARY KEY NOT NULL,
       "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,
       "entry_date" date NOT NULL,
+      "meal_group_id" uuid REFERENCES "meal_groups"("id") ON DELETE SET NULL,
+      "status" text DEFAULT 'eaten' NOT NULL,
+      "product_id" uuid REFERENCES "food_products"("id") ON DELETE SET NULL,
       "label" text NOT NULL,
       "sort_order" integer NOT NULL,
+      "quantity" numeric(8, 2) DEFAULT '1' NOT NULL,
+      "unit" text DEFAULT 'serving' NOT NULL,
+      "serving_multiplier" numeric(8, 2) DEFAULT '1' NOT NULL,
       "protein_g" numeric(6, 1) NOT NULL,
       "carbs_g" numeric(6, 1) NOT NULL,
       "fat_g" numeric(6, 1) NOT NULL,
       "calories_kcal" integer NOT NULL,
+      "client_mutation_id" text,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL,
       "updated_at" timestamp with time zone DEFAULT now() NOT NULL
     )
   `));
+  await db.execute(sql.raw(`ALTER TABLE "meal_entries" ADD COLUMN IF NOT EXISTS "meal_group_id" uuid`));
+  await db.execute(sql.raw(`ALTER TABLE "meal_entries" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'eaten' NOT NULL`));
+  await db.execute(sql.raw(`ALTER TABLE "meal_entries" ADD COLUMN IF NOT EXISTS "product_id" uuid`));
+  await db.execute(sql.raw(`ALTER TABLE "meal_entries" ADD COLUMN IF NOT EXISTS "quantity" numeric(8, 2) DEFAULT '1' NOT NULL`));
+  await db.execute(sql.raw(`ALTER TABLE "meal_entries" ADD COLUMN IF NOT EXISTS "unit" text DEFAULT 'serving' NOT NULL`));
+  await db.execute(sql.raw(`ALTER TABLE "meal_entries" ADD COLUMN IF NOT EXISTS "serving_multiplier" numeric(8, 2) DEFAULT '1' NOT NULL`));
+  await db.execute(sql.raw(`ALTER TABLE "meal_entries" ADD COLUMN IF NOT EXISTS "client_mutation_id" text`));
   await db.execute(
     sql.raw(
       `CREATE INDEX IF NOT EXISTS "meal_entries_user_date_idx" ON "meal_entries" USING btree ("user_id","entry_date")`,
@@ -190,6 +250,12 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
     sql.raw(
       `CREATE INDEX IF NOT EXISTS "meal_entries_user_date_sort_idx" ON "meal_entries" USING btree ("user_id","entry_date","sort_order")`,
     ),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "meal_entries_user_date_status_idx" ON "meal_entries" USING btree ("user_id","entry_date","status")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS "meal_entries_user_client_mutation_key" ON "meal_entries" USING btree ("user_id","client_mutation_id")`),
   );
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS "food_presets" (
@@ -242,10 +308,12 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,
       "label" text NOT NULL,
       "portions" integer DEFAULT 1 NOT NULL,
+      "total_cooked_weight_g" numeric(8, 2),
       "created_at" timestamp with time zone DEFAULT now() NOT NULL,
       "updated_at" timestamp with time zone DEFAULT now() NOT NULL
     )
   `));
+  await db.execute(sql.raw(`ALTER TABLE "recipes" ADD COLUMN IF NOT EXISTS "total_cooked_weight_g" numeric(8, 2)`));
   await db.execute(
     sql.raw(
       `CREATE INDEX IF NOT EXISTS "recipes_user_idx" ON "recipes" USING btree ("user_id")`,
@@ -255,8 +323,12 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
     CREATE TABLE IF NOT EXISTS "recipe_ingredients" (
       "id" uuid PRIMARY KEY NOT NULL,
       "recipe_id" uuid NOT NULL REFERENCES "recipes"("id") ON DELETE cascade,
+      "product_id" uuid REFERENCES "food_products"("id") ON DELETE SET NULL,
       "sort_order" integer NOT NULL,
       "label" text NOT NULL,
+      "quantity" numeric(8, 2) DEFAULT '1' NOT NULL,
+      "unit" text DEFAULT 'serving' NOT NULL,
+      "serving_multiplier" numeric(8, 2) DEFAULT '1' NOT NULL,
       "protein_g" numeric(6, 1) NOT NULL,
       "carbs_g" numeric(6, 1) NOT NULL,
       "fat_g" numeric(6, 1) NOT NULL,
@@ -264,6 +336,10 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
     )
   `));
+  await db.execute(sql.raw(`ALTER TABLE "recipe_ingredients" ADD COLUMN IF NOT EXISTS "product_id" uuid`));
+  await db.execute(sql.raw(`ALTER TABLE "recipe_ingredients" ADD COLUMN IF NOT EXISTS "quantity" numeric(8, 2) DEFAULT '1' NOT NULL`));
+  await db.execute(sql.raw(`ALTER TABLE "recipe_ingredients" ADD COLUMN IF NOT EXISTS "unit" text DEFAULT 'serving' NOT NULL`));
+  await db.execute(sql.raw(`ALTER TABLE "recipe_ingredients" ADD COLUMN IF NOT EXISTS "serving_multiplier" numeric(8, 2) DEFAULT '1' NOT NULL`));
   await db.execute(
     sql.raw(
       `CREATE INDEX IF NOT EXISTS "recipe_ingredients_recipe_idx" ON "recipe_ingredients" USING btree ("recipe_id")`,
@@ -312,6 +388,113 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       `CREATE INDEX IF NOT EXISTS "barcode_products_deleted_at_idx" ON "barcode_products" USING btree ("deleted_at")`,
     ),
   );
+  await db.execute(sql.raw(`
+    UPDATE "food_products"
+    SET
+      "name" = "barcode_products"."name",
+      "brand" = "barcode_products"."brands",
+      "default_serving_quantity" = '1.00',
+      "default_serving_unit" = 'serving',
+      "protein_per_100" = "barcode_products"."protein_g",
+      "carbs_per_100" = "barcode_products"."carbs_g",
+      "fat_per_100" = "barcode_products"."fat_g",
+      "calories_per_100" = "barcode_products"."calories_kcal",
+      "serving_weight_g" = COALESCE("barcode_products"."serving_size_g", '100.00'),
+      "serving_volume_ml" = NULL,
+      "updated_at" = "barcode_products"."updated_at",
+      "deleted_at" = "barcode_products"."deleted_at"
+    FROM "barcode_products"
+    WHERE
+      "food_products"."owner_user_id" IS NULL
+      AND "food_products"."source" = 'barcode'
+      AND "food_products"."barcode" = "barcode_products"."barcode"
+  `));
+  await db.execute(sql.raw(`
+    WITH source_barcode_products AS (
+      SELECT
+        (
+          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 1, 8) || '-' ||
+          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 9, 4) || '-' ||
+          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 13, 4) || '-' ||
+          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 17, 4) || '-' ||
+          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 21, 12)
+        )::uuid AS "id",
+        "barcode_products"."barcode",
+        "barcode_products"."name",
+        "barcode_products"."brands",
+        "barcode_products"."protein_g",
+        "barcode_products"."carbs_g",
+        "barcode_products"."fat_g",
+        "barcode_products"."calories_kcal",
+        "barcode_products"."serving_size_g",
+        "barcode_products"."created_at",
+        "barcode_products"."updated_at",
+        "barcode_products"."deleted_at"
+      FROM "barcode_products"
+    )
+    INSERT INTO "food_products" (
+      "id",
+      "owner_user_id",
+      "scope",
+      "source",
+      "barcode",
+      "name",
+      "brand",
+      "default_serving_quantity",
+      "default_serving_unit",
+      "protein_per_100",
+      "carbs_per_100",
+      "fat_per_100",
+      "calories_per_100",
+      "serving_weight_g",
+      "serving_volume_ml",
+      "created_at",
+      "updated_at",
+      "deleted_at"
+    )
+    SELECT
+      "id",
+      NULL,
+      'global',
+      'barcode',
+      "barcode",
+      "name",
+      "brands",
+      '1.00',
+      'serving',
+      "protein_g",
+      "carbs_g",
+      "fat_g",
+      "calories_kcal",
+      COALESCE("serving_size_g", '100.00'),
+      NULL,
+      "created_at",
+      "updated_at",
+      "deleted_at"
+    FROM source_barcode_products
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM "food_products"
+      WHERE
+        "food_products"."owner_user_id" IS NULL
+        AND "food_products"."source" = 'barcode'
+        AND "food_products"."barcode" = source_barcode_products."barcode"
+    )
+  `));
+  await db.execute(sql.raw(`
+    UPDATE "food_products"
+    SET
+      "deleted_at" = COALESCE("food_products"."deleted_at", now()),
+      "updated_at" = now()
+    WHERE
+      "food_products"."owner_user_id" IS NULL
+      AND "food_products"."source" = 'barcode'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "barcode_products"
+        WHERE "barcode_products"."barcode" = "food_products"."barcode"
+      )
+  `));
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS "admin_audit_events" (
       "id" uuid PRIMARY KEY NOT NULL,

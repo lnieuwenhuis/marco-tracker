@@ -1,20 +1,33 @@
 import {
   computeStreaks,
+  createMealGroup,
   createRecipe,
   createMealEntry,
+  createPersonalFoodProduct,
+  deleteMealGroup,
   deleteMealEntry,
+  ensureDefaultMealGroups,
   getDailySummary,
+  getMealGroups,
   getPeriodAverages,
   getRecipeById,
   getRecentQuickAddCandidates,
+  getStatsPageData,
+  lookupCustomBarcodeProduct,
+  markMealEntryStatus,
+  resolveProductNutritionForQuantity,
+  saveCustomBarcodeProduct,
+  saveUserGoals,
+  searchFoodProducts,
   updateRecipe,
   updateMealEntry,
   upsertUserFromShooProfile,
   type DatabaseRuntime,
 } from "../src";
-import { mealEntries, recipeIngredients, recipes } from "../src/schema";
+import { barcodeProducts, foodProducts, mealEntries, recipeIngredients, recipes } from "../src/schema";
 import { createTestDatabase } from "../src/testing";
 import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 describe("database queries", () => {
@@ -56,6 +69,19 @@ describe("database queries", () => {
     return entry;
   }
 
+  async function createOtherUser() {
+    const user = await upsertUserFromShooProfile(
+      {
+        pairwiseSub: "ps_other_user",
+        email: "other@example.com",
+        displayName: "Other",
+      },
+      runtime.db,
+    );
+
+    return user.id;
+  }
+
   function createFailingRecipeDb(failOnIngredientInsertNumber: number) {
     let ingredientInsertCount = 0;
 
@@ -72,6 +98,62 @@ describe("database queries", () => {
               }
 
               return target.insert(table);
+            };
+          }
+
+          if (prop === "transaction") {
+            return async (callback: (tx: unknown) => unknown) =>
+              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
+          }
+
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }
+
+    return wrapClient(runtime.db as any);
+  }
+
+  function createFailingBarcodeFoodProductDb() {
+    function wrapClient(client: any) {
+      return new Proxy(client, {
+        get(target, prop, receiver) {
+          if (prop === "insert") {
+            return (table: unknown) => {
+              if (table === foodProducts) {
+                throw new Error("Forced barcode food product insert failure.");
+              }
+
+              return target.insert(table);
+            };
+          }
+
+          if (prop === "transaction") {
+            return async (callback: (tx: unknown) => unknown) =>
+              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
+          }
+
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }
+
+    return wrapClient(runtime.db as any);
+  }
+
+  function createFailingMealGroupDeleteDb() {
+    function wrapClient(client: any) {
+      return new Proxy(client, {
+        get(target, prop, receiver) {
+          if (prop === "update") {
+            return (table: unknown) => {
+              if (table === mealEntries) {
+                throw new Error("Forced meal group unassign failure.");
+              }
+
+              return target.update(table);
             };
           }
 
@@ -171,6 +253,47 @@ describe("database queries", () => {
     expect(rolling30?.loggedDays).toBe(3);
   });
 
+  it("does not count calorie overshoots as goal hits", async () => {
+    await saveUserGoals(
+      userId,
+      {
+        caloriesKcal: 2000,
+        proteinG: null,
+        carbsG: null,
+        fatG: null,
+      },
+      runtime.db,
+    );
+    await createMealEntry(
+      userId,
+      {
+        date: "2026-03-18",
+        label: "Target day",
+        proteinG: 120,
+        carbsG: 220,
+        fatG: 70,
+        caloriesKcal: 2000,
+      },
+      runtime.db,
+    );
+    await createMealEntry(
+      userId,
+      {
+        date: "2026-03-19",
+        label: "Overshoot day",
+        proteinG: 150,
+        carbsG: 300,
+        fatG: 90,
+        caloriesKcal: 2300,
+      },
+      runtime.db,
+    );
+
+    const stats = await getStatsPageData(userId, "2026-03-19", runtime.db);
+
+    expect(stats.goalHitRates.days7.caloriesKcal).toBe(50);
+  });
+
   it("creates, updates, and deletes meal entries while keeping totals in sync", async () => {
     const breakfast = await createMealEntry(
       userId,
@@ -237,6 +360,724 @@ describe("database queries", () => {
       carbsG: 42,
       fatG: 11,
       caloriesKcal: 395,
+    });
+  });
+
+  it("tracks meal groups and excludes planned or skipped entries from eaten totals", async () => {
+    const groups = await getMealGroups(userId, runtime.db);
+    expect(groups.map((group) => group.label)).toEqual([
+      "Breakfast",
+      "Lunch",
+      "Dinner",
+      "Snack",
+    ]);
+
+    const supper = await createMealGroup(userId, { label: "Supper" }, runtime.db);
+    const eaten = await createMealEntry(
+      userId,
+      {
+        date: "2026-04-12",
+        mealGroupId: supper.id,
+        label: "Salmon bowl",
+        proteinG: 40,
+        carbsG: 50,
+        fatG: 18,
+        caloriesKcal: 520,
+      },
+      runtime.db,
+    );
+    const planned = await createMealEntry(
+      userId,
+      {
+        date: "2026-04-12",
+        status: "planned",
+        label: "Evening shake",
+        proteinG: 30,
+        carbsG: 10,
+        fatG: 2,
+        caloriesKcal: 180,
+      },
+      runtime.db,
+    );
+
+    let summary = await getDailySummary(userId, "2026-04-12", runtime.db);
+    expect(summary.totals.caloriesKcal).toBe(520);
+    expect(summary.plannedTotals.caloriesKcal).toBe(180);
+    expect(summary.meals.find((meal) => meal.id === eaten.id)?.mealGroupId).toBe(supper.id);
+
+    await markMealEntryStatus(userId, planned.id, "eaten", runtime.db);
+    summary = await getDailySummary(userId, "2026-04-12", runtime.db);
+    expect(summary.totals.caloriesKcal).toBe(700);
+    expect(summary.plannedTotals.caloriesKcal).toBe(0);
+  });
+
+  it("rejects inaccessible or deleted meal groups on meal entry saves", async () => {
+    const otherUserId = await createOtherUser();
+    const otherGroup = await createMealGroup(
+      otherUserId,
+      { label: "Other user's dinner" },
+      runtime.db,
+    );
+
+    await expect(
+      createMealEntry(
+        userId,
+        {
+          date: "2026-05-01",
+          mealGroupId: otherGroup.id,
+          label: "Cross-user group",
+          proteinG: 10,
+          carbsG: 10,
+          fatG: 5,
+          caloriesKcal: 125,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Meal group not found.");
+
+    const meal = await createMealEntry(
+      userId,
+      {
+        date: "2026-05-01",
+        label: "Owned meal",
+        proteinG: 20,
+        carbsG: 20,
+        fatG: 10,
+        caloriesKcal: 250,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      updateMealEntry(
+        userId,
+        meal.id,
+        {
+          date: meal.date,
+          mealGroupId: otherGroup.id,
+          label: meal.label,
+          sortOrder: meal.sortOrder,
+          proteinG: 25,
+          carbsG: 20,
+          fatG: 10,
+          caloriesKcal: 270,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Meal group not found.");
+
+    const deletedGroup = await createMealGroup(
+      userId,
+      { label: "Temporary" },
+      runtime.db,
+    );
+    await deleteMealGroup(userId, deletedGroup.id, runtime.db);
+
+    await expect(
+      createMealEntry(
+        userId,
+        {
+          date: "2026-05-01",
+          mealGroupId: deletedGroup.id,
+          label: "Deleted group",
+          proteinG: 10,
+          carbsG: 10,
+          fatG: 5,
+          caloriesKcal: 125,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Meal group not found.");
+  });
+
+  it("rejects inaccessible products and hides their labels from daily summaries", async () => {
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's yogurt",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      createMealEntry(
+        userId,
+        {
+          date: "2026-05-02",
+          productId: otherProduct.id,
+          label: "Cross-user product",
+          proteinG: 15,
+          carbsG: 6,
+          fatG: 3,
+          caloriesKcal: 111,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const meal = await createMealEntry(
+      userId,
+      {
+        date: "2026-05-02",
+        label: "Manual meal",
+        proteinG: 20,
+        carbsG: 20,
+        fatG: 10,
+        caloriesKcal: 250,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      updateMealEntry(
+        userId,
+        meal.id,
+        {
+          date: meal.date,
+          productId: otherProduct.id,
+          label: meal.label,
+          sortOrder: meal.sortOrder,
+          proteinG: 25,
+          carbsG: 20,
+          fatG: 10,
+          caloriesKcal: 270,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const deletedProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Deleted product",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+    await runtime.db
+      .update(foodProducts)
+      .set({ deletedAt: new Date() })
+      .where(eq(foodProducts.id, deletedProduct.id));
+
+    await expect(
+      createMealEntry(
+        userId,
+        {
+          date: "2026-05-02",
+          productId: deletedProduct.id,
+          label: "Deleted product meal",
+          proteinG: 15,
+          carbsG: 6,
+          fatG: 3,
+          caloriesKcal: 111,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    await runtime.db.insert(mealEntries).values({
+      id: randomUUID(),
+      userId,
+      entryDate: "2026-05-03",
+      productId: otherProduct.id,
+      label: "Bad legacy link",
+      sortOrder: 0,
+      proteinG: "1.0",
+      carbsG: "1.0",
+      fatG: "1.0",
+      caloriesKcal: 16,
+      updatedAt: new Date(),
+    });
+
+    const summary = await getDailySummary(userId, "2026-05-03", runtime.db);
+    expect(summary.meals).toHaveLength(1);
+    expect(summary.meals[0]?.productId).toBeNull();
+    expect(summary.meals[0]?.sourceLabel).toBeNull();
+  });
+
+  it("rejects inaccessible recipe ingredient products on create", async () => {
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's oats",
+        source: "manual",
+        proteinPer100: 12,
+        carbsPer100: 60,
+        fatPer100: 7,
+        caloriesPer100: 351,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      createRecipe(
+        userId,
+        {
+          label: "Cross-user recipe",
+          portions: 2,
+          ingredients: [
+            {
+              productId: otherProduct.id,
+              label: "Oats",
+              proteinG: 12,
+              carbsG: 60,
+              fatG: 7,
+              caloriesKcal: 351,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const deletedProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Deleted recipe product",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+    await runtime.db
+      .update(foodProducts)
+      .set({ deletedAt: new Date() })
+      .where(eq(foodProducts.id, deletedProduct.id));
+
+    await expect(
+      createRecipe(
+        userId,
+        {
+          label: "Deleted product recipe",
+          portions: 2,
+          ingredients: [
+            {
+              productId: deletedProduct.id,
+              label: "Deleted product",
+              proteinG: 10,
+              carbsG: 4,
+              fatG: 2,
+              caloriesKcal: 74,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    expect(await runtime.db.select().from(recipes)).toHaveLength(0);
+    expect(await runtime.db.select().from(recipeIngredients)).toHaveLength(0);
+  });
+
+  it("rejects inaccessible recipe ingredient products on update", async () => {
+    const original = await createRecipe(
+      userId,
+      {
+        label: "Original recipe",
+        portions: 2,
+        ingredients: [
+          {
+            label: "Eggs",
+            proteinG: 12,
+            carbsG: 1,
+            fatG: 10,
+            caloriesKcal: 140,
+          },
+        ],
+      },
+      runtime.db,
+    );
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's yogurt",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      updateRecipe(
+        userId,
+        original.id,
+        {
+          label: "Invalid update",
+          portions: 3,
+          ingredients: [
+            {
+              productId: otherProduct.id,
+              label: "Yogurt",
+              proteinG: 15,
+              carbsG: 6,
+              fatG: 3,
+              caloriesKcal: 111,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const deletedProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Deleted yogurt",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+    await runtime.db
+      .update(foodProducts)
+      .set({ deletedAt: new Date() })
+      .where(eq(foodProducts.id, deletedProduct.id));
+
+    await expect(
+      updateRecipe(
+        userId,
+        original.id,
+        {
+          label: "Invalid deleted update",
+          portions: 3,
+          ingredients: [
+            {
+              productId: deletedProduct.id,
+              label: "Deleted yogurt",
+              proteinG: 15,
+              carbsG: 6,
+              fatG: 3,
+              caloriesKcal: 111,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const stored = await getRecipeById(userId, original.id, runtime.db);
+    expect(stored).toMatchObject({
+      label: "Original recipe",
+      portions: 2,
+    });
+    expect(stored?.ingredients).toHaveLength(1);
+    expect(stored?.ingredients[0]).toMatchObject({
+      label: "Eggs",
+      productId: null,
+    });
+  });
+
+  it("preserves manual macro edits for legacy product-linked meals", async () => {
+    const legacyProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Legacy oats",
+        scope: "legacy",
+        source: "legacy",
+        defaultServingQuantity: 1,
+        defaultServingUnit: "serving",
+        proteinPer100: 100,
+        carbsPer100: 100,
+        fatPer100: 100,
+        caloriesPer100: 1600,
+        servingWeightG: 100,
+      },
+      runtime.db,
+    );
+
+    const entry = await createMealEntry(
+      userId,
+      {
+        date: "2026-05-04",
+        productId: legacyProduct.id,
+        label: "Legacy oats",
+        quantity: 1,
+        unit: "serving",
+        proteinG: 5,
+        carbsG: 27,
+        fatG: 3,
+        caloriesKcal: 150,
+      },
+      runtime.db,
+    );
+
+    expect(entry).toMatchObject({
+      productId: legacyProduct.id,
+      proteinG: 5,
+      carbsG: 27,
+      fatG: 3,
+      caloriesKcal: 150,
+    });
+
+    const updated = await updateMealEntry(
+      userId,
+      entry.id,
+      {
+        date: entry.date,
+        productId: legacyProduct.id,
+        label: "Legacy oats edited",
+        sortOrder: entry.sortOrder,
+        quantity: 1,
+        unit: "serving",
+        proteinG: 7,
+        carbsG: 30,
+        fatG: 4,
+        caloriesKcal: 180,
+      },
+      runtime.db,
+    );
+
+    expect(updated).toMatchObject({
+      productId: legacyProduct.id,
+      label: "Legacy oats edited",
+      proteinG: 7,
+      carbsG: 30,
+      fatG: 4,
+      caloriesKcal: 180,
+    });
+  });
+
+  it("seeds default meal groups idempotently across concurrent first requests", async () => {
+    await Promise.all([
+      ensureDefaultMealGroups(userId, runtime.db),
+      ensureDefaultMealGroups(userId, runtime.db),
+    ]);
+
+    const groups = await getMealGroups(userId, runtime.db);
+    expect(groups.map((group) => group.label)).toEqual([
+      "Breakfast",
+      "Lunch",
+      "Dinner",
+      "Snack",
+    ]);
+    expect(new Set(groups.map((group) => group.id)).size).toBe(4);
+  });
+
+  it("rolls back meal group deletion when unassigning entries fails", async () => {
+    const group = await createMealGroup(userId, { label: "Supper" }, runtime.db);
+    const entry = await createMealEntry(
+      userId,
+      {
+        date: "2026-05-05",
+        mealGroupId: group.id,
+        label: "Salmon bowl",
+        proteinG: 40,
+        carbsG: 50,
+        fatG: 18,
+        caloriesKcal: 520,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      deleteMealGroup(userId, group.id, createFailingMealGroupDeleteDb()),
+    ).rejects.toThrow("Forced meal group unassign failure.");
+
+    const groups = await getMealGroups(userId, runtime.db);
+    expect(groups.map((item) => item.id)).toContain(group.id);
+
+    const summary = await getDailySummary(userId, "2026-05-05", runtime.db);
+    expect(summary.meals.find((meal) => meal.id === entry.id)?.mealGroupId).toBe(
+      group.id,
+    );
+  });
+
+  it("returns the existing meal for concurrent creates with the same client mutation id", async () => {
+    const input = {
+      date: "2026-05-06",
+      label: "Idempotent shake",
+      proteinG: 30,
+      carbsG: 20,
+      fatG: 5,
+      caloriesKcal: 245,
+      clientMutationId: "meal-entry-concurrent-1",
+    };
+
+    const [first, second] = await Promise.all([
+      createMealEntry(userId, input, runtime.db),
+      createMealEntry(userId, input, runtime.db),
+    ]);
+
+    expect(second.id).toBe(first.id);
+    const summary = await getDailySummary(userId, "2026-05-06", runtime.db);
+    expect(
+      summary.meals.filter(
+        (meal) => meal.clientMutationId === "meal-entry-concurrent-1",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("creates searchable products and resolves quantity-scaled nutrition", async () => {
+    const product = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Greek yogurt 2%",
+        source: "manual",
+        defaultServingQuantity: 150,
+        defaultServingUnit: "g",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+
+    const results = await searchFoodProducts(userId, "greek", runtime.db);
+    expect(results.map((item) => item.id)).toContain(product.id);
+    expect(resolveProductNutritionForQuantity(product, 150, "g")).toEqual({
+      proteinG: 15,
+      carbsG: 6,
+      fatG: 3,
+      caloriesKcal: 111,
+    });
+  });
+
+  it("creates community barcode products and searchable food products atomically", async () => {
+    const input = {
+      barcode: "8712345000001",
+      name: "Community Protein Drink",
+      brands: "Macro Lab",
+      proteinG: 20,
+      carbsG: 8,
+      fatG: 2,
+      caloriesKcal: 130,
+      servingSizeG: 250,
+    };
+
+    await expect(
+      saveCustomBarcodeProduct(userId, input, createFailingBarcodeFoodProductDb()),
+    ).rejects.toThrow("Forced barcode food product insert failure.");
+
+    expect(await lookupCustomBarcodeProduct(input.barcode, runtime.db)).toBeNull();
+    expect(await runtime.db.select().from(barcodeProducts)).toHaveLength(0);
+    expect(await searchFoodProducts(userId, "Community Protein", runtime.db)).toEqual(
+      [],
+    );
+
+    const saved = await saveCustomBarcodeProduct(userId, input, runtime.db);
+    expect(saved).toMatchObject({
+      barcode: input.barcode,
+      name: input.name,
+      addedByUserId: userId,
+    });
+
+    const products = await searchFoodProducts(
+      userId,
+      "Community Protein",
+      runtime.db,
+    );
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({
+      ownerUserId: null,
+      scope: "global",
+      source: "barcode",
+      barcode: input.barcode,
+      name: input.name,
+      brand: input.brands,
+      proteinPer100: 20,
+      carbsPer100: 8,
+      fatPer100: 2,
+      caloriesPer100: 130,
+      servingWeightG: 250,
+    });
+  });
+
+  it("forces user-created products to personal scope and validates product enums", async () => {
+    const baseProduct = {
+      name: "Shared almonds",
+      source: "manual" as const,
+      defaultServingQuantity: 100,
+      defaultServingUnit: "g" as const,
+      proteinPer100: 21,
+      carbsPer100: 22,
+      fatPer100: 49,
+      caloriesPer100: 579,
+    };
+    const product = await createPersonalFoodProduct(
+      userId,
+      {
+        ...baseProduct,
+        scope: "global",
+      },
+      runtime.db,
+    );
+
+    expect(product.scope).toBe("personal");
+    expect(product.ownerUserId).toBe(userId);
+
+    const otherUserId = await createOtherUser();
+    const otherResults = await searchFoodProducts(
+      otherUserId,
+      "shared almonds",
+      runtime.db,
+    );
+    expect(otherResults.map((item) => item.id)).not.toContain(product.id);
+
+    await expect(
+      createPersonalFoodProduct(
+        userId,
+        { ...baseProduct, name: "Bad scope", scope: "shared" as never },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Product scope is invalid.");
+
+    await expect(
+      createPersonalFoodProduct(
+        userId,
+        { ...baseProduct, name: "Bad source", source: "feed" as never },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Product source is invalid.");
+  });
+
+  it("preserves recipe cooked weight and ingredient quantity metadata", async () => {
+    const recipe = await createRecipe(
+      userId,
+      {
+        label: "Rice pot",
+        portions: 4,
+        totalCookedWeightG: 900,
+        ingredients: [
+          {
+            label: "Rice",
+            quantity: 250,
+            unit: "g",
+            proteinG: 18,
+            carbsG: 190,
+            fatG: 2,
+            caloriesKcal: 850,
+          },
+        ],
+      },
+      runtime.db,
+    );
+
+    expect(recipe.totalCookedWeightG).toBe(900);
+    expect(recipe.ingredients[0]).toMatchObject({
+      quantity: 250,
+      unit: "g",
     });
   });
 

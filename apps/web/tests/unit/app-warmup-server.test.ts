@@ -21,16 +21,21 @@ const zeroGoals: MacroGoals = {
   fatG: null,
 };
 
+const zeroMacros = {
+  caloriesKcal: 0,
+  proteinG: 0,
+  carbsG: 0,
+  fatG: 0,
+};
+
 function buildSummary(date: string): DailySummary {
   return {
     date,
-    totals: {
-      caloriesKcal: 0,
-      proteinG: 0,
-      carbsG: 0,
-      fatG: 0,
-    },
+    totals: zeroMacros,
+    plannedTotals: zeroMacros,
+    skippedTotals: zeroMacros,
     meals: [],
+    mealGroups: [],
   };
 }
 
@@ -79,6 +84,31 @@ const statsData: StatsPageData = {
   totalCaloriesKcal: 0,
   bestCalorieDay: null,
   topLabels: [],
+  goalHitRates: {
+    days7: zeroGoals,
+    days30: zeroGoals,
+    days90: zeroGoals,
+  },
+  macroConsistency: {
+    calorieAvgAbsoluteDeviation: null,
+    score: null,
+  },
+  rollingAverages: {
+    days7: zeroMacros,
+    days30: zeroMacros,
+  },
+  estimatedEnergyBalance: {
+    averageDailyDeltaKcal: null,
+    estimatedWeeklyWeightChangeKg: null,
+  },
+  proteinPerKg: null,
+  smoothedWeightTrend: [],
+  plannedAdherence: {
+    plannedCount: 0,
+    eatenCount: 0,
+    skippedCount: 0,
+    adherencePct: null,
+  },
 };
 
 const weight: WeightPageData = {
