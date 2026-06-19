@@ -1299,14 +1299,26 @@ export async function searchMealEntries(
       id: mealEntries.id,
       userId: mealEntries.userId,
       date: mealEntries.entryDate,
+      mealGroupId: mealEntries.mealGroupId,
+      status: mealEntries.status,
+      productId: foodProducts.id,
       label: mealEntries.label,
       sortOrder: mealEntries.sortOrder,
+      quantity: mealEntries.quantity,
+      unit: mealEntries.unit,
+      servingMultiplier: mealEntries.servingMultiplier,
       proteinG: mealEntries.proteinG,
       carbsG: mealEntries.carbsG,
       fatG: mealEntries.fatG,
       caloriesKcal: mealEntries.caloriesKcal,
+      clientMutationId: mealEntries.clientMutationId,
+      sourceLabel: foodProducts.name,
     })
     .from(mealEntries)
+    .leftJoin(
+      foodProducts,
+      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
+    )
     .where(and(eatenEntryPredicate(userId), ...wordConditions))
     .orderBy(desc(mealEntries.entryDate), asc(mealEntries.sortOrder))
     .limit(100);

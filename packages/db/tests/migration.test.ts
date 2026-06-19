@@ -16,6 +16,7 @@ const migrationFiles = [
   "0006_preset_last_used_at.sql",
   "0007_admin_panel.sql",
   "0008_product_model_meal_planning.sql",
+  "0009_sync_barcode_food_products.sql",
 ] as const;
 
 async function applyMigration(runtime: DatabaseRuntime, fileName: string) {
@@ -107,5 +108,56 @@ describe("database migrations", () => {
     );
     expect(ingredientProductIds.size).toBe(1);
     expect([...ingredientProductIds][0]).toBeTruthy();
+  });
+
+  it("syncs existing barcode products into global food products", async () => {
+    runtime = await createDatabaseRuntime("memory:");
+
+    for (const fileName of migrationFiles.slice(0, 9)) {
+      await applyMigration(runtime, fileName);
+    }
+
+    await runtime.db.execute(sql.raw(`
+      INSERT INTO "barcode_products" (
+        "id",
+        "barcode",
+        "name",
+        "brands",
+        "protein_g",
+        "carbs_g",
+        "fat_g",
+        "calories_kcal",
+        "serving_size_g"
+      )
+      VALUES (
+        '77777777-7777-4777-8777-777777777777',
+        '8712345000001',
+        'Community Protein Drink',
+        'Macro Lab',
+        20.0,
+        8.0,
+        2.0,
+        130,
+        250.0
+      )
+    `));
+
+    await applyMigration(runtime, "0009_sync_barcode_food_products.sql");
+
+    const products = await runtime.db
+      .select()
+      .from(foodProducts)
+      .where(eq(foodProducts.barcode, "8712345000001"));
+
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({
+      ownerUserId: null,
+      scope: "global",
+      source: "barcode",
+      barcode: "8712345000001",
+      name: "Community Protein Drink",
+      brand: "Macro Lab",
+      caloriesPer100: 130,
+    });
   });
 });
