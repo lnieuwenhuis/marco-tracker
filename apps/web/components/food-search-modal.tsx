@@ -45,6 +45,7 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
+      setProducts([]);
       setError(null);
       setIsSearching(false);
       return;
@@ -52,6 +53,7 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
 
     let cancelled = false;
     setIsSearching(true);
+    setProducts([]);
 
     const timer = setTimeout(async () => {
       try {
@@ -64,6 +66,8 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
           const productResult = await searchFoodProductsAction({ query: query.trim() });
           if (!cancelled && productResult.ok && productResult.products) {
             setProducts(productResult.products);
+          } else if (!cancelled) {
+            setProducts([]);
           }
           setError(null);
         } else {

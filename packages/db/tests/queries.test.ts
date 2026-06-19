@@ -4,7 +4,9 @@ import {
   createRecipe,
   createMealEntry,
   createPersonalFoodProduct,
+  deleteMealGroup,
   deleteMealEntry,
+  ensureDefaultMealGroups,
   getDailySummary,
   getMealGroups,
   getPeriodAverages,
@@ -18,9 +20,10 @@ import {
   upsertUserFromShooProfile,
   type DatabaseRuntime,
 } from "../src";
-import { mealEntries, recipeIngredients, recipes } from "../src/schema";
+import { foodProducts, mealEntries, recipeIngredients, recipes } from "../src/schema";
 import { createTestDatabase } from "../src/testing";
 import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 describe("database queries", () => {
@@ -62,6 +65,19 @@ describe("database queries", () => {
     return entry;
   }
 
+  async function createOtherUser() {
+    const user = await upsertUserFromShooProfile(
+      {
+        pairwiseSub: "ps_other_user",
+        email: "other@example.com",
+        displayName: "Other",
+      },
+      runtime.db,
+    );
+
+    return user.id;
+  }
+
   function createFailingRecipeDb(failOnIngredientInsertNumber: number) {
     let ingredientInsertCount = 0;
 
@@ -78,6 +94,34 @@ describe("database queries", () => {
               }
 
               return target.insert(table);
+            };
+          }
+
+          if (prop === "transaction") {
+            return async (callback: (tx: unknown) => unknown) =>
+              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
+          }
+
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }
+
+    return wrapClient(runtime.db as any);
+  }
+
+  function createFailingMealGroupDeleteDb() {
+    function wrapClient(client: any) {
+      return new Proxy(client, {
+        get(target, prop, receiver) {
+          if (prop === "update") {
+            return (table: unknown) => {
+              if (table === mealEntries) {
+                throw new Error("Forced meal group unassign failure.");
+              }
+
+              return target.update(table);
             };
           }
 
@@ -292,6 +336,315 @@ describe("database queries", () => {
     summary = await getDailySummary(userId, "2026-04-12", runtime.db);
     expect(summary.totals.caloriesKcal).toBe(700);
     expect(summary.plannedTotals.caloriesKcal).toBe(0);
+  });
+
+  it("rejects inaccessible or deleted meal groups on meal entry saves", async () => {
+    const otherUserId = await createOtherUser();
+    const otherGroup = await createMealGroup(
+      otherUserId,
+      { label: "Other user's dinner" },
+      runtime.db,
+    );
+
+    await expect(
+      createMealEntry(
+        userId,
+        {
+          date: "2026-05-01",
+          mealGroupId: otherGroup.id,
+          label: "Cross-user group",
+          proteinG: 10,
+          carbsG: 10,
+          fatG: 5,
+          caloriesKcal: 125,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Meal group not found.");
+
+    const meal = await createMealEntry(
+      userId,
+      {
+        date: "2026-05-01",
+        label: "Owned meal",
+        proteinG: 20,
+        carbsG: 20,
+        fatG: 10,
+        caloriesKcal: 250,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      updateMealEntry(
+        userId,
+        meal.id,
+        {
+          date: meal.date,
+          mealGroupId: otherGroup.id,
+          label: meal.label,
+          sortOrder: meal.sortOrder,
+          proteinG: 25,
+          carbsG: 20,
+          fatG: 10,
+          caloriesKcal: 270,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Meal group not found.");
+
+    const deletedGroup = await createMealGroup(
+      userId,
+      { label: "Temporary" },
+      runtime.db,
+    );
+    await deleteMealGroup(userId, deletedGroup.id, runtime.db);
+
+    await expect(
+      createMealEntry(
+        userId,
+        {
+          date: "2026-05-01",
+          mealGroupId: deletedGroup.id,
+          label: "Deleted group",
+          proteinG: 10,
+          carbsG: 10,
+          fatG: 5,
+          caloriesKcal: 125,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Meal group not found.");
+  });
+
+  it("rejects inaccessible products and hides their labels from daily summaries", async () => {
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's yogurt",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      createMealEntry(
+        userId,
+        {
+          date: "2026-05-02",
+          productId: otherProduct.id,
+          label: "Cross-user product",
+          proteinG: 15,
+          carbsG: 6,
+          fatG: 3,
+          caloriesKcal: 111,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const meal = await createMealEntry(
+      userId,
+      {
+        date: "2026-05-02",
+        label: "Manual meal",
+        proteinG: 20,
+        carbsG: 20,
+        fatG: 10,
+        caloriesKcal: 250,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      updateMealEntry(
+        userId,
+        meal.id,
+        {
+          date: meal.date,
+          productId: otherProduct.id,
+          label: meal.label,
+          sortOrder: meal.sortOrder,
+          proteinG: 25,
+          carbsG: 20,
+          fatG: 10,
+          caloriesKcal: 270,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const deletedProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Deleted product",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+    await runtime.db
+      .update(foodProducts)
+      .set({ deletedAt: new Date() })
+      .where(eq(foodProducts.id, deletedProduct.id));
+
+    await expect(
+      createMealEntry(
+        userId,
+        {
+          date: "2026-05-02",
+          productId: deletedProduct.id,
+          label: "Deleted product meal",
+          proteinG: 15,
+          carbsG: 6,
+          fatG: 3,
+          caloriesKcal: 111,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    await runtime.db.insert(mealEntries).values({
+      id: randomUUID(),
+      userId,
+      entryDate: "2026-05-03",
+      productId: otherProduct.id,
+      label: "Bad legacy link",
+      sortOrder: 0,
+      proteinG: "1.0",
+      carbsG: "1.0",
+      fatG: "1.0",
+      caloriesKcal: 16,
+      updatedAt: new Date(),
+    });
+
+    const summary = await getDailySummary(userId, "2026-05-03", runtime.db);
+    expect(summary.meals).toHaveLength(1);
+    expect(summary.meals[0]?.productId).toBeNull();
+    expect(summary.meals[0]?.sourceLabel).toBeNull();
+  });
+
+  it("preserves manual macro edits for legacy product-linked meals", async () => {
+    const legacyProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Legacy oats",
+        scope: "legacy",
+        source: "legacy",
+        defaultServingQuantity: 1,
+        defaultServingUnit: "serving",
+        proteinPer100: 100,
+        carbsPer100: 100,
+        fatPer100: 100,
+        caloriesPer100: 1600,
+        servingWeightG: 100,
+      },
+      runtime.db,
+    );
+
+    const entry = await createMealEntry(
+      userId,
+      {
+        date: "2026-05-04",
+        productId: legacyProduct.id,
+        label: "Legacy oats",
+        quantity: 1,
+        unit: "serving",
+        proteinG: 5,
+        carbsG: 27,
+        fatG: 3,
+        caloriesKcal: 150,
+      },
+      runtime.db,
+    );
+
+    expect(entry).toMatchObject({
+      productId: legacyProduct.id,
+      proteinG: 5,
+      carbsG: 27,
+      fatG: 3,
+      caloriesKcal: 150,
+    });
+
+    const updated = await updateMealEntry(
+      userId,
+      entry.id,
+      {
+        date: entry.date,
+        productId: legacyProduct.id,
+        label: "Legacy oats edited",
+        sortOrder: entry.sortOrder,
+        quantity: 1,
+        unit: "serving",
+        proteinG: 7,
+        carbsG: 30,
+        fatG: 4,
+        caloriesKcal: 180,
+      },
+      runtime.db,
+    );
+
+    expect(updated).toMatchObject({
+      productId: legacyProduct.id,
+      label: "Legacy oats edited",
+      proteinG: 7,
+      carbsG: 30,
+      fatG: 4,
+      caloriesKcal: 180,
+    });
+  });
+
+  it("seeds default meal groups idempotently across concurrent first requests", async () => {
+    await Promise.all([
+      ensureDefaultMealGroups(userId, runtime.db),
+      ensureDefaultMealGroups(userId, runtime.db),
+    ]);
+
+    const groups = await getMealGroups(userId, runtime.db);
+    expect(groups.map((group) => group.label)).toEqual([
+      "Breakfast",
+      "Lunch",
+      "Dinner",
+      "Snack",
+    ]);
+    expect(new Set(groups.map((group) => group.id)).size).toBe(4);
+  });
+
+  it("rolls back meal group deletion when unassigning entries fails", async () => {
+    const group = await createMealGroup(userId, { label: "Supper" }, runtime.db);
+    const entry = await createMealEntry(
+      userId,
+      {
+        date: "2026-05-05",
+        mealGroupId: group.id,
+        label: "Salmon bowl",
+        proteinG: 40,
+        carbsG: 50,
+        fatG: 18,
+        caloriesKcal: 520,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      deleteMealGroup(userId, group.id, createFailingMealGroupDeleteDb()),
+    ).rejects.toThrow("Forced meal group unassign failure.");
+
+    const groups = await getMealGroups(userId, runtime.db);
+    expect(groups.map((item) => item.id)).toContain(group.id);
+
+    const summary = await getDailySummary(userId, "2026-05-05", runtime.db);
+    expect(summary.meals.find((meal) => meal.id === entry.id)?.mealGroupId).toBe(
+      group.id,
+    );
   });
 
   it("creates searchable products and resolves quantity-scaled nutrition", async () => {

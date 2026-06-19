@@ -1,4 +1,5 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, max, ne, or, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
 
 import { computeStreaks, getPeriodRanges } from "./dates";
 import { getDb, type DatabaseClient } from "./client";
@@ -407,6 +408,15 @@ export async function getUserById(userId: string, db?: DatabaseClient) {
 
 const DEFAULT_MEAL_GROUP_LABELS = ["Breakfast", "Lunch", "Dinner", "Snack"] as const;
 
+function deterministicUuid(seed: string) {
+  const hash = createHash("md5").update(seed).digest("hex");
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
+
+function defaultMealGroupId(userId: string, label: string) {
+  return deterministicUuid(`${userId}:meal-group:${label}`);
+}
+
 export async function ensureDefaultMealGroups(userId: string, db?: DatabaseClient) {
   const database = await resolveDb(db);
   const existing = await database
@@ -419,16 +429,27 @@ export async function ensureDefaultMealGroups(userId: string, db?: DatabaseClien
     return;
   }
 
-  await database.insert(mealGroups).values(
-    DEFAULT_MEAL_GROUP_LABELS.map((label, index) => ({
-      id: crypto.randomUUID(),
+  const now = new Date();
+  await database
+    .insert(mealGroups)
+    .values(DEFAULT_MEAL_GROUP_LABELS.map((label, index) => ({
+      id: defaultMealGroupId(userId, label),
       userId,
       label,
       sortOrder: index,
       isDefault: true,
-      updatedAt: new Date(),
-    })),
-  );
+      updatedAt: now,
+    })))
+    .onConflictDoUpdate({
+      target: mealGroups.id,
+      set: {
+        label: sql`excluded.label`,
+        sortOrder: sql`excluded.sort_order`,
+        isDefault: true,
+        deletedAt: null,
+        updatedAt: now,
+      },
+    });
 }
 
 export async function getMealGroups(
@@ -514,20 +535,31 @@ export async function deleteMealGroup(
   db?: DatabaseClient,
 ): Promise<boolean> {
   const database = await resolveDb(db);
-  const [deleted] = await database
-    .update(mealGroups)
-    .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(mealGroups.id, groupId), eq(mealGroups.userId, userId)))
-    .returning();
+  return database.transaction(async (tx) => {
+    const now = new Date();
+    const [deleted] = await tx
+      .update(mealGroups)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(mealGroups.id, groupId),
+          eq(mealGroups.userId, userId),
+          isNull(mealGroups.deletedAt),
+        ),
+      )
+      .returning();
 
-  if (deleted) {
-    await database
+    if (!deleted) {
+      return false;
+    }
+
+    await tx
       .update(mealEntries)
-      .set({ mealGroupId: null, updatedAt: new Date() })
+      .set({ mealGroupId: null, updatedAt: now })
       .where(and(eq(mealEntries.userId, userId), eq(mealEntries.mealGroupId, groupId)));
-  }
 
-  return Boolean(deleted);
+    return true;
+  });
 }
 
 export async function reorderMealGroups(
@@ -562,7 +594,7 @@ export async function getDailySummary(
         date: mealEntries.entryDate,
         mealGroupId: mealEntries.mealGroupId,
         status: mealEntries.status,
-        productId: mealEntries.productId,
+        productId: foodProducts.id,
         label: mealEntries.label,
         sortOrder: mealEntries.sortOrder,
         quantity: mealEntries.quantity,
@@ -576,7 +608,10 @@ export async function getDailySummary(
         sourceLabel: foodProducts.name,
       })
       .from(mealEntries)
-      .leftJoin(foodProducts, eq(mealEntries.productId, foodProducts.id))
+      .leftJoin(
+        foodProducts,
+        and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
+      )
       .where(
         and(eq(mealEntries.userId, userId), eq(mealEntries.entryDate, selectedDate)),
       )
@@ -730,6 +765,36 @@ async function getFoodProductByIdForUser(
     .limit(1);
 
   return row ? mapFoodProductRow(row) : null;
+}
+
+async function assertMealGroupAccessibleForUser(
+  userId: string,
+  mealGroupId: string | null | undefined,
+  db: DatabaseClient,
+) {
+  if (!mealGroupId) {
+    return;
+  }
+
+  const [row] = await db
+    .select({ id: mealGroups.id })
+    .from(mealGroups)
+    .where(
+      and(
+        eq(mealGroups.id, mealGroupId),
+        eq(mealGroups.userId, userId),
+        isNull(mealGroups.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    throw new Error("Meal group not found.");
+  }
+}
+
+function productControlsMealMacros(product: FoodProduct) {
+  return product.scope !== "legacy" && product.source !== "legacy";
 }
 
 export async function updatePersonalFoodProduct(
@@ -910,7 +975,7 @@ export async function createMealEntry(
         date: mealEntries.entryDate,
         mealGroupId: mealEntries.mealGroupId,
         status: mealEntries.status,
-        productId: mealEntries.productId,
+        productId: foodProducts.id,
         label: mealEntries.label,
         sortOrder: mealEntries.sortOrder,
         quantity: mealEntries.quantity,
@@ -924,7 +989,10 @@ export async function createMealEntry(
         sourceLabel: foodProducts.name,
       })
       .from(mealEntries)
-      .leftJoin(foodProducts, eq(mealEntries.productId, foodProducts.id))
+      .leftJoin(
+        foodProducts,
+        and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
+      )
       .where(
         and(
           eq(mealEntries.userId, userId),
@@ -952,18 +1020,24 @@ export async function createMealEntry(
     nextSortOrder = (row?.maxSortOrder ?? -1) + 1;
   }
 
+  await assertMealGroupAccessibleForUser(userId, input.mealGroupId, database);
+
   let productMacros: MacroNumbers | null = null;
   let productLabel: string | null = null;
   if (input.productId) {
     const product = await getFoodProductByIdForUser(userId, input.productId, database);
-    if (product) {
+    if (!product) {
+      throw new Error("Food product not found.");
+    }
+
+    productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
+    if (productControlsMealMacros(product)) {
       productMacros = resolveProductNutritionForQuantity(
         product,
         input.quantity ?? product.defaultServingQuantity,
         input.unit ?? product.defaultServingUnit,
         input.servingMultiplier ?? 1,
       );
-      productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
     }
   }
 
@@ -1007,18 +1081,24 @@ export async function updateMealEntry(
   db?: DatabaseClient,
 ) {
   const database = await resolveDb(db);
+  await assertMealGroupAccessibleForUser(userId, input.mealGroupId, database);
+
   let productMacros: MacroNumbers | null = null;
   let productLabel: string | null = null;
   if (input.productId) {
     const product = await getFoodProductByIdForUser(userId, input.productId, database);
-    if (product) {
+    if (!product) {
+      throw new Error("Food product not found.");
+    }
+
+    productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
+    if (productControlsMealMacros(product)) {
       productMacros = resolveProductNutritionForQuantity(
         product,
         input.quantity ?? product.defaultServingQuantity,
         input.unit ?? product.defaultServingUnit,
         input.servingMultiplier ?? 1,
       );
-      productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
     }
   }
   const normalized = validateMealEntryInput({

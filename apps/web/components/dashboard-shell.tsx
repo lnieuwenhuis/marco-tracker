@@ -641,6 +641,7 @@ export function DashboardShell({
 
   async function handleDeleteMealGroup(groupId: string) {
     const previousGroups = localMealGroups;
+    const previousDrafts = drafts;
     setLocalMealGroups((groups) => groups.filter((group) => group.id !== groupId));
     setDrafts((currentDrafts) =>
       currentDrafts.map((draft) =>
@@ -653,6 +654,7 @@ export function DashboardShell({
       const result = await deleteMealGroupAction({ id: groupId });
       if (!result.ok) {
         setLocalMealGroups(previousGroups);
+        setDrafts(previousDrafts);
         setGroupError(result.error ?? "Unable to delete group.");
       }
     } finally {

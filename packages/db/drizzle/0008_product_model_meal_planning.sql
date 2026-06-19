@@ -146,15 +146,6 @@ SELECT
   '100'
 FROM legacy_foods;
 --> statement-breakpoint
-UPDATE "meal_entries"
-SET "product_id" = (
-  substr(md5("meal_entries"."user_id"::text || ':legacy-food:' || lower(trim("meal_entries"."label")) || ':' || "meal_entries"."protein_g"::text || ':' || "meal_entries"."carbs_g"::text || ':' || "meal_entries"."fat_g"::text || ':' || "meal_entries"."calories_kcal"::text), 1, 8) || '-' ||
-  substr(md5("meal_entries"."user_id"::text || ':legacy-food:' || lower(trim("meal_entries"."label")) || ':' || "meal_entries"."protein_g"::text || ':' || "meal_entries"."carbs_g"::text || ':' || "meal_entries"."fat_g"::text || ':' || "meal_entries"."calories_kcal"::text), 9, 4) || '-' ||
-  substr(md5("meal_entries"."user_id"::text || ':legacy-food:' || lower(trim("meal_entries"."label")) || ':' || "meal_entries"."protein_g"::text || ':' || "meal_entries"."carbs_g"::text || ':' || "meal_entries"."fat_g"::text || ':' || "meal_entries"."calories_kcal"::text), 13, 4) || '-' ||
-  substr(md5("meal_entries"."user_id"::text || ':legacy-food:' || lower(trim("meal_entries"."label")) || ':' || "meal_entries"."protein_g"::text || ':' || "meal_entries"."carbs_g"::text || ':' || "meal_entries"."fat_g"::text || ':' || "meal_entries"."calories_kcal"::text), 17, 4) || '-' ||
-  substr(md5("meal_entries"."user_id"::text || ':legacy-food:' || lower(trim("meal_entries"."label")) || ':' || "meal_entries"."protein_g"::text || ':' || "meal_entries"."carbs_g"::text || ':' || "meal_entries"."fat_g"::text || ':' || "meal_entries"."calories_kcal"::text), 21, 12)
-)::uuid;
---> statement-breakpoint
 WITH legacy_ingredients AS (
   SELECT DISTINCT
     "recipes"."user_id" AS owner_user_id,
