@@ -13,9 +13,10 @@ import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 type FoodSearchModalProps = {
   onClose: () => void;
   onViewDate: (date: string) => void;
+  onEntrySaved?: (entry: MealEntryRecord) => void;
 };
 
-export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
+export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearchModalProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MealEntryRecord[]>([]);
   const [products, setProducts] = useState<FoodProduct[]>([]);
@@ -142,6 +143,9 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
 
       if (result.ok) {
         invalidateAppDataCache(getDailyMutationCacheKeys(todayStr));
+        if (result.entry) {
+          onEntrySaved?.(result.entry);
+        }
         setCopiedIds((prev) => new Set([...prev, product.id]));
         return;
       }

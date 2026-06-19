@@ -69,6 +69,19 @@ function mealToDraft(meal: MealEntryRecord): MealDraft {
   };
 }
 
+function mealToDraftWithClientId(meal: MealEntryRecord, clientId = meal.id): MealDraft {
+  return { ...mealToDraft(meal), clientId };
+}
+
+function upsertSavedMeal(meals: MealEntryRecord[], entry: MealEntryRecord) {
+  const exists = meals.some((meal) => meal.id === entry.id);
+  if (!exists) {
+    return [...meals, entry];
+  }
+
+  return meals.map((meal) => (meal.id === entry.id ? entry : meal));
+}
+
 function createEmptyDraft(sortOrder: number, status: MealEntryStatus): MealDraft {
   return {
     clientId: `draft-${crypto.randomUUID()}`,
@@ -152,6 +165,7 @@ export function DashboardShell({
   );
   const [errors, setErrors] = useState<ErrorState>({});
   const [activeMutation, setActiveMutation] = useState<string | null>(null);
+  const [savingClientId, setSavingClientId] = useState<string | null>(null);
   const [isPending, beginMutation] = useTransition();
 
   const [showPresetsModal, setShowPresetsModal] = useState(false);
@@ -385,6 +399,29 @@ export function DashboardShell({
     }
   }
 
+  function handleSearchEntrySaved(entry: MealEntryRecord) {
+    if (entry.date !== selectedDate) {
+      return;
+    }
+
+    setSavedMeals((meals) => upsertSavedMeal(meals, entry));
+    setDrafts((currentDrafts) => {
+      const existingDraft = currentDrafts.find((draft) => draft.id === entry.id);
+      const savedDraft = mealToDraftWithClientId(
+        entry,
+        existingDraft?.clientId ?? entry.id,
+      );
+
+      if (!existingDraft) {
+        return [...currentDrafts, savedDraft];
+      }
+
+      return currentDrafts.map((draft) =>
+        draft.id === entry.id ? savedDraft : draft,
+      );
+    });
+  }
+
   function removeLocalDraft(clientId: string) {
     setDrafts((currentDrafts) =>
       currentDrafts.filter((draft) => draft.clientId !== clientId),
@@ -424,14 +461,14 @@ export function DashboardShell({
     }));
   }
 
-  function handleSave(clientId: string) {
+  async function handleSave(clientId: string) {
     const draft = drafts.find((entry) => entry.clientId === clientId);
     if (!draft) {
       return;
     }
 
-    setActiveMutation(clientId);
-    beginMutation(async () => {
+    setSavingClientId(clientId);
+    try {
       const result = await saveMealEntryAction({
         id: draft.id,
         date: selectedDate,
@@ -454,23 +491,25 @@ export function DashboardShell({
           ...currentErrors,
           [clientId]: result.error ?? "Unable to save food item.",
         }));
-        setActiveMutation(null);
         return;
       }
 
-      // Stamp the server-assigned ID onto the draft so subsequent edits go
-      // through the update path rather than creating a duplicate entry.
       if (result.entry) {
+        const savedEntry = result.entry;
         setDrafts((currentDrafts) =>
           currentDrafts.map((d) =>
-            d.clientId === clientId ? { ...d, id: result.entry!.id } : d,
+            d.clientId === clientId
+              ? mealToDraftWithClientId(savedEntry, clientId)
+              : d,
           ),
         );
+        setSavedMeals((meals) => upsertSavedMeal(meals, savedEntry));
       }
 
       invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
-      router.refresh();
-    });
+    } finally {
+      setSavingClientId(null);
+    }
   }
 
   function handleDelete(clientId: string) {
@@ -1047,26 +1086,28 @@ export function DashboardShell({
                 </h3>
                 <div className="space-y-3">
                   {groupDrafts.map((draft) => {
-            const busy = isPending && activeMutation === draft.clientId;
+                    const busy =
+                      savingClientId === draft.clientId ||
+                      (isPending && activeMutation === draft.clientId);
 
-            return (
-              <MealCard
-                key={draft.clientId}
-                draft={draft}
-                busy={busy}
-                error={errors[draft.clientId]}
-                isCopied={copiedCardIds.has(draft.clientId)}
-                mealGroups={localMealGroups}
-                onChange={updateDraft}
-                onSave={handleSave}
-                onDelete={handleDelete}
-                onDuplicate={handleDuplicate}
-                onGroupChange={handleGroupChange}
-                onStatusChange={handleStatusChange}
-                onCopyToToday={isViewingToday ? undefined : handleCopyToToday}
-                onDiscardChanges={discardDraftChanges}
-              />
-            );
+                    return (
+                      <MealCard
+                        key={draft.clientId}
+                        draft={draft}
+                        busy={busy}
+                        error={errors[draft.clientId]}
+                        isCopied={copiedCardIds.has(draft.clientId)}
+                        mealGroups={localMealGroups}
+                        onChange={updateDraft}
+                        onSave={handleSave}
+                        onDelete={handleDelete}
+                        onDuplicate={handleDuplicate}
+                        onGroupChange={handleGroupChange}
+                        onStatusChange={handleStatusChange}
+                        onCopyToToday={isViewingToday ? undefined : handleCopyToToday}
+                        onDiscardChanges={discardDraftChanges}
+                      />
+                    );
                   })}
                 </div>
               </div>
@@ -1105,6 +1146,7 @@ export function DashboardShell({
       {showSearchModal && (
         <FoodSearchModal
           onClose={() => setShowSearchModal(false)}
+          onEntrySaved={handleSearchEntrySaved}
           onViewDate={(date) => {
             setShowSearchModal(false);
             const href = `/?date=${date}`;
