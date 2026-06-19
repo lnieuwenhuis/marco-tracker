@@ -1,6 +1,6 @@
 "use client";
 
-import type { RecipeRecord } from "@macro-tracker/db";
+import type { MealEntryStatus, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
@@ -10,6 +10,7 @@ import {
   getRecipeMutationCacheKeys,
 } from "@/lib/app-warmup";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
+import { getLocalDateString } from "@/lib/startup-date";
 
 import { invalidateAppDataCache } from "./app-data-cache";
 import { ConfirmDeleteButton } from "./confirm-delete-button";
@@ -30,9 +31,12 @@ export function RecipeCard({ recipe, selectedDate }: RecipeCardProps) {
   function handleLogPortion() {
     setError(null);
     startTransition(async () => {
+      const status: MealEntryStatus =
+        selectedDate > getLocalDateString() ? "planned" : "eaten";
       const result = await logRecipePortionAction({
         recipeId: recipe.id,
         date: selectedDate,
+        status,
         portionCount: Number(portionCount) || 1,
         gramsConsumed: gramsConsumed.trim() ? Number(gramsConsumed) : null,
       });

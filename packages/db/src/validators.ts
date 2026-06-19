@@ -1,7 +1,11 @@
 import {
+  FOOD_PRODUCT_SCOPE_VALUES,
+  FOOD_PRODUCT_SOURCE_VALUES,
   isMealEntryStatus,
   isQuantityUnit,
   type FoodProductInput,
+  type FoodProductScope,
+  type FoodProductSource,
   type MacroNumbers,
   type MealEntryInput,
   type QuantityUnit,
@@ -18,6 +22,28 @@ export class MealEntryValidationError extends Error {
 
 function roundToSingleDecimal(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function normalizeFoodProductScope(value: unknown): FoodProductScope {
+  const scope = value ?? "personal";
+  if (
+    typeof scope !== "string" ||
+    !FOOD_PRODUCT_SCOPE_VALUES.includes(scope as FoodProductScope)
+  ) {
+    throw new MealEntryValidationError("Product scope is invalid.");
+  }
+  return scope as FoodProductScope;
+}
+
+function normalizeFoodProductSource(value: unknown): FoodProductSource {
+  const source = value ?? "manual";
+  if (
+    typeof source !== "string" ||
+    !FOOD_PRODUCT_SOURCE_VALUES.includes(source as FoodProductSource)
+  ) {
+    throw new MealEntryValidationError("Product source is invalid.");
+  }
+  return source as FoodProductSource;
 }
 
 export class WeightEntryValidationError extends Error {
@@ -252,13 +278,16 @@ export function validateFoodProductInput(input: FoodProductInput): Required<
       ? normalizePositiveNumber(input.servingVolumeMl, "Serving volume", 1)
       : null;
 
+  const scope = normalizeFoodProductScope(input.scope);
+  const source = normalizeFoodProductSource(input.source);
+
   return {
     ...input,
     name,
     brand: input.brand?.trim() ?? "",
     barcode: input.barcode?.trim() || null,
-    scope: input.scope ?? "personal",
-    source: input.source ?? "manual",
+    scope,
+    source,
     defaultServingQuantity,
     defaultServingUnit,
     proteinPer100: macros.proteinG,

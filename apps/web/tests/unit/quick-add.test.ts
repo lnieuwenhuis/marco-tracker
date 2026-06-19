@@ -12,6 +12,23 @@ import {
 } from "@/lib/quick-add";
 import type { MealDraft } from "@/components/meal-card";
 
+function buildDraft(overrides: Partial<MealDraft>): MealDraft {
+  return {
+    clientId: "draft",
+    status: "eaten",
+    label: "Food",
+    quantity: "1",
+    unit: "serving",
+    servingMultiplier: "1",
+    proteinG: "0",
+    carbsG: "0",
+    fatG: "0",
+    caloriesKcal: "0",
+    sortOrder: 0,
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // computeLiveTotals
 // ---------------------------------------------------------------------------
@@ -26,9 +43,9 @@ describe("computeLiveTotals", () => {
     });
   });
 
-  it("sums numeric string values across all drafts", () => {
+  it("sums numeric string values across eaten drafts", () => {
     const drafts: MealDraft[] = [
-      {
+      buildDraft({
         clientId: "a",
         label: "Eggs",
         proteinG: "12",
@@ -36,8 +53,8 @@ describe("computeLiveTotals", () => {
         fatG: "9",
         caloriesKcal: "130",
         sortOrder: 0,
-      },
-      {
+      }),
+      buildDraft({
         clientId: "b",
         label: "Oats",
         proteinG: "5",
@@ -45,7 +62,7 @@ describe("computeLiveTotals", () => {
         fatG: "3",
         caloriesKcal: "150",
         sortOrder: 1,
-      },
+      }),
     ];
 
     expect(computeLiveTotals(drafts)).toEqual({
@@ -58,7 +75,7 @@ describe("computeLiveTotals", () => {
 
   it("treats empty strings as zero", () => {
     const drafts: MealDraft[] = [
-      {
+      buildDraft({
         clientId: "a",
         label: "Partial",
         proteinG: "",
@@ -66,7 +83,7 @@ describe("computeLiveTotals", () => {
         fatG: "",
         caloriesKcal: "100",
         sortOrder: 0,
-      },
+      }),
     ];
 
     expect(computeLiveTotals(drafts)).toEqual({
@@ -74,6 +91,41 @@ describe("computeLiveTotals", () => {
       carbsG: 10,
       fatG: 0,
       caloriesKcal: 100,
+    });
+  });
+
+  it("does not count planned or skipped drafts as eaten intake", () => {
+    const drafts: MealDraft[] = [
+      buildDraft({
+        clientId: "eaten",
+        proteinG: "20",
+        carbsG: "30",
+        fatG: "10",
+        caloriesKcal: "290",
+      }),
+      buildDraft({
+        clientId: "planned",
+        status: "planned",
+        proteinG: "40",
+        carbsG: "50",
+        fatG: "20",
+        caloriesKcal: "540",
+      }),
+      buildDraft({
+        clientId: "skipped",
+        status: "skipped",
+        proteinG: "10",
+        carbsG: "20",
+        fatG: "5",
+        caloriesKcal: "165",
+      }),
+    ];
+
+    expect(computeLiveTotals(drafts)).toEqual({
+      proteinG: 20,
+      carbsG: 30,
+      fatG: 10,
+      caloriesKcal: 290,
     });
   });
 });

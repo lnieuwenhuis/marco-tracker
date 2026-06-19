@@ -13,7 +13,7 @@ function parseDraftValue(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** Compute macro totals from the current draft array (unsaved edits included). */
+/** Compute eaten macro totals from the current draft array (unsaved edits included). */
 export function computeLiveTotals(drafts: MealDraft[]): MacroNumbers {
   let proteinG = 0;
   let carbsG = 0;
@@ -21,6 +21,10 @@ export function computeLiveTotals(drafts: MealDraft[]): MacroNumbers {
   let caloriesKcal = 0;
 
   for (const draft of drafts) {
+    if (draft.status !== "eaten") {
+      continue;
+    }
+
     proteinG += parseDraftValue(draft.proteinG);
     carbsG += parseDraftValue(draft.carbsG);
     fatG += parseDraftValue(draft.fatG);

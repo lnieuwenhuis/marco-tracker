@@ -647,6 +647,31 @@ describe("database queries", () => {
     );
   });
 
+  it("returns the existing meal for concurrent creates with the same client mutation id", async () => {
+    const input = {
+      date: "2026-05-06",
+      label: "Idempotent shake",
+      proteinG: 30,
+      carbsG: 20,
+      fatG: 5,
+      caloriesKcal: 245,
+      clientMutationId: "meal-entry-concurrent-1",
+    };
+
+    const [first, second] = await Promise.all([
+      createMealEntry(userId, input, runtime.db),
+      createMealEntry(userId, input, runtime.db),
+    ]);
+
+    expect(second.id).toBe(first.id);
+    const summary = await getDailySummary(userId, "2026-05-06", runtime.db);
+    expect(
+      summary.meals.filter(
+        (meal) => meal.clientMutationId === "meal-entry-concurrent-1",
+      ),
+    ).toHaveLength(1);
+  });
+
   it("creates searchable products and resolves quantity-scaled nutrition", async () => {
     const product = await createPersonalFoodProduct(
       userId,
@@ -671,6 +696,54 @@ describe("database queries", () => {
       fatG: 3,
       caloriesKcal: 111,
     });
+  });
+
+  it("forces user-created products to personal scope and validates product enums", async () => {
+    const baseProduct = {
+      name: "Shared almonds",
+      source: "manual" as const,
+      defaultServingQuantity: 100,
+      defaultServingUnit: "g" as const,
+      proteinPer100: 21,
+      carbsPer100: 22,
+      fatPer100: 49,
+      caloriesPer100: 579,
+    };
+    const product = await createPersonalFoodProduct(
+      userId,
+      {
+        ...baseProduct,
+        scope: "global",
+      },
+      runtime.db,
+    );
+
+    expect(product.scope).toBe("personal");
+    expect(product.ownerUserId).toBe(userId);
+
+    const otherUserId = await createOtherUser();
+    const otherResults = await searchFoodProducts(
+      otherUserId,
+      "shared almonds",
+      runtime.db,
+    );
+    expect(otherResults.map((item) => item.id)).not.toContain(product.id);
+
+    await expect(
+      createPersonalFoodProduct(
+        userId,
+        { ...baseProduct, name: "Bad scope", scope: "shared" as never },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Product scope is invalid.");
+
+    await expect(
+      createPersonalFoodProduct(
+        userId,
+        { ...baseProduct, name: "Bad source", source: "feed" as never },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Product source is invalid.");
   });
 
   it("preserves recipe cooked weight and ingredient quantity metadata", async () => {

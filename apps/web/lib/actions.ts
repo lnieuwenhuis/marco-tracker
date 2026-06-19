@@ -34,6 +34,7 @@ import type { CustomBarcodeProduct, FoodPreset, FoodProduct, FoodProductInput, L
 import { revalidatePath } from "next/cache";
 
 import { requireSessionUser } from "./auth";
+import { getLocalDateString } from "./startup-date";
 
 type ActionResult = {
   ok: boolean;
@@ -518,6 +519,7 @@ export async function updateFoodProductAction(
 type LogRecipePortionInput = {
   recipeId: string;
   date: string;
+  status?: MealEntryStatus;
   portionCount?: number;
   gramsConsumed?: number | null;
 };
@@ -544,6 +546,9 @@ export async function logRecipePortionAction(
 
     await createMealEntry(sessionUser.userId, {
       date: input.date,
+      status:
+        input.status ??
+        (input.date > getLocalDateString() ? "planned" : "eaten"),
       label:
         input.gramsConsumed && recipe.totalCookedWeightG
           ? `${recipe.label} (${input.gramsConsumed}g)`

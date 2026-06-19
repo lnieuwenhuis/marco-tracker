@@ -706,16 +706,51 @@ export async function createPersonalFoodProduct(
   db?: DatabaseClient,
 ): Promise<FoodProduct> {
   const database = await resolveDb(db);
-  const normalized = validateFoodProductInput({
-    ...input,
-    scope: input.scope ?? "personal",
-  });
+  const normalizedInput = validateFoodProductInput(input);
+  const normalized = {
+    ...normalizedInput,
+    scope: "personal" as const,
+  };
 
   const [created] = await database
     .insert(foodProducts)
     .values({
       id: crypto.randomUUID(),
-      ownerUserId: normalized.scope === "global" ? null : userId,
+      ownerUserId: userId,
+      scope: normalized.scope,
+      source: normalized.source,
+      barcode: normalized.barcode,
+      name: normalized.name,
+      brand: normalized.brand ?? "",
+      defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
+      defaultServingUnit: normalized.defaultServingUnit,
+      proteinPer100: normalized.proteinPer100.toFixed(2),
+      carbsPer100: normalized.carbsPer100.toFixed(2),
+      fatPer100: normalized.fatPer100.toFixed(2),
+      caloriesPer100: normalized.caloriesPer100,
+      servingWeightG: normalized.servingWeightG?.toFixed(2) ?? null,
+      servingVolumeMl: normalized.servingVolumeMl?.toFixed(2) ?? null,
+      updatedAt: new Date(),
+    })
+    .returning();
+
+  return mapFoodProductRow(created);
+}
+
+async function createGlobalFoodProduct(
+  input: FoodProductInput,
+  db: DatabaseClient,
+): Promise<FoodProduct> {
+  const normalized = validateFoodProductInput({
+    ...input,
+    scope: "global",
+  });
+
+  const [created] = await db
+    .insert(foodProducts)
+    .values({
+      id: crypto.randomUUID(),
+      ownerUserId: null,
       scope: normalized.scope,
       source: normalized.source,
       barcode: normalized.barcode,
@@ -960,51 +995,53 @@ export async function getDashboardData(
   };
 }
 
+async function getMealEntryByClientMutationId(
+  userId: string,
+  clientMutationId: string,
+  db: DatabaseClient,
+): Promise<MealEntryRecord | null> {
+  const [existing] = await db
+    .select({
+      id: mealEntries.id,
+      userId: mealEntries.userId,
+      date: mealEntries.entryDate,
+      mealGroupId: mealEntries.mealGroupId,
+      status: mealEntries.status,
+      productId: foodProducts.id,
+      label: mealEntries.label,
+      sortOrder: mealEntries.sortOrder,
+      quantity: mealEntries.quantity,
+      unit: mealEntries.unit,
+      servingMultiplier: mealEntries.servingMultiplier,
+      proteinG: mealEntries.proteinG,
+      carbsG: mealEntries.carbsG,
+      fatG: mealEntries.fatG,
+      caloriesKcal: mealEntries.caloriesKcal,
+      clientMutationId: mealEntries.clientMutationId,
+      sourceLabel: foodProducts.name,
+    })
+    .from(mealEntries)
+    .leftJoin(
+      foodProducts,
+      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
+    )
+    .where(
+      and(
+        eq(mealEntries.userId, userId),
+        eq(mealEntries.clientMutationId, clientMutationId),
+      ),
+    )
+    .limit(1);
+
+  return existing ? mapMealRow(existing) : null;
+}
+
 export async function createMealEntry(
   userId: string,
   input: Omit<MealEntryInput, "sortOrder"> & { sortOrder?: number },
   db?: DatabaseClient,
 ) {
   const database = await resolveDb(db);
-
-  if (input.clientMutationId) {
-    const [existing] = await database
-      .select({
-        id: mealEntries.id,
-        userId: mealEntries.userId,
-        date: mealEntries.entryDate,
-        mealGroupId: mealEntries.mealGroupId,
-        status: mealEntries.status,
-        productId: foodProducts.id,
-        label: mealEntries.label,
-        sortOrder: mealEntries.sortOrder,
-        quantity: mealEntries.quantity,
-        unit: mealEntries.unit,
-        servingMultiplier: mealEntries.servingMultiplier,
-        proteinG: mealEntries.proteinG,
-        carbsG: mealEntries.carbsG,
-        fatG: mealEntries.fatG,
-        caloriesKcal: mealEntries.caloriesKcal,
-        clientMutationId: mealEntries.clientMutationId,
-        sourceLabel: foodProducts.name,
-      })
-      .from(mealEntries)
-      .leftJoin(
-        foodProducts,
-        and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
-      )
-      .where(
-        and(
-          eq(mealEntries.userId, userId),
-          eq(mealEntries.clientMutationId, input.clientMutationId),
-        ),
-      )
-      .limit(1);
-
-    if (existing) {
-      return mapMealRow(existing);
-    }
-  }
 
   let nextSortOrder = input.sortOrder;
   if (typeof nextSortOrder !== "number") {
@@ -1048,28 +1085,50 @@ export async function createMealEntry(
     ...(productMacros ?? {}),
   });
 
-  const [created] = await database
-    .insert(mealEntries)
-    .values({
-      id: crypto.randomUUID(),
+  const insertValues = {
+    id: crypto.randomUUID(),
+    userId,
+    entryDate: normalized.date,
+    mealGroupId: normalized.mealGroupId,
+    status: normalized.status,
+    productId: normalized.productId,
+    label: normalized.label,
+    sortOrder: normalized.sortOrder,
+    quantity: normalized.quantity?.toFixed(2) ?? "1.00",
+    unit: normalized.unit ?? "serving",
+    servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
+    proteinG: normalized.proteinG.toFixed(1),
+    carbsG: normalized.carbsG.toFixed(1),
+    fatG: normalized.fatG.toFixed(1),
+    caloriesKcal: normalized.caloriesKcal,
+    clientMutationId: normalized.clientMutationId,
+    updatedAt: new Date(),
+  };
+
+  const [created] = normalized.clientMutationId
+    ? await database
+        .insert(mealEntries)
+        .values(insertValues)
+        .onConflictDoNothing({
+          target: [mealEntries.userId, mealEntries.clientMutationId],
+        })
+        .returning()
+    : await database.insert(mealEntries).values(insertValues).returning();
+
+  if (!created && normalized.clientMutationId) {
+    const existing = await getMealEntryByClientMutationId(
       userId,
-      entryDate: normalized.date,
-      mealGroupId: normalized.mealGroupId,
-      status: normalized.status,
-      productId: normalized.productId,
-      label: normalized.label,
-      sortOrder: normalized.sortOrder,
-      quantity: normalized.quantity?.toFixed(2) ?? "1.00",
-      unit: normalized.unit ?? "serving",
-      servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
-      proteinG: normalized.proteinG.toFixed(1),
-      carbsG: normalized.carbsG.toFixed(1),
-      fatG: normalized.fatG.toFixed(1),
-      caloriesKcal: normalized.caloriesKcal,
-      clientMutationId: normalized.clientMutationId,
-      updatedAt: new Date(),
-    })
-    .returning();
+      normalized.clientMutationId,
+      database,
+    );
+    if (existing) {
+      return existing;
+    }
+  }
+
+  if (!created) {
+    throw new Error("Unable to create meal entry.");
+  }
 
   return mapMealRow(created);
 }
@@ -2318,8 +2377,7 @@ export async function saveCustomBarcodeProduct(
     })
     .returning();
 
-  await createPersonalFoodProduct(
-    addedByUserId,
+  await createGlobalFoodProduct(
     {
       scope: "global",
       source: "barcode",
