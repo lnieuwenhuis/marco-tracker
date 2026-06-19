@@ -107,13 +107,25 @@ function readCachedBaseline(fixtureLimit: number) {
   return newest;
 }
 
+export function getBaselineCacheCreatedAt(
+  result: Pick<MacroBenchmarkResult, "baselineCreatedAt" | "usedBaseline">,
+  createdAt = new Date().toISOString(),
+) {
+  return result.usedBaseline ? result.baselineCreatedAt : createdAt;
+}
+
 function writeBaselineCache(result: MacroBenchmarkResult) {
   if (typeof window === "undefined" || result.mode === "candidate_only") {
     return;
   }
 
+  const createdAt = getBaselineCacheCreatedAt(result);
+  if (!createdAt) {
+    return;
+  }
+
   const payload = {
-    createdAt: new Date().toISOString(),
+    createdAt,
     currentModel: result.currentModel,
     fixtureLimit: result.fixtureCount,
     fixtureIds: result.cases.map((item) => item.fixtureId),
