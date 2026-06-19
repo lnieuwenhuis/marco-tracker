@@ -21,6 +21,7 @@ export function AdminShell({ userEmail, role, children }: AdminShellProps) {
     { href: "/admin", label: "Dashboard" },
     { href: "/admin/users", label: "Users" },
     { href: "/admin/barcodes", label: "Barcodes" },
+    { href: "/admin/ai-benchmark", label: "AI Benchmark" },
     ...(role === "owner" ? [{ href: "/admin/audit", label: "Audit" }] : []),
   ];
 
@@ -55,7 +56,9 @@ export function AdminShell({ userEmail, role, children }: AdminShellProps) {
             <nav className="flex flex-wrap gap-2">
               {links.map((link) => {
                 const active =
-                  pathname === link.href || pathname.startsWith(`${link.href}/`);
+                  pathname === link.href ||
+                  (link.href !== "/admin" &&
+                    pathname.startsWith(`${link.href}/`));
 
                 return (
                   <Link

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { parseFoodPhotoAnalysis } from "@/lib/ai-food-photo";
+import {
+  classifyFoodPhotoFailure,
+  parseFoodPhotoAnalysis,
+} from "@/lib/ai-food-photo";
 
 describe("parseFoodPhotoAnalysis", () => {
   it("parses a ready nutrition estimate", () => {
@@ -81,5 +84,28 @@ describe("parseFoodPhotoAnalysis", () => {
         notes: ["estimated portion size"],
       },
     });
+  });
+});
+
+describe("classifyFoodPhotoFailure", () => {
+  it("classifies provider image access failures", () => {
+    expect(
+      classifyFoodPhotoFailure(
+        "403 Forbidden, url=https://example.com/food.jpg",
+        403,
+      ),
+    ).toBe("provider_image_access");
+  });
+
+  it("classifies free model rate limits", () => {
+    expect(classifyFoodPhotoFailure("free-models-per-min exceeded")).toBe(
+      "provider_rate_limit",
+    );
+  });
+
+  it("classifies provider quota and balance failures", () => {
+    expect(
+      classifyFoodPhotoFailure("insufficient_quota: balance is too low /billing"),
+    ).toBe("provider_quota");
   });
 });
