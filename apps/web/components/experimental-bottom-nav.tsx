@@ -58,8 +58,8 @@ export function ExperimentalBottomNav({
     },
     {
       id: "recipes",
-      label: "Recipes",
-      href: `/recipes?date=${selectedDate}`,
+      label: "Library",
+      href: `/library?date=${selectedDate}`,
       icon: (
         <svg width="17" height="17" viewBox="0 0 17 17" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
           <rect x="2.5" y="2.5" width="12" height="12" rx="2" />

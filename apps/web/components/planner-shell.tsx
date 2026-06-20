@@ -15,6 +15,7 @@ import {
 
 import { invalidateAppDataCache } from "./app-data-cache";
 import { ExperimentalAppShell, ExperimentalSettingsButton } from "./experimental-app-shell";
+import { LibraryHubNav } from "./library-hub-nav";
 
 type PlannerShellProps = {
   userEmail: string;
@@ -115,6 +116,8 @@ export function PlannerShell({
       )}
     >
       <div className="space-y-5">
+        <LibraryHubNav active="planner" selectedDate={selectedDate} />
+
         <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
           <div className="flex items-center justify-between gap-3">
             <div>

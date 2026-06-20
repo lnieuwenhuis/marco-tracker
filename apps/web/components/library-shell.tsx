@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ExperimentalAppShell, ExperimentalSettingsButton } from "./experimental-app-shell";
+import { LibraryHubNav } from "./library-hub-nav";
 import { TransitionLink } from "./transition-link";
 
 type LibraryShellProps = {
@@ -77,6 +78,8 @@ export function LibraryShell({
       )}
     >
       <div className="space-y-5">
+        <LibraryHubNav active="library" selectedDate={selectedDate} />
+
         <form onSubmit={submitSearch} className="flex gap-2">
           <input
             type="search"

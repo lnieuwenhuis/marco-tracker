@@ -13,17 +13,36 @@ test("canonical app navigation and settings are visible", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Food Log" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Progress" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add food" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Recipes" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Summary" })).toBeVisible();
-  await expect(page.getByText("Your Records")).toHaveCount(0);
-
-  await page.getByRole("button", { name: "Open settings" }).click();
-  await expect(page.getByText("Theme", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Food Library" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "Library" })).toHaveAttribute(
     "href",
     "/library?date=2026-03-19",
   );
-  await expect(page.getByRole("link", { name: "Meal Planner" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "Summary" })).toBeVisible();
+  await expect(page.getByText("Your Records")).toHaveCount(0);
+
+  await page.getByRole("link", { name: "Library" }).click();
+  await expect(page).toHaveURL(/\/library\?date=2026-03-19$/);
+  const libraryHub = page.getByRole("navigation", { name: "Food library sections" });
+  await expect(libraryHub.getByRole("link", { name: /Food Library/ })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(libraryHub.getByRole("link", { name: /Recipes/ })).toHaveAttribute(
+    "href",
+    "/recipes?date=2026-03-19",
+  );
+  await expect(libraryHub.getByRole("link", { name: /Planner/ })).toHaveAttribute(
+    "href",
+    "/planner?date=2026-03-19",
+  );
+
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await expect(page.getByText("Theme", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Food Library", exact: true })).toHaveAttribute(
+    "href",
+    "/library?date=2026-03-19",
+  );
+  await expect(page.getByRole("link", { name: "Meal Planner", exact: true })).toHaveAttribute(
     "href",
     "/planner?date=2026-03-19",
   );
