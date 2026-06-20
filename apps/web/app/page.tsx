@@ -1,8 +1,7 @@
 import { canAccessAdmin, ensureDateString, getDailySummary, getRecentQuickAddCandidates, getRecipes, getTemplates, getUserById, getUserGoals } from "@macro-tracker/db";
-import { redirect } from "next/navigation";
 
 import { DashboardShell } from "@/components/dashboard-shell";
-import { requireSessionUser } from "@/lib/auth";
+import { requireOnboardedSessionUser } from "@/lib/auth";
 import { normalizeComposeAction } from "@/lib/compose";
 
 type HomePageProps = {
@@ -13,7 +12,7 @@ type HomePageProps = {
 };
 
 export default async function HomePage({ searchParams }: HomePageProps) {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const params = await searchParams;
   const selectedDate = ensureDateString(params.date);
   const initialComposeAction = normalizeComposeAction(params.compose);
@@ -26,9 +25,6 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     getRecipes(sessionUser.userId),
     getRecentQuickAddCandidates(sessionUser.userId),
   ]);
-  if (user && !user.onboardingCompletedAt) {
-    redirect("/onboarding");
-  }
   const dashboardKey = JSON.stringify({ selectedDate, dailySummary });
 
   return (

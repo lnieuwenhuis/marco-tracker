@@ -1,7 +1,7 @@
 import { canAccessAdmin, ensureDateString, getUserById, getUserGoals, getWeightPageData } from "@macro-tracker/db";
 
 import { ProgressShell } from "@/components/progress-shell";
-import { requireSessionUser } from "@/lib/auth";
+import { requireOnboardedSessionUser } from "@/lib/auth";
 import { normalizeProgressTab } from "@/lib/ui-mode";
 
 type ProgressPageProps = {
@@ -12,7 +12,7 @@ type ProgressPageProps = {
 };
 
 export default async function ProgressPage({ searchParams }: ProgressPageProps) {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const params = await searchParams;
   const selectedDate = ensureDateString(params.date);
   const initialTab = normalizeProgressTab(params.tab);

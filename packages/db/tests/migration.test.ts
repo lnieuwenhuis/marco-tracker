@@ -16,6 +16,7 @@ const migrationFiles = [
   "0007_admin_panel.sql",
   "0008_product_model_meal_planning.sql",
   "0009_sync_barcode_food_products.sql",
+  "0010_templates_food_product_cleanup.sql",
 ] as const;
 
 async function applyMigration(runtime: DatabaseRuntime, fileName: string) {
@@ -185,6 +186,101 @@ describe("database migrations", () => {
       name: "Community Protein Drink",
       brand: "Macro Lab",
       calories_per_100: 130,
+    });
+  });
+
+  it("remaps legacy barcode audit events to migrated food products", async () => {
+    runtime = await createDatabaseRuntime("memory:");
+
+    for (const fileName of migrationFiles.slice(0, 9)) {
+      await applyMigration(runtime, fileName);
+    }
+
+    const adminId = "11111111-1111-4111-8111-111111111111";
+    const barcodeProductId = "77777777-7777-4777-8777-777777777777";
+    const auditId = "88888888-8888-4888-8888-888888888888";
+
+    await runtime.db.execute(sql.raw(`
+      INSERT INTO "users" ("id", "shoo_pairwise_sub", "email", "display_name", "role")
+      VALUES ('${adminId}', 'audit_admin', 'admin@example.com', 'Admin', 'admin')
+    `));
+    await runtime.db.execute(sql.raw(`
+      INSERT INTO "barcode_products" (
+        "id",
+        "barcode",
+        "name",
+        "brands",
+        "protein_g",
+        "carbs_g",
+        "fat_g",
+        "calories_kcal",
+        "serving_size_g",
+        "added_by_user_id"
+      )
+      VALUES (
+        '${barcodeProductId}',
+        '8712345000099',
+        'Audited Protein Drink',
+        'Macro Lab',
+        20.0,
+        8.0,
+        2.0,
+        130,
+        250.0,
+        '${adminId}'
+      )
+    `));
+    await runtime.db.execute(sql.raw(`
+      INSERT INTO "admin_audit_events" (
+        "id",
+        "actor_user_id",
+        "actor_role",
+        "action",
+        "target_type",
+        "target_id",
+        "details_json"
+      )
+      VALUES (
+        '${auditId}',
+        '${adminId}',
+        'admin',
+        'barcode.updated',
+        'barcode_product',
+        '${barcodeProductId}',
+        '{"name":"Audited Protein Drink"}'::jsonb
+      )
+    `));
+
+    await applyMigration(runtime, "0009_sync_barcode_food_products.sql");
+    await applyMigration(runtime, "0010_templates_food_product_cleanup.sql");
+
+    const productResult = await runtime.db.execute<{
+      id: string;
+    }>(sql.raw(`
+      SELECT "id"
+      FROM "food_products"
+      WHERE "barcode" = '8712345000099'
+    `));
+    const productId = productResult.rows[0]?.id;
+    expect(productId).toBeTruthy();
+
+    const auditResult = await runtime.db.execute<{
+      target_type: string;
+      target_id: string;
+      legacy_id: string;
+    }>(sql.raw(`
+      SELECT
+        "target_type",
+        "target_id",
+        "details_json"->>'legacyBarcodeProductId' AS legacy_id
+      FROM "admin_audit_events"
+      WHERE "id" = '${auditId}'
+    `));
+
+    expect(auditResult.rows[0]).toEqual({
+      target_type: "food_product",
+      target_id: productId,
+      legacy_id: barcodeProductId,
     });
   });
 });

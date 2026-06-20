@@ -16,6 +16,7 @@ const mocked = vi.hoisted(() => ({
   deleteWeightEntry: vi.fn(),
   getLeaderboardStats: vi.fn(),
   getRecipeById: vi.fn(),
+  getTemplateById: vi.fn(),
   isValidDateString: vi.fn((value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)),
   markMealEntryStatus: vi.fn(),
   applyTemplateToDate: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("@macro-tracker/db", () => ({
   deleteWeightEntry: mocked.deleteWeightEntry,
   getLeaderboardStats: mocked.getLeaderboardStats,
   getRecipeById: mocked.getRecipeById,
+  getTemplateById: mocked.getTemplateById,
   isValidDateString: mocked.isValidDateString,
   markMealEntryStatus: mocked.markMealEntryStatus,
   applyTemplateToDate: mocked.applyTemplateToDate,
@@ -83,6 +85,7 @@ import {
   deleteWeightEntryAction,
   fetchLeaderboardStatsAction,
   logRecipePortionAction,
+  updateTemplateAction,
 } from "@/lib/actions";
 
 describe("server actions", () => {
@@ -216,4 +219,48 @@ describe("server actions", () => {
       expect(mocked.revalidatePath).not.toHaveBeenCalled();
     },
   );
+
+  it("refuses to rewrite day templates through the single-food template update action", async () => {
+    mocked.getTemplateById.mockResolvedValue({
+      id: "template-1",
+      userId: "user-1",
+      type: "day",
+      label: "Full day",
+      notes: null,
+      createdAt: "2026-06-20T00:00:00.000Z",
+      updatedAt: "2026-06-20T00:00:00.000Z",
+      items: [
+        {
+          id: "item-1",
+          templateId: "template-1",
+          productId: null,
+          mealGroupLabel: "Breakfast",
+          sortOrder: 0,
+          label: "Oats",
+          quantity: 1,
+          unit: "serving",
+          servingMultiplier: 1,
+          proteinG: 20,
+          carbsG: 40,
+          fatG: 8,
+          caloriesKcal: 312,
+        },
+      ],
+    });
+
+    const result = await updateTemplateAction({
+      id: "template-1",
+      label: "Changed",
+      proteinG: 1,
+      carbsG: 1,
+      fatG: 1,
+      caloriesKcal: 20,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "This template cannot be edited from the single-food template form.",
+    });
+    expect(mocked.updateTemplate).not.toHaveBeenCalled();
+  });
 });

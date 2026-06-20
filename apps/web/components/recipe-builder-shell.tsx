@@ -117,26 +117,21 @@ export function RecipeBuilderShell({
     ]);
   }
 
-  function templateItem(template: MealTemplate) {
-    return template.items[0] ?? null;
-  }
-
   function addIngredientFromPreset(template: MealTemplate) {
-    const item = templateItem(template);
     setIngredients((prev) => [
       ...prev,
-      {
+      ...template.items.map((item) => ({
         clientId: `ing-${crypto.randomUUID()}`,
-        productId: item?.productId ?? null,
-        label: item?.label ?? template.label,
-        quantity: "1",
-        unit: "serving",
-        servingMultiplier: "1",
-        proteinG: String(item?.proteinG ?? 0),
-        carbsG: String(item?.carbsG ?? 0),
-        fatG: String(item?.fatG ?? 0),
-        caloriesKcal: String(item?.caloriesKcal ?? 0),
-      },
+        productId: item.productId ?? null,
+        label: item.label,
+        quantity: String(item.quantity),
+        unit: item.unit,
+        servingMultiplier: String(item.servingMultiplier),
+        proteinG: String(item.proteinG),
+        carbsG: String(item.carbsG),
+        fatG: String(item.fatG),
+        caloriesKcal: String(item.caloriesKcal),
+      })),
     ]);
     setShowPresetsModal(false);
   }

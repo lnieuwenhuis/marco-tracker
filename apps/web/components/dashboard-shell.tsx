@@ -14,6 +14,10 @@ import { computeLiveTotals, computeRemaining, rankCandidates } from "@/lib/quick
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
 import type { OpenFoodFactsProduct } from "@/lib/openfoodfacts";
 import { getLocalDateString } from "@/lib/startup-date";
+import {
+  canEditAsSingleFoodTemplate,
+  getTemplateMacroTotals,
+} from "@/lib/template-macros";
 
 import { AiFoodPhotoModal } from "./ai-food-photo-modal";
 import { invalidateAppDataCache } from "./app-data-cache";
@@ -107,26 +111,49 @@ function createEmptyDraft(sortOrder: number, status: MealEntryStatus): MealDraft
   };
 }
 
-function templateItem(template: MealTemplate) {
-  return template.items[0] ?? null;
-}
-
-function createDraftFromTemplate(template: MealTemplate, sortOrder: number, status: MealEntryStatus): MealDraft {
-  const item = templateItem(template);
+function createDraftFromTemplateItem(
+  item: MealTemplate["items"][number],
+  sortOrder: number,
+  status: MealEntryStatus,
+  mealGroupId: string | null,
+): MealDraft {
   return {
     clientId: `draft-${crypto.randomUUID()}`,
     status,
-    productId: item?.productId ?? null,
-    label: item?.label ?? template.label,
-    quantity: "1",
-    unit: "serving",
-    servingMultiplier: "1",
-    proteinG: String(item?.proteinG ?? 0),
-    carbsG: String(item?.carbsG ?? 0),
-    fatG: String(item?.fatG ?? 0),
-    caloriesKcal: String(item?.caloriesKcal ?? 0),
+    mealGroupId,
+    productId: item.productId ?? null,
+    label: item.label,
+    quantity: String(item.quantity),
+    unit: item.unit,
+    servingMultiplier: String(item.servingMultiplier),
+    proteinG: String(item.proteinG),
+    carbsG: String(item.carbsG),
+    fatG: String(item.fatG),
+    caloriesKcal: String(item.caloriesKcal),
     sortOrder,
   };
+}
+
+function createDraftsFromTemplate(
+  template: MealTemplate,
+  sortOrder: number,
+  status: MealEntryStatus,
+  mealGroups: MealGroup[],
+) {
+  const groupByLabel = new Map(
+    mealGroups.map((group) => [group.label.toLowerCase(), group.id]),
+  );
+
+  return template.items.map((item, index) =>
+    createDraftFromTemplateItem(
+      item,
+      sortOrder + index,
+      status,
+      item.mealGroupLabel
+        ? groupByLabel.get(item.mealGroupLabel.toLowerCase()) ?? null
+        : null,
+    ),
+  );
 }
 
 function createDraftFromCandidate(
@@ -244,18 +271,20 @@ export function DashboardShell({
 
   // Build a unified candidate pool: template candidates + recent history candidates
   const allCandidates = useMemo<QuickAddCandidate[]>(() => {
-    const templateCandidates: QuickAddCandidate[] = localTemplates.map((template) => {
-      const item = templateItem(template);
-      return {
-      label: item?.label ?? template.label,
-      proteinG: item?.proteinG ?? 0,
-      carbsG: item?.carbsG ?? 0,
-      fatG: item?.fatG ?? 0,
-      caloriesKcal: item?.caloriesKcal ?? 0,
-      source: "preset" as const,
-      presetId: template.id,
-      };
-    });
+    const templateCandidates: QuickAddCandidate[] = localTemplates
+      .filter(canEditAsSingleFoodTemplate)
+      .map((template) => {
+        const totals = getTemplateMacroTotals(template.items);
+        return {
+          label: template.items[0]?.label ?? template.label,
+          proteinG: totals.proteinG,
+          carbsG: totals.carbsG,
+          fatG: totals.fatG,
+          caloriesKcal: totals.caloriesKcal,
+          source: "preset" as const,
+          presetId: template.id,
+        };
+      });
     return [...templateCandidates, ...recentCandidates];
   }, [localTemplates, recentCandidates]);
 
@@ -392,7 +421,15 @@ export function DashboardShell({
   function addDraftFromPreset(template: MealTemplate) {
     setDrafts((currentDrafts) => [
       ...currentDrafts,
-      createDraftFromTemplate(template, nextSortOrder(), defaultEntryStatus),
+      ...createDraftsFromTemplate(
+        template,
+        currentDrafts.reduce(
+          (highest, draft) => Math.max(highest, draft.sortOrder),
+          -1,
+        ) + 1,
+        defaultEntryStatus,
+        localMealGroups,
+      ),
     ]);
     setPresetError(null);
     setShowPresetsModal(false);

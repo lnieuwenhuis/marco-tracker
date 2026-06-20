@@ -653,6 +653,33 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
     )
   `));
   await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "admin_audit_events" (
+      "id" uuid PRIMARY KEY NOT NULL,
+      "actor_user_id" uuid NOT NULL REFERENCES "users"("id"),
+      "actor_role" text NOT NULL,
+      "action" text NOT NULL,
+      "target_type" text NOT NULL,
+      "target_id" text NOT NULL,
+      "details_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `));
+  await db.execute(sql.raw(`
+    UPDATE "admin_audit_events"
+    SET
+      "target_type" = 'food_product',
+      "target_id" = "food_products"."id"::text,
+      "details_json" = COALESCE("admin_audit_events"."details_json", '{}'::jsonb) || jsonb_build_object(
+        'legacyBarcodeProductId', "admin_audit_events"."target_id"
+      )
+    FROM "food_products"
+    WHERE
+      "admin_audit_events"."target_type" = 'barcode_product'
+      AND "food_products"."owner_user_id" IS NULL
+      AND "food_products"."source" = 'barcode'
+      AND "food_products"."source_metadata"->>'legacyBarcodeProductId' = "admin_audit_events"."target_id"
+  `));
+  await db.execute(sql.raw(`
     INSERT INTO "food_product_revisions" (
       "id",
       "product_id",

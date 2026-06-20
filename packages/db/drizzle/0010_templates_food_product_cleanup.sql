@@ -34,6 +34,20 @@ WHERE
   AND "food_products"."source" = 'barcode'
   AND "food_products"."barcode" = "barcode_products"."barcode";
 --> statement-breakpoint
+UPDATE "admin_audit_events"
+SET
+  "target_type" = 'food_product',
+  "target_id" = "food_products"."id"::text,
+  "details_json" = COALESCE("admin_audit_events"."details_json", '{}'::jsonb) || jsonb_build_object(
+    'legacyBarcodeProductId', "admin_audit_events"."target_id"
+  )
+FROM "food_products"
+WHERE
+  "admin_audit_events"."target_type" = 'barcode_product'
+  AND "food_products"."owner_user_id" IS NULL
+  AND "food_products"."source" = 'barcode'
+  AND "food_products"."source_metadata"->>'legacyBarcodeProductId' = "admin_audit_events"."target_id";
+--> statement-breakpoint
 CREATE INDEX "food_products_submitted_by_idx" ON "food_products" USING btree ("submitted_by_user_id");
 --> statement-breakpoint
 CREATE INDEX "food_products_corrected_from_idx" ON "food_products" USING btree ("corrected_from_product_id");

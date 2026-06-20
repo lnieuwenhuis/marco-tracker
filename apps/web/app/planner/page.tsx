@@ -1,14 +1,14 @@
 import { canAccessAdmin, ensureDateString, getDailySummary, getTemplates, getUserById } from "@macro-tracker/db";
 
 import { PlannerShell } from "@/components/planner-shell";
-import { requireSessionUser } from "@/lib/auth";
+import { requireOnboardedSessionUser } from "@/lib/auth";
 
 type PlannerPageProps = {
   searchParams: Promise<{ date?: string }>;
 };
 
 export default async function PlannerPage({ searchParams }: PlannerPageProps) {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const params = await searchParams;
   const selectedDate = ensureDateString(params.date);
   const [templates, dailySummary, user] = await Promise.all([

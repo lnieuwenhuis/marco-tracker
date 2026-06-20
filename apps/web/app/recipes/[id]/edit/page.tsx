@@ -2,7 +2,7 @@ import { canAccessAdmin, ensureDateString, getRecipeById, getTemplates, getUserB
 import { notFound } from "next/navigation";
 
 import { RecipeBuilderShell } from "@/components/recipe-builder-shell";
-import { requireSessionUser } from "@/lib/auth";
+import { requireOnboardedSessionUser } from "@/lib/auth";
 
 type EditRecipePageProps = {
   params: Promise<{ id: string }>;
@@ -15,7 +15,7 @@ export default async function EditRecipePage({
   params,
   searchParams,
 }: EditRecipePageProps) {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const [routeParams, queryParams] = await Promise.all([params, searchParams]);
   const selectedDate = ensureDateString(queryParams.date);
 

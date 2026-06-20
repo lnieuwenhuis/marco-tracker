@@ -4,6 +4,7 @@ import {
   createRecipe,
   createMealEntry,
   createPersonalFoodProduct,
+  createTemplate,
   deleteMealGroup,
   deleteMealEntry,
   ensureDefaultMealGroups,
@@ -15,6 +16,7 @@ import {
   getStatsPageData,
   lookupBarcodeFoodProduct,
   markMealEntryStatus,
+  applyTemplateToDate,
   resolveProductNutritionForQuantity,
   saveBarcodeFoodProduct,
   saveUserGoals,
@@ -123,6 +125,39 @@ describe("database queries", () => {
             return (table: unknown) => {
               if (table === foodProducts) {
                 throw new Error("Forced barcode food product insert failure.");
+              }
+
+              return target.insert(table);
+            };
+          }
+
+          if (prop === "transaction") {
+            return async (callback: (tx: unknown) => unknown) =>
+              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
+          }
+
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }
+
+    return wrapClient(runtime.db as any);
+  }
+
+  function createFailingMealEntryInsertDb(failOnMealEntryInsertNumber: number) {
+    let mealEntryInsertCount = 0;
+
+    function wrapClient(client: any) {
+      return new Proxy(client, {
+        get(target, prop, receiver) {
+          if (prop === "insert") {
+            return (table: unknown) => {
+              if (table === mealEntries) {
+                mealEntryInsertCount += 1;
+                if (mealEntryInsertCount === failOnMealEntryInsertNumber) {
+                  throw new Error("Forced meal entry insert failure.");
+                }
               }
 
               return target.insert(table);
@@ -603,6 +638,102 @@ describe("database queries", () => {
     expect(summary.meals).toHaveLength(1);
     expect(summary.meals[0]?.productId).toBeNull();
     expect(summary.meals[0]?.sourceLabel).toBeNull();
+  });
+
+  it("prevalidates all template item product access before applying a template", async () => {
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's shake",
+        source: "manual",
+        proteinPer100: 24,
+        carbsPer100: 12,
+        fatPer100: 3,
+        caloriesPer100: 171,
+      },
+      runtime.db,
+    );
+    const template = await createTemplate(
+      userId,
+      {
+        type: "day",
+        label: "Blocked template",
+        items: [
+          {
+            label: "Accessible oats",
+            proteinG: 20,
+            carbsG: 40,
+            fatG: 8,
+            caloriesKcal: 312,
+          },
+          {
+            productId: otherProduct.id,
+            label: "Cross-user shake",
+            proteinG: 24,
+            carbsG: 12,
+            fatG: 3,
+            caloriesKcal: 171,
+          },
+        ],
+      },
+      runtime.db,
+    );
+
+    await expect(
+      applyTemplateToDate(
+        userId,
+        {
+          templateId: template.id,
+          date: "2026-05-03",
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const summary = await getDailySummary(userId, "2026-05-03", runtime.db);
+    expect(summary.meals).toHaveLength(0);
+  });
+
+  it("rolls back all template entries when one item insert fails", async () => {
+    const template = await createTemplate(
+      userId,
+      {
+        type: "day",
+        label: "Two item template",
+        items: [
+          {
+            label: "Oats",
+            proteinG: 20,
+            carbsG: 40,
+            fatG: 8,
+            caloriesKcal: 312,
+          },
+          {
+            label: "Yogurt",
+            proteinG: 25,
+            carbsG: 12,
+            fatG: 2,
+            caloriesKcal: 166,
+          },
+        ],
+      },
+      runtime.db,
+    );
+
+    await expect(
+      applyTemplateToDate(
+        userId,
+        {
+          templateId: template.id,
+          date: "2026-05-04",
+        },
+        createFailingMealEntryInsertDb(2),
+      ),
+    ).rejects.toThrow("Forced meal entry insert failure.");
+
+    const summary = await getDailySummary(userId, "2026-05-04", runtime.db);
+    expect(summary.meals).toHaveLength(0);
   });
 
   it("rejects inaccessible recipe ingredient products on create", async () => {

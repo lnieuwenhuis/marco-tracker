@@ -16,6 +16,7 @@ import {
   deleteWeightEntry,
   getLeaderboardStats,
   getRecipeById,
+  getTemplateById,
   markMealEntryStatus,
   applyTemplateToDate,
   reorderMealGroups,
@@ -311,16 +312,21 @@ type SaveTemplateInput = {
 };
 type SaveTemplateResult = ActionResult & { template?: MealTemplate };
 
-function singleFoodTemplateInput(input: SaveTemplateInput) {
+function singleFoodTemplateInput(
+  input: SaveTemplateInput,
+  existingItem?: MealTemplate["items"][number],
+) {
   return {
     type: "meal" as const,
     label: input.label,
     items: [
       {
+        productId: existingItem?.productId ?? null,
+        mealGroupLabel: existingItem?.mealGroupLabel ?? null,
         label: input.label,
-        quantity: 1,
-        unit: "serving" as const,
-        servingMultiplier: 1,
+        quantity: existingItem?.quantity ?? 1,
+        unit: existingItem?.unit ?? "serving" as const,
+        servingMultiplier: existingItem?.servingMultiplier ?? 1,
         proteinG: input.proteinG,
         carbsG: input.carbsG,
         fatG: input.fatG,
@@ -366,10 +372,21 @@ export async function updateTemplateAction(input: UpdateTemplateInput): Promise<
   const sessionUser = await requireSessionUser();
 
   try {
+    const existingTemplate = await getTemplateById(sessionUser.userId, input.id);
+    if (!existingTemplate) {
+      return { ok: false, error: "Template not found." };
+    }
+    if (existingTemplate.type !== "meal" || existingTemplate.items.length !== 1) {
+      return {
+        ok: false,
+        error: "This template cannot be edited from the single-food template form.",
+      };
+    }
+
     const template = await updateTemplate(
       sessionUser.userId,
       input.id,
-      singleFoodTemplateInput(input),
+      singleFoodTemplateInput(input, existingTemplate.items[0]),
     );
     return { ok: true, template };
   } catch (error) {

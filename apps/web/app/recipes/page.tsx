@@ -1,7 +1,7 @@
 import { canAccessAdmin, ensureDateString, getRecipes, getUserById } from "@macro-tracker/db";
 
 import { RecipesShell } from "@/components/recipes-shell";
-import { requireSessionUser } from "@/lib/auth";
+import { requireOnboardedSessionUser } from "@/lib/auth";
 
 type RecipesPageProps = {
   searchParams: Promise<{
@@ -10,7 +10,7 @@ type RecipesPageProps = {
 };
 
 export default async function RecipesPage({ searchParams }: RecipesPageProps) {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const params = await searchParams;
   const selectedDate = ensureDateString(params.date);
 

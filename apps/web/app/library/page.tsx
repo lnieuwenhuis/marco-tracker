@@ -1,14 +1,14 @@
 import { canAccessAdmin, ensureDateString, getRecipes, getTemplates, getUserById, searchFoodProducts } from "@macro-tracker/db";
 
 import { LibraryShell } from "@/components/library-shell";
-import { requireSessionUser } from "@/lib/auth";
+import { requireOnboardedSessionUser } from "@/lib/auth";
 
 type LibraryPageProps = {
   searchParams: Promise<{ q?: string; date?: string }>;
 };
 
 export default async function LibraryPage({ searchParams }: LibraryPageProps) {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const params = await searchParams;
   const query = params.q ?? "";
   const selectedDate = ensureDateString(params.date);

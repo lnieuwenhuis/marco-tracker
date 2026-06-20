@@ -12,6 +12,7 @@ import {
 } from "@/components/admin-ui";
 import { changeUserRoleAction } from "@/lib/admin-actions";
 import { requireAdminUser } from "@/lib/auth";
+import { getTemplateMacroTotals } from "@/lib/template-macros";
 
 type AdminUserDetailPageProps = {
   params: Promise<{ userId: string }>;
@@ -36,17 +37,6 @@ function GoalValue({
       <p className="mt-2 text-lg font-semibold text-[var(--color-ink)]">{value}</p>
     </div>
   );
-}
-
-function firstTemplateItem(template: {
-  items: Array<{
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }>;
-}) {
-  return template.items[0] ?? null;
 }
 
 export default async function AdminUserDetailPage({
@@ -229,7 +219,7 @@ export default async function AdminUserDetailPage({
         <AdminSection title="Recent Templates">
           <div className="space-y-3">
             {detail.recentTemplates.map((preset) => {
-              const item = firstTemplateItem(preset);
+              const totals = getTemplateMacroTotals(preset.items);
               return (
               <div
                 key={preset.id}
@@ -237,7 +227,7 @@ export default async function AdminUserDetailPage({
               >
                 <p className="font-semibold text-[var(--color-ink)]">{preset.label}</p>
                 <p className="mt-1 text-sm text-[var(--color-muted)]">
-                  {item?.proteinG ?? 0}P / {item?.carbsG ?? 0}C / {item?.fatG ?? 0}F / {item?.caloriesKcal ?? 0} kcal
+                  {totals.proteinG}P / {totals.carbsG}C / {totals.fatG}F / {totals.caloriesKcal} kcal
                 </p>
               </div>
               );

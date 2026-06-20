@@ -9,7 +9,7 @@ async function startCustomFoodDraft(page: Page) {
   }
 
   await page.getByRole("button", { name: "Add food" }).click();
-  await page.getByRole("button", { name: "Custom", exact: true }).click();
+  await page.getByRole("button", { name: /^Custom\b/ }).click();
 }
 
 async function addCustomFood(
@@ -22,9 +22,14 @@ async function addCustomFood(
     caloriesKcal: string;
   },
 ) {
+  const unsavedCards = page.locator("article").filter({
+    has: page.getByRole("button", { name: "Save" }),
+  });
+  const unsavedBefore = await unsavedCards.count();
   await startCustomFoodDraft(page);
 
-  const mealCard = page.locator("article").last();
+  await expect(unsavedCards).toHaveCount(unsavedBefore + 1);
+  const mealCard = unsavedCards.last();
   const mealName = mealCard.getByPlaceholder("Chicken breast, rice, banana...");
 
   await expect(mealName).toBeVisible();
@@ -37,6 +42,7 @@ async function addCustomFood(
   await expect(
     page.getByRole("heading", { name: input.label }).last(),
   ).toBeVisible();
+  await expect(unsavedCards).toHaveCount(unsavedBefore);
 }
 
 test("redirects unauthenticated users to login", async ({ page }) => {
@@ -156,6 +162,65 @@ test("recent foods appear in quick add and create a prefilled draft", async ({
 
   const articlesAfter = await page.locator("article").count();
   expect(articlesAfter).toBeGreaterThan(articlesBefore);
+});
+
+test("adds every item from a saved day template on the dashboard", async ({
+  page,
+}) => {
+  const suffix = Date.now();
+  const firstItem = `Template oats ${suffix}`;
+  const secondItem = `Template yogurt ${suffix}`;
+  const templateLabel = `Two item day ${suffix}`;
+
+  await page.goto("/api/test/session?email=user@example.com");
+  await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
+  const seedResult = await page.evaluate(
+    async ({ firstItem, secondItem, templateLabel }) => {
+      const response = await fetch("/api/test/templates", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "day",
+          label: templateLabel,
+          items: [
+            {
+              label: firstItem,
+              mealGroupLabel: "Breakfast",
+              proteinG: 20,
+              carbsG: 40,
+              fatG: 8,
+              caloriesKcal: 312,
+            },
+            {
+              label: secondItem,
+              mealGroupLabel: "Lunch",
+              proteinG: 25,
+              carbsG: 12,
+              fatG: 2,
+              caloriesKcal: 166,
+            },
+          ],
+        }),
+      });
+      return { ok: response.ok, status: response.status };
+    },
+    { firstItem, secondItem, templateLabel },
+  );
+  expect(seedResult).toEqual({ ok: true, status: 200 });
+
+  await page.goto("/?date=2026-04-02");
+  await page.getByRole("button", { name: "From template" }).click();
+  const modal = page.getByRole("dialog", { name: "Meal Templates" });
+  await expect(modal).toBeVisible();
+  await expect(modal.getByText(templateLabel)).toBeVisible();
+  await modal.getByRole("button", { name: "Add" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: firstItem }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: secondItem }),
+  ).toBeVisible();
 });
 
 test("stats and weight pages load without day navigation chrome", async ({

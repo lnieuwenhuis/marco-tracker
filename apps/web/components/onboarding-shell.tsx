@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { completeOnboardingAction } from "@/lib/actions";
+import {
+  normalizeOnboardingWeightKg,
+  parsePositiveNumber,
+} from "@/lib/onboarding-weight";
 
 import { ThemePicker } from "./theme-toggle";
 
@@ -13,13 +17,6 @@ type OnboardingShellProps = {
   currentDate: string;
   preferredWeightUnit: WeightUnit;
 };
-
-function toNullableNumber(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
 
 function MacroInput({
   label,
@@ -92,13 +89,13 @@ export function OnboardingShell({
       const result = await completeOnboardingAction({
         preferredWeightUnit: unit,
         goals: {
-          caloriesKcal: toNullableNumber(calories),
-          proteinG: toNullableNumber(protein),
-          carbsG: toNullableNumber(carbs),
-          fatG: toNullableNumber(fat),
+          caloriesKcal: parsePositiveNumber(calories),
+          proteinG: parsePositiveNumber(protein),
+          carbsG: parsePositiveNumber(carbs),
+          fatG: parsePositiveNumber(fat),
         },
-        goalWeightKg: toNullableNumber(goalWeight),
-        currentWeightKg: toNullableNumber(currentWeight),
+        goalWeightKg: normalizeOnboardingWeightKg(goalWeight, unit),
+        currentWeightKg: normalizeOnboardingWeightKg(currentWeight, unit),
         currentWeightDate: currentDate,
         starterTemplate,
       });
@@ -151,8 +148,8 @@ export function OnboardingShell({
                   <option value="lb">lb</option>
                 </select>
               </label>
-              <MacroInput label="Current" unit="kg" value={currentWeight} onChange={setCurrentWeight} />
-              <MacroInput label="Goal" unit="kg" value={goalWeight} onChange={setGoalWeight} />
+              <MacroInput label="Current" unit={unit} value={currentWeight} onChange={setCurrentWeight} />
+              <MacroInput label="Goal" unit={unit} value={goalWeight} onChange={setGoalWeight} />
             </div>
           </section>
 

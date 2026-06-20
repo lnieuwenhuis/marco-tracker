@@ -3,6 +3,11 @@
 import type { MealTemplate } from "@macro-tracker/db";
 import { useEffect, useState } from "react";
 
+import {
+  canEditAsSingleFoodTemplate,
+  getTemplateMacroTotals,
+} from "@/lib/template-macros";
+
 import { ConfirmDeleteButton } from "./confirm-delete-button";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 
@@ -41,12 +46,8 @@ function emptyDraft(): PresetDraft {
   return { label: "", proteinG: "", carbsG: "", fatG: "", caloriesKcal: "" };
 }
 
-function templateItem(template: MealTemplate) {
-  return template.items[0] ?? null;
-}
-
 function presetToDraft(preset: MealTemplate): PresetDraft {
-  const item = templateItem(preset);
+  const item = preset.items[0] ?? null;
   return {
     label: preset.label,
     proteinG: String(item?.proteinG ?? 0),
@@ -161,6 +162,10 @@ export function PresetModal({
   }
 
   function startEdit(preset: MealTemplate) {
+    if (!canEditAsSingleFoodTemplate(preset)) {
+      return;
+    }
+
     setEditingId(preset.id);
     setEditDraft(presetToDraft(preset));
     setShowCreateForm(false);
@@ -233,8 +238,12 @@ export function PresetModal({
         {/* Preset list */}
         {presets.length > 0 && (
           <div className="space-y-2">
-            {presets.map((preset) =>
-              editingId === preset.id ? (
+            {presets.map((preset) => {
+              const totals = getTemplateMacroTotals(preset.items);
+              const canEditPreset = canEditAsSingleFoodTemplate(preset);
+              const itemCount = preset.items.length;
+
+              return editingId === preset.id ? (
                 /* Inline edit form */
                 <div
                   key={preset.id}
@@ -288,10 +297,13 @@ export function PresetModal({
                       {preset.label}
                     </p>
                     <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-0.5">
-                      <span className="text-[10px] font-semibold text-[var(--color-bar-protein)]">P {templateItem(preset)?.proteinG ?? 0}g</span>
-                      <span className="text-[10px] font-semibold text-[var(--color-bar-carbs)]">C {templateItem(preset)?.carbsG ?? 0}g</span>
-                      <span className="text-[10px] font-semibold text-[var(--color-bar-fat)]">F {templateItem(preset)?.fatG ?? 0}g</span>
-                      <span className="text-[10px] font-semibold text-[var(--color-muted)]">{templateItem(preset)?.caloriesKcal ?? 0} kcal</span>
+                      <span className="text-[10px] font-semibold text-[var(--color-bar-protein)]">P {totals.proteinG}g</span>
+                      <span className="text-[10px] font-semibold text-[var(--color-bar-carbs)]">C {totals.carbsG}g</span>
+                      <span className="text-[10px] font-semibold text-[var(--color-bar-fat)]">F {totals.fatG}g</span>
+                      <span className="text-[10px] font-semibold text-[var(--color-muted)]">{totals.caloriesKcal} kcal</span>
+                      {itemCount > 1 ? (
+                        <span className="text-[10px] font-semibold text-[var(--color-muted)]">{itemCount} items</span>
+                      ) : null}
                     </div>
                   </div>
 
@@ -304,17 +316,19 @@ export function PresetModal({
                     Add
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => startEdit(preset)}
-                    disabled={mutationsDisabled}
-                    className="shrink-0 rounded-lg p-1.5 text-[var(--color-muted)] transition hover:text-[var(--color-accent)]"
-                    aria-label={`Edit ${preset.label}`}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9.5 2.5l2 2L4 12H2v-2L9.5 2.5z" />
-                    </svg>
-                  </button>
+                  {canEditPreset ? (
+                    <button
+                      type="button"
+                      onClick={() => startEdit(preset)}
+                      disabled={mutationsDisabled}
+                      className="shrink-0 rounded-lg p-1.5 text-[var(--color-muted)] transition hover:text-[var(--color-accent)]"
+                      aria-label={`Edit ${preset.label}`}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9.5 2.5l2 2L4 12H2v-2L9.5 2.5z" />
+                      </svg>
+                    </button>
+                  ) : null}
 
                   <ConfirmDeleteButton
                     onConfirm={() => void onDelete(preset.id)}
@@ -328,8 +342,8 @@ export function PresetModal({
                     </svg>
                   </ConfirmDeleteButton>
                 </div>
-              )
-            )}
+              );
+            })}
           </div>
         )}
 

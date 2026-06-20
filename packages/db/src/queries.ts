@@ -1880,42 +1880,53 @@ export async function applyTemplateToDate(
   db?: DatabaseClient,
 ): Promise<MealEntryRecord[]> {
   const database = await resolveDb(db);
-  const template = await getTemplateById(userId, input.templateId, database);
-  if (!template) {
-    throw new Error("Template not found.");
-  }
-  const groups = await getMealGroups(userId, database);
-  const groupByLabel = new Map(
-    groups.map((group) => [group.label.toLowerCase(), group.id]),
-  );
-  const created: MealEntryRecord[] = [];
-  for (const item of template.items) {
-    const mealGroupId =
-      item.mealGroupLabel
-        ? groupByLabel.get(item.mealGroupLabel.toLowerCase()) ?? null
-        : null;
-    created.push(
-      await createMealEntry(
-        userId,
-        {
-          date: input.date,
-          mealGroupId,
-          status: input.status ?? "planned",
-          productId: item.productId,
-          label: item.label,
-          quantity: item.quantity,
-          unit: item.unit,
-          servingMultiplier: item.servingMultiplier,
-          proteinG: item.proteinG,
-          carbsG: item.carbsG,
-          fatG: item.fatG,
-          caloriesKcal: item.caloriesKcal,
-        },
-        database,
-      ),
+  return (database as any).transaction(async (tx: any) => {
+    const template = await getTemplateById(userId, input.templateId, tx);
+    if (!template) {
+      throw new Error("Template not found.");
+    }
+
+    await assertFoodProductsAccessibleForUser(
+      userId,
+      template.items.map((item) => item.productId),
+      tx,
     );
-  }
-  return created;
+
+    const groups = await getMealGroups(userId, tx);
+    const groupByLabel = new Map(
+      groups.map((group) => [group.label.toLowerCase(), group.id]),
+    );
+    const created: MealEntryRecord[] = [];
+
+    for (const item of template.items) {
+      const mealGroupId =
+        item.mealGroupLabel
+          ? groupByLabel.get(item.mealGroupLabel.toLowerCase()) ?? null
+          : null;
+      created.push(
+        await createMealEntry(
+          userId,
+          {
+            date: input.date,
+            mealGroupId,
+            status: input.status ?? "planned",
+            productId: item.productId,
+            label: item.label,
+            quantity: item.quantity,
+            unit: item.unit,
+            servingMultiplier: item.servingMultiplier,
+            proteinG: item.proteinG,
+            carbsG: item.carbsG,
+            fatG: item.fatG,
+            caloriesKcal: item.caloriesKcal,
+          },
+          tx,
+        ),
+      );
+    }
+
+    return created;
+  });
 }
 
 export async function createTemplateFromDate(
@@ -3489,6 +3500,41 @@ export async function getAdminUserDetail(
       .limit(10),
   ]);
 
+  const recentTemplateItemRows =
+    recentTemplates.length === 0
+      ? []
+      : await database
+          .select({
+            id: mealTemplateItems.id,
+            templateId: mealTemplateItems.templateId,
+            productId: mealTemplateItems.productId,
+            mealGroupLabel: mealTemplateItems.mealGroupLabel,
+            sortOrder: mealTemplateItems.sortOrder,
+            label: mealTemplateItems.label,
+            quantity: mealTemplateItems.quantity,
+            unit: mealTemplateItems.unit,
+            servingMultiplier: mealTemplateItems.servingMultiplier,
+            proteinG: mealTemplateItems.proteinG,
+            carbsG: mealTemplateItems.carbsG,
+            fatG: mealTemplateItems.fatG,
+            caloriesKcal: mealTemplateItems.caloriesKcal,
+          })
+          .from(mealTemplateItems)
+          .where(
+            inArray(
+              mealTemplateItems.templateId,
+              recentTemplates.map((row) => row.id),
+            ),
+          )
+          .orderBy(asc(mealTemplateItems.sortOrder));
+
+  const recentTemplateItemsByTemplate = new Map<string, MealTemplateItem[]>();
+  for (const item of recentTemplateItemRows.map(mapMealTemplateItemRow)) {
+    const items = recentTemplateItemsByTemplate.get(item.templateId) ?? [];
+    items.push(item);
+    recentTemplateItemsByTemplate.set(item.templateId, items);
+  }
+
   return {
     user,
     goals: {
@@ -3522,7 +3568,9 @@ export async function getAdminUserDetail(
         updatedAt: toTimestampString(row.updatedAt),
       }),
     ),
-    recentTemplates: recentTemplates.map((row) => mapMealTemplateRow(row, [])),
+    recentTemplates: recentTemplates.map((row) =>
+      mapMealTemplateRow(row, recentTemplateItemsByTemplate.get(row.id) ?? []),
+    ),
     recentBarcodeSubmissions: recentBarcodeRows.map(mapFoodProductRow),
   };
 }
@@ -3854,6 +3902,13 @@ export async function restoreAdminBarcodeProduct(
 
     if (!existing.deletedAt) {
       return existing;
+    }
+
+    if (existing.barcode) {
+      const duplicate = await findGlobalBarcodeFoodProduct(existing.barcode, tx);
+      if (duplicate && duplicate.id !== existing.id) {
+        throw new Error("That barcode already exists.");
+      }
     }
 
     const [updated] = await tx

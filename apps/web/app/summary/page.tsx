@@ -8,7 +8,7 @@ import {
 } from "@macro-tracker/db";
 
 import { SummaryShell } from "@/components/summary-shell";
-import { requireSessionUser } from "@/lib/auth";
+import { requireOnboardedSessionUser } from "@/lib/auth";
 
 type SummaryPageProps = {
   searchParams: Promise<{
@@ -17,7 +17,7 @@ type SummaryPageProps = {
 };
 
 export default async function SummaryPage({ searchParams }: SummaryPageProps) {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const params = await searchParams;
   const selectedDate = ensureDateString(params.date);
 

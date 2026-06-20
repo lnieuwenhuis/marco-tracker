@@ -1,6 +1,8 @@
 import {
   createAdminBarcodeProduct,
+  createTemplate,
   ensureUserRole,
+  getAdminUserDetail,
   getAdminBarcodeProductById,
   listAdminAuditEvents,
   listAdminBarcodeProducts,
@@ -221,5 +223,90 @@ describe("admin queries", () => {
       "barcode.updated",
       "barcode.created",
     ]);
+  });
+
+  it("prevents restoring a deleted barcode when an active replacement uses the same barcode", async () => {
+    const deletedOriginal = await createAdminBarcodeProduct(
+      adminId,
+      {
+        barcode: "9900000000099",
+        name: "Original Barcode Food",
+        brands: "Macro Lab",
+        proteinG: 12,
+        carbsG: 20,
+        fatG: 4,
+        caloriesKcal: 164,
+        servingSizeG: 100,
+      },
+      runtime.db,
+    );
+    await softDeleteAdminBarcodeProduct(adminId, deletedOriginal.id, runtime.db);
+    await createAdminBarcodeProduct(
+      adminId,
+      {
+        barcode: "9900000000099",
+        name: "Replacement Barcode Food",
+        brands: "Macro Lab",
+        proteinG: 14,
+        carbsG: 18,
+        fatG: 5,
+        caloriesKcal: 173,
+        servingSizeG: 100,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      restoreAdminBarcodeProduct(adminId, deletedOriginal.id, runtime.db),
+    ).rejects.toThrow("That barcode already exists.");
+
+    const stillDeleted = await getAdminBarcodeProductById(
+      deletedOriginal.id,
+      runtime.db,
+    );
+    expect(stillDeleted?.deletedAt).toBeTruthy();
+    expect(await lookupBarcodeFoodProduct("9900000000099", runtime.db)).toMatchObject({
+      name: "Replacement Barcode Food",
+    });
+  });
+
+  it("loads item macros for recent templates in admin user detail", async () => {
+    await createTemplate(
+      userId,
+      {
+        type: "day",
+        label: "Two item day",
+        items: [
+          {
+            label: "Breakfast",
+            proteinG: 20,
+            carbsG: 40,
+            fatG: 8,
+            caloriesKcal: 312,
+          },
+          {
+            label: "Lunch",
+            proteinG: 30,
+            carbsG: 50,
+            fatG: 12,
+            caloriesKcal: 428,
+          },
+        ],
+      },
+      runtime.db,
+    );
+
+    const detail = await getAdminUserDetail(userId, runtime.db);
+    const template = detail?.recentTemplates.find(
+      (item) => item.label === "Two item day",
+    );
+
+    expect(template?.items).toHaveLength(2);
+    expect(
+      template?.items.reduce(
+        (sum, item) => sum + item.caloriesKcal,
+        0,
+      ),
+    ).toBe(740);
   });
 });
