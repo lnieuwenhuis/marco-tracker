@@ -88,6 +88,7 @@ import {
   completeOnboardingAction,
   fetchLeaderboardStatsAction,
   logRecipePortionAction,
+  searchFoodsAction,
   updateTemplateAction,
 } from "@/lib/actions";
 
@@ -124,6 +125,111 @@ describe("server actions", () => {
       "user-1",
       "2026-04-20",
     );
+  });
+
+  it("searches history and products through one authenticated action", async () => {
+    mocked.searchMealEntries.mockResolvedValue([
+      {
+        id: "entry-1",
+        userId: "user-1",
+        date: "2026-06-20",
+        mealGroupId: null,
+        status: "eaten",
+        productId: null,
+        label: "Greek yogurt",
+        sortOrder: 0,
+        quantity: 1,
+        unit: "serving",
+        servingMultiplier: 1,
+        proteinG: 20,
+        carbsG: 8,
+        fatG: 0,
+        caloriesKcal: 112,
+      },
+    ]);
+    mocked.searchFoodProducts.mockResolvedValue([
+      {
+        id: "product-1",
+        ownerUserId: "user-1",
+        scope: "personal",
+        source: "custom",
+        name: "Greek yogurt",
+        brand: null,
+        barcode: null,
+        defaultServingQuantity: 1,
+        defaultServingUnit: "serving",
+        servingWeightG: 170,
+        servingVolumeMl: null,
+        proteinPer100: 11.8,
+        carbsPer100: 4.7,
+        fatPer100: 0,
+        caloriesPer100: 66,
+        isActive: true,
+        createdAt: "2026-06-20T00:00:00.000Z",
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      },
+    ]);
+
+    const result = await searchFoodsAction({ query: "  greek  " });
+
+    expect(result).toMatchObject({
+      ok: true,
+      results: [{ id: "entry-1" }],
+      products: [{ id: "product-1" }],
+    });
+    expect(mocked.requireSessionUser).toHaveBeenCalledTimes(1);
+    expect(mocked.searchMealEntries).toHaveBeenCalledWith("user-1", "greek");
+    expect(mocked.searchFoodProducts).toHaveBeenCalledWith("user-1", "greek");
+  });
+
+  it("keeps history results available when product search fails", async () => {
+    mocked.searchMealEntries.mockResolvedValue([
+      {
+        id: "entry-1",
+        userId: "user-1",
+        date: "2026-06-20",
+        mealGroupId: null,
+        status: "eaten",
+        productId: null,
+        label: "Greek yogurt",
+        sortOrder: 0,
+        quantity: 1,
+        unit: "serving",
+        servingMultiplier: 1,
+        proteinG: 20,
+        carbsG: 8,
+        fatG: 0,
+        caloriesKcal: 112,
+      },
+    ]);
+    mocked.searchFoodProducts.mockRejectedValue(new Error("catalog down"));
+
+    const result = await searchFoodsAction({ query: "greek" });
+
+    expect(result).toEqual({
+      ok: true,
+      results: [
+        {
+          id: "entry-1",
+          userId: "user-1",
+          date: "2026-06-20",
+          mealGroupId: null,
+          status: "eaten",
+          productId: null,
+          label: "Greek yogurt",
+          sortOrder: 0,
+          quantity: 1,
+          unit: "serving",
+          servingMultiplier: 1,
+          proteinG: 20,
+          carbsG: 8,
+          fatG: 0,
+          caloriesKcal: 112,
+        },
+      ],
+      products: [],
+      error: "Product search failed, but history results are still available.",
+    });
   });
 
   it("rejects invalid leaderboard reference dates before hitting auth or the db", async () => {

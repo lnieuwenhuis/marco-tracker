@@ -3,7 +3,7 @@
 import type { FoodProduct, MealEntryRecord } from "@macro-tracker/db";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { saveMealEntryAction, searchFoodProductsAction, searchMealEntriesAction } from "@/lib/actions";
+import { saveMealEntryAction, searchFoodsAction } from "@/lib/actions";
 import { getDailyMutationCacheKeys } from "@/lib/app-warmup";
 import { formatSelectedDate } from "@/lib/formatting";
 import { buildMealEntryCopyInput } from "@/lib/meal-entry-copy";
@@ -55,23 +55,17 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
 
     let cancelled = false;
     setIsSearching(true);
-    setProducts([]);
 
     const timer = setTimeout(async () => {
       try {
-        const result = await searchMealEntriesAction({ query: query.trim() });
+        const result = await searchFoodsAction({ query: query.trim() });
         // Guard against the component having unmounted or the query having
         // changed while the network request was in flight.
         if (cancelled) return;
-        if (result.ok && result.results) {
-          setResults(result.results);
-          const productResult = await searchFoodProductsAction({ query: query.trim() });
-          if (!cancelled && productResult.ok && productResult.products) {
-            setProducts(productResult.products);
-          } else if (!cancelled) {
-            setProducts([]);
-          }
-          setError(null);
+        if (result.ok) {
+          setResults(result.results ?? []);
+          setProducts(result.products ?? []);
+          setError(result.error ?? null);
         } else {
           setError(result.error ?? "Search failed.");
           setResults([]);
@@ -80,7 +74,7 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
       } finally {
         if (!cancelled) setIsSearching(false);
       }
-    }, 350);
+    }, 250);
 
     return () => {
       cancelled = true;

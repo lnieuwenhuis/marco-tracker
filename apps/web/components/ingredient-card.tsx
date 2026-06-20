@@ -52,7 +52,7 @@ function NumericInput({
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2 pr-9 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2 pr-16 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
         />
         <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[var(--color-muted)]">
           {unit}
@@ -73,11 +73,12 @@ export function IngredientCard({
     onChange(draft.clientId, { ...draft, [field]: value });
   }
 
+  const isPositive = (value: string) => parseFloat(value) > 0;
   const hasValues =
-    Boolean(draft.proteinG) ||
-    Boolean(draft.carbsG) ||
-    Boolean(draft.fatG) ||
-    Boolean(draft.caloriesKcal);
+    isPositive(draft.proteinG) ||
+    isPositive(draft.carbsG) ||
+    isPositive(draft.fatG) ||
+    isPositive(draft.caloriesKcal);
 
   return (
     <article className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-card-subtle)] shadow-[0_4px_16px_rgba(74,45,28,0.05)]">
@@ -141,6 +142,33 @@ export function IngredientCard({
           </button>
         </div>
 
+        <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+          <NumericInput
+            label="Quantity"
+            value={draft.quantity ?? "1"}
+            unit={draft.unit ?? "serving"}
+            step="0.01"
+            disabled={disabled}
+            onChange={(value) => update("quantity", value)}
+          />
+          <label className="block min-w-28">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
+              Unit
+            </span>
+            <select
+              value={draft.unit ?? "serving"}
+              disabled={disabled}
+              onChange={(event) => update("unit", event.target.value)}
+              className="h-[38px] w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="g">g</option>
+              <option value="ml">ml</option>
+              <option value="serving">serving</option>
+              <option value="count">count</option>
+            </select>
+          </label>
+        </div>
+
         {/* Macro inputs */}
         <div className="mt-2 grid grid-cols-2 gap-2">
           <NumericInput
@@ -180,22 +208,22 @@ export function IngredientCard({
         {/* Inline macro summary */}
         {hasValues && (
           <div className="mt-2 flex flex-wrap gap-x-2.5 gap-y-0.5">
-            {draft.proteinG ? (
+            {isPositive(draft.proteinG) ? (
               <span className="text-[10px] font-semibold text-[var(--color-bar-protein)]">
                 P {draft.proteinG}g
               </span>
             ) : null}
-            {draft.carbsG ? (
+            {isPositive(draft.carbsG) ? (
               <span className="text-[10px] font-semibold text-[var(--color-bar-carbs)]">
                 C {draft.carbsG}g
               </span>
             ) : null}
-            {draft.fatG ? (
+            {isPositive(draft.fatG) ? (
               <span className="text-[10px] font-semibold text-[var(--color-bar-fat)]">
                 F {draft.fatG}g
               </span>
             ) : null}
-            {draft.caloriesKcal ? (
+            {isPositive(draft.caloriesKcal) ? (
               <span className="text-[10px] font-semibold text-[var(--color-muted)]">
                 {draft.caloriesKcal} kcal
               </span>

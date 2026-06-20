@@ -70,7 +70,7 @@ function NumericInput({
           value={value}
           disabled={busy}
           onChange={(event) => onChange(event.target.value)}
-          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-9 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
+          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-16 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
         />
         <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[var(--color-muted)]">
           {unit}

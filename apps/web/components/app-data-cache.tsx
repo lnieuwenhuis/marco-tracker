@@ -55,6 +55,7 @@ export function AppDataCacheProvider({ children }: { children: ReactNode }) {
     }
 
     setStaleKeys((current) => new Set([...current, ...keys]));
+    setWarmedDates(new Set());
   }, []);
 
   const warmup = useCallback(

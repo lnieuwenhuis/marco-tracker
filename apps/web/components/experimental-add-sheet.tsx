@@ -100,6 +100,14 @@ export function ExperimentalAddSheet({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+
+      const actionIndex = Number(event.key) - 1;
+      const action = ACTIONS[actionIndex]?.action;
+      if (action) {
+        event.preventDefault();
+        onSelect(action);
       }
     }
 
@@ -122,7 +130,7 @@ export function ExperimentalAddSheet({
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [onClose, open]);
+  }, [onClose, onSelect, open]);
 
   if (!open) {
     return null;

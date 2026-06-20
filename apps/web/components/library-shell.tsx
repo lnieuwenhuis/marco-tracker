@@ -2,7 +2,7 @@
 
 import type { FoodProduct, MealTemplate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useDeferredValue, useMemo, useState, useTransition } from "react";
 
 import { ExperimentalAppShell, ExperimentalSettingsButton } from "./experimental-app-shell";
 import { LibraryHubNav } from "./library-hub-nav";
@@ -39,22 +39,38 @@ export function LibraryShell({
 }: LibraryShellProps) {
   const router = useRouter();
   const [search, setSearch] = useState(query);
+  const [isSearching, startSearch] = useTransition();
+  const deferredSearch = useDeferredValue(search);
 
   function submitSearch(event: React.FormEvent) {
     event.preventDefault();
     const params = new URLSearchParams();
     if (search.trim()) params.set("q", search.trim());
     params.set("date", selectedDate);
-    router.push(`/library?${params.toString()}`);
+    startSearch(() => {
+      router.push(`/library?${params.toString()}`);
+    });
   }
 
-  const normalizedQuery = query.trim().toLowerCase();
-  const visibleTemplates = normalizedQuery
-    ? templates.filter((template) => template.label.toLowerCase().includes(normalizedQuery))
-    : templates;
-  const visibleRecipes = normalizedQuery
-    ? recipes.filter((recipe) => recipe.label.toLowerCase().includes(normalizedQuery))
-    : recipes;
+  const normalizedQuery = deferredSearch.trim().toLowerCase();
+  const visibleTemplates = useMemo(
+    () =>
+      normalizedQuery
+        ? templates.filter((template) =>
+            template.label.toLowerCase().includes(normalizedQuery),
+          )
+        : templates,
+    [normalizedQuery, templates],
+  );
+  const visibleRecipes = useMemo(
+    () =>
+      normalizedQuery
+        ? recipes.filter((recipe) =>
+            recipe.label.toLowerCase().includes(normalizedQuery),
+          )
+        : recipes,
+    [normalizedQuery, recipes],
+  );
 
   return (
     <ExperimentalAppShell
@@ -90,9 +106,10 @@ export function LibraryShell({
           />
           <button
             type="submit"
-            className="rounded-2xl bg-[var(--color-accent)] px-4 py-3 text-sm font-semibold text-white"
+            disabled={isSearching}
+            className="rounded-2xl bg-[var(--color-accent)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            Search
+            {isSearching ? "Searching..." : "Search"}
           </button>
         </form>
 
