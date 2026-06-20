@@ -4,7 +4,7 @@ import type { DailySummary, MacroGoals, MealEntryRecord, MealEntryStatus, MealGr
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useMemo, useRef, useState, useTransition } from "react";
 
-import { createMealGroupAction, deleteMealGroupAction, deleteTemplateAction, deleteMealEntryAction, markMealEntryStatusAction, saveTemplateAction, saveMealEntryAction, updateMealGroupAction, updateTemplateAction } from "@/lib/actions";
+import { applyTemplateAction, createMealGroupAction, deleteMealGroupAction, deleteTemplateAction, deleteMealEntryAction, markMealEntryStatusAction, saveTemplateAction, saveMealEntryAction, updateMealGroupAction, updateTemplateAction } from "@/lib/actions";
 import {
   getDailyMutationCacheKeys,
   getTemplateMutationCacheKeys,
@@ -46,6 +46,7 @@ type DashboardShellProps = {
 type ErrorState = Record<string, string | null>;
 type PresetMutationState =
   | { type: "save" }
+  | { type: "apply"; presetId: string }
   | { type: "update" | "delete"; presetId: string };
 
 function mealToDraft(meal: MealEntryRecord): MealDraft {
@@ -109,51 +110,6 @@ function createEmptyDraft(sortOrder: number, status: MealEntryStatus): MealDraft
     caloriesKcal: "",
     sortOrder,
   };
-}
-
-function createDraftFromTemplateItem(
-  item: MealTemplate["items"][number],
-  sortOrder: number,
-  status: MealEntryStatus,
-  mealGroupId: string | null,
-): MealDraft {
-  return {
-    clientId: `draft-${crypto.randomUUID()}`,
-    status,
-    mealGroupId,
-    productId: item.productId ?? null,
-    label: item.label,
-    quantity: String(item.quantity),
-    unit: item.unit,
-    servingMultiplier: String(item.servingMultiplier),
-    proteinG: String(item.proteinG),
-    carbsG: String(item.carbsG),
-    fatG: String(item.fatG),
-    caloriesKcal: String(item.caloriesKcal),
-    sortOrder,
-  };
-}
-
-function createDraftsFromTemplate(
-  template: MealTemplate,
-  sortOrder: number,
-  status: MealEntryStatus,
-  mealGroups: MealGroup[],
-) {
-  const groupByLabel = new Map(
-    mealGroups.map((group) => [group.label.toLowerCase(), group.id]),
-  );
-
-  return template.items.map((item, index) =>
-    createDraftFromTemplateItem(
-      item,
-      sortOrder + index,
-      status,
-      item.mealGroupLabel
-        ? groupByLabel.get(item.mealGroupLabel.toLowerCase()) ?? null
-        : null,
-    ),
-  );
 }
 
 function createDraftFromCandidate(
@@ -418,21 +374,35 @@ export function DashboardShell({
     setDrafts((currentDrafts) => [...currentDrafts, createEmptyDraft(nextSortOrder(), defaultEntryStatus)]);
   }
 
-  function addDraftFromPreset(template: MealTemplate) {
-    setDrafts((currentDrafts) => [
-      ...currentDrafts,
-      ...createDraftsFromTemplate(
-        template,
-        currentDrafts.reduce(
-          (highest, draft) => Math.max(highest, draft.sortOrder),
-          -1,
-        ) + 1,
-        defaultEntryStatus,
-        localMealGroups,
-      ),
-    ]);
+  async function addDraftFromPreset(template: MealTemplate) {
     setPresetError(null);
-    setShowPresetsModal(false);
+    setPresetMutation({ type: "apply", presetId: template.id });
+
+    try {
+      const result = await applyTemplateAction({
+        templateId: template.id,
+        date: selectedDate,
+      });
+      const entries = result.entries ?? [];
+
+      if (!result.ok || entries.length === 0) {
+        setPresetError(result.error ?? "Unable to apply template.");
+        return;
+      }
+
+      setSavedMeals((meals) =>
+        entries.reduce((nextMeals, entry) => upsertSavedMeal(nextMeals, entry), meals),
+      );
+      setDrafts((currentDrafts) => [
+        ...currentDrafts,
+        ...entries.map((entry) => mealToDraft(entry)),
+      ]);
+      invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
+      setShowPresetsModal(false);
+      router.refresh();
+    } finally {
+      setPresetMutation(null);
+    }
   }
 
   function addDraftFromRecipe(recipe: RecipeRecord) {

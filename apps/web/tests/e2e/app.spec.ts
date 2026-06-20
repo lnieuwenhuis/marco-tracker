@@ -191,7 +191,7 @@ test("recent foods appear in quick add and create a prefilled draft", async ({
   expect(articlesAfter).toBeGreaterThan(articlesBefore);
 });
 
-test("adds every item from a saved day template on the dashboard", async ({
+test("applies a saved day template as collapsed planned entries", async ({
   page,
 }) => {
   const suffix = Date.now();
@@ -242,12 +242,20 @@ test("adds every item from a saved day template on the dashboard", async ({
   await expect(modal.getByText(templateLabel)).toBeVisible();
   await modal.getByRole("button", { name: "Add" }).click();
 
-  await expect(
-    page.getByRole("heading", { name: firstItem }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: secondItem }),
-  ).toBeVisible();
+  await expect(modal).toBeHidden();
+  const firstCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: firstItem }),
+  });
+  const secondCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: secondItem }),
+  });
+
+  await expect(firstCard).toBeVisible();
+  await expect(secondCard).toBeVisible();
+  await expect(firstCard).toContainText("planned");
+  await expect(secondCard).toContainText("planned");
+  await expect(firstCard.getByRole("button", { name: "Save" })).toHaveCount(0);
+  await expect(secondCard.getByRole("button", { name: "Save" })).toHaveCount(0);
 });
 
 test("stats and weight pages load without day navigation chrome", async ({
