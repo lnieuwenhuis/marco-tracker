@@ -17,6 +17,7 @@ import {
   type DatabaseRuntime,
 } from "../src";
 import { createTestDatabase } from "../src/testing";
+import { sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 describe("admin queries", () => {
@@ -267,6 +268,267 @@ describe("admin queries", () => {
     expect(stillDeleted?.deletedAt).toBeTruthy();
     expect(await lookupBarcodeFoodProduct("9900000000099", runtime.db)).toMatchObject({
       name: "Replacement Barcode Food",
+    });
+  });
+
+  it("prevents duplicate active barcode creates and updates", async () => {
+    await createAdminBarcodeProduct(
+      adminId,
+      {
+        barcode: "9900000000101",
+        name: "Original Duplicate Guard Food",
+        brands: "Macro Lab",
+        proteinG: 10,
+        carbsG: 20,
+        fatG: 5,
+        caloriesKcal: 165,
+        servingSizeG: 100,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      createAdminBarcodeProduct(
+        adminId,
+        {
+          barcode: "9900000000101",
+          name: "Duplicate Guard Food",
+          brands: "Macro Lab",
+          proteinG: 12,
+          carbsG: 19,
+          fatG: 6,
+          caloriesKcal: 178,
+          servingSizeG: 100,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("That barcode already exists.");
+
+    const other = await createAdminBarcodeProduct(
+      adminId,
+      {
+        barcode: "9900000000102",
+        name: "Other Duplicate Guard Food",
+        brands: "Macro Lab",
+        proteinG: 14,
+        carbsG: 18,
+        fatG: 4,
+        caloriesKcal: 164,
+        servingSizeG: 100,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      updateAdminBarcodeProduct(
+        adminId,
+        other.id,
+        {
+          barcode: "9900000000101",
+          name: "Other Duplicate Guard Food",
+          brands: "Macro Lab",
+          proteinG: 14,
+          carbsG: 18,
+          fatG: 4,
+          caloriesKcal: 164,
+          servingSizeG: 100,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("That barcode already exists.");
+
+    expect(await getAdminBarcodeProductById(other.id, runtime.db)).toMatchObject({
+      barcode: "9900000000102",
+    });
+  });
+
+  it("enforces active global barcode uniqueness at the database level", async () => {
+    await createAdminBarcodeProduct(
+      adminId,
+      {
+        barcode: "9900000000201",
+        name: "Indexed Barcode Food",
+        brands: "Macro Lab",
+        proteinG: 10,
+        carbsG: 20,
+        fatG: 5,
+        caloriesKcal: 165,
+        servingSizeG: 100,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      runtime.db.execute(sql.raw(`
+        INSERT INTO "food_products" (
+          "id",
+          "owner_user_id",
+          "scope",
+          "source",
+          "barcode",
+          "name",
+          "brand",
+          "default_serving_quantity",
+          "default_serving_unit",
+          "protein_per_100",
+          "carbs_per_100",
+          "fat_per_100",
+          "calories_per_100",
+          "serving_weight_g"
+        )
+        VALUES (
+          '11111111-2222-4333-8444-555555555555',
+          NULL,
+          'global',
+          'barcode',
+          '9900000000201',
+          'Duplicate Indexed Barcode Food',
+          'Macro Lab',
+          '1.00',
+          'serving',
+          10.00,
+          20.00,
+          5.00,
+          165,
+          '100.00'
+        )
+      `)),
+    ).rejects.toThrow();
+
+    await expect(
+      runtime.db.execute(sql.raw(`
+        INSERT INTO "food_products" (
+          "id",
+          "owner_user_id",
+          "scope",
+          "source",
+          "barcode",
+          "name",
+          "brand",
+          "default_serving_quantity",
+          "default_serving_unit",
+          "protein_per_100",
+          "carbs_per_100",
+          "fat_per_100",
+          "calories_per_100",
+          "serving_weight_g",
+          "deleted_at"
+        )
+        VALUES (
+          '11111111-2222-4333-8444-555555555556',
+          NULL,
+          'global',
+          'barcode',
+          '9900000000201',
+          'Deleted Indexed Barcode Food',
+          'Macro Lab',
+          '1.00',
+          'serving',
+          10.00,
+          20.00,
+          5.00,
+          165,
+          '100.00',
+          now()
+        )
+      `)),
+    ).resolves.toBeTruthy();
+  });
+
+  it("finds active barcode duplicates when a newer deleted duplicate also exists", async () => {
+    const active = await createAdminBarcodeProduct(
+      adminId,
+      {
+        barcode: "9900000000301",
+        name: "Active Masking Guard Food",
+        brands: "Macro Lab",
+        proteinG: 10,
+        carbsG: 20,
+        fatG: 5,
+        caloriesKcal: 165,
+        servingSizeG: 100,
+      },
+      runtime.db,
+    );
+
+    await runtime.db.execute(sql.raw(`
+      INSERT INTO "food_products" (
+        "id",
+        "owner_user_id",
+        "scope",
+        "source",
+        "barcode",
+        "name",
+        "brand",
+        "default_serving_quantity",
+        "default_serving_unit",
+        "protein_per_100",
+        "carbs_per_100",
+        "fat_per_100",
+        "calories_per_100",
+        "serving_weight_g",
+        "updated_at",
+        "deleted_at"
+      )
+      VALUES (
+        '11111111-2222-4333-8444-555555555557',
+        NULL,
+        'global',
+        'barcode',
+        '9900000000301',
+        'Deleted Masking Guard Food',
+        'Macro Lab',
+        '1.00',
+        'serving',
+        10.00,
+        20.00,
+        5.00,
+        165,
+        '100.00',
+        '2999-01-01 00:00:00+00',
+        '2999-01-01 00:00:00+00'
+      )
+    `));
+
+    const other = await createAdminBarcodeProduct(
+      adminId,
+      {
+        barcode: "9900000000302",
+        name: "Other Masking Guard Food",
+        brands: "Macro Lab",
+        proteinG: 14,
+        carbsG: 18,
+        fatG: 4,
+        caloriesKcal: 164,
+        servingSizeG: 100,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      updateAdminBarcodeProduct(
+        adminId,
+        other.id,
+        {
+          barcode: "9900000000301",
+          name: "Other Masking Guard Food",
+          brands: "Macro Lab",
+          proteinG: 14,
+          carbsG: 18,
+          fatG: 4,
+          caloriesKcal: 164,
+          servingSizeG: 100,
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("That barcode already exists.");
+
+    expect(await lookupBarcodeFoodProduct("9900000000301", runtime.db)).toMatchObject({
+      id: active.id,
+      name: "Active Masking Guard Food",
+    });
+    expect(await getAdminBarcodeProductById(other.id, runtime.db)).toMatchObject({
+      barcode: "9900000000302",
     });
   });
 

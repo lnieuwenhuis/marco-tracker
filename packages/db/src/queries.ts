@@ -2897,15 +2897,16 @@ function normalizeBarcodeFoodInput(input: BarcodeFoodProductInput): FoodProductI
 async function findGlobalBarcodeFoodProduct(
   barcode: string,
   db: DatabaseClient,
-  includeDeleted = false,
+  excludeProductId?: string,
 ): Promise<FoodProduct | null> {
   const conditions = [
     isNull(foodProducts.ownerUserId),
     eq(foodProducts.source, "barcode"),
     eq(foodProducts.barcode, barcode.trim()),
+    isNull(foodProducts.deletedAt),
   ];
-  if (!includeDeleted) {
-    conditions.push(isNull(foodProducts.deletedAt));
+  if (excludeProductId) {
+    conditions.push(ne(foodProducts.id, excludeProductId));
   }
   const [row] = await db
     .select()
@@ -2936,9 +2937,8 @@ async function insertBarcodeFoodProduct(
   const existing = await findGlobalBarcodeFoodProduct(
     normalized.barcode ?? "",
     db,
-    true,
   );
-  if (existing && !existing.deletedAt) {
+  if (existing) {
     throw new Error("That barcode already exists.");
   }
 
@@ -3809,9 +3809,9 @@ export async function updateAdminBarcodeProduct(
     const duplicate = await findGlobalBarcodeFoodProduct(
       normalized.barcode ?? "",
       tx,
-      true,
+      before.id,
     );
-    if (duplicate && duplicate.id !== before.id && !duplicate.deletedAt) {
+    if (duplicate) {
       throw new Error("That barcode already exists.");
     }
 

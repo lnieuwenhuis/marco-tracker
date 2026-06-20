@@ -7,6 +7,7 @@ async function enableExperimentalUi(page: Page) {
 
 test("canonical app navigation and settings are visible", async ({ page }) => {
   await page.goto("/api/test/session?email=coach@example.com");
+  await page.goto("/?date=2026-03-19");
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
   await expect(page.getByRole("link", { name: "Food Log" })).toBeVisible();
@@ -18,6 +19,14 @@ test("canonical app navigation and settings are visible", async ({ page }) => {
 
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByText("Theme", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Food Library" })).toHaveAttribute(
+    "href",
+    "/library?date=2026-03-19",
+  );
+  await expect(page.getByRole("link", { name: "Meal Planner" })).toHaveAttribute(
+    "href",
+    "/planner?date=2026-03-19",
+  );
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
   await expect(page.getByRole("switch", { name: /Legacy UI/i })).toHaveCount(0);
 });

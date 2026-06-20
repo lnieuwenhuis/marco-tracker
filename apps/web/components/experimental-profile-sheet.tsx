@@ -10,6 +10,7 @@ type ExperimentalProfileSheetProps = {
   open: boolean;
   userEmail: string;
   canAccessAdmin: boolean;
+  selectedDate: string;
   onClose: () => void;
 };
 
@@ -17,6 +18,7 @@ export function ExperimentalProfileSheet({
   open,
   userEmail,
   canAccessAdmin,
+  selectedDate,
   onClose,
 }: ExperimentalProfileSheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -97,7 +99,7 @@ export function ExperimentalProfileSheet({
                   Library
                 </span>
                 <TransitionLink
-                  href="/library"
+                  href={`/library?date=${selectedDate}`}
                   motion="screen"
                   onClick={onClose}
                   className="flex items-center justify-between rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-sm font-semibold text-[var(--color-ink)] transition hover:bg-[var(--color-card-muted)]"
@@ -106,7 +108,7 @@ export function ExperimentalProfileSheet({
                   <span aria-hidden="true">+</span>
                 </TransitionLink>
                 <TransitionLink
-                  href="/planner"
+                  href={`/planner?date=${selectedDate}`}
                   motion="screen"
                   onClick={onClose}
                   className="flex items-center justify-between rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-sm font-semibold text-[var(--color-ink)] transition hover:bg-[var(--color-card-muted)]"

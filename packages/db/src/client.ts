@@ -224,6 +224,9 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
     sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_barcode_idx" ON "food_products" USING btree ("barcode")`),
   );
   await db.execute(
+    sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS "food_products_active_global_barcode_key" ON "food_products" USING btree ("barcode") WHERE "owner_user_id" IS NULL AND "source" = 'barcode' AND "deleted_at" IS NULL AND "barcode" IS NOT NULL`),
+  );
+  await db.execute(
     sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_scope_source_idx" ON "food_products" USING btree ("scope","source")`),
   );
   await db.execute(

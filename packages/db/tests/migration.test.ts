@@ -17,6 +17,7 @@ const migrationFiles = [
   "0008_product_model_meal_planning.sql",
   "0009_sync_barcode_food_products.sql",
   "0010_templates_food_product_cleanup.sql",
+  "0011_active_global_barcode_unique.sql",
 ] as const;
 
 async function applyMigration(runtime: DatabaseRuntime, fileName: string) {

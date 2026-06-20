@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   date,
   boolean,
@@ -126,6 +127,11 @@ export const foodProducts = pgTable(
   (table) => [
     index("food_products_owner_name_idx").on(table.ownerUserId, table.name),
     index("food_products_barcode_idx").on(table.barcode),
+    uniqueIndex("food_products_active_global_barcode_key")
+      .on(table.barcode)
+      .where(
+        sql`${table.ownerUserId} IS NULL AND ${table.source} = 'barcode' AND ${table.deletedAt} IS NULL AND ${table.barcode} IS NOT NULL`,
+      ),
     index("food_products_scope_source_idx").on(table.scope, table.source),
     index("food_products_deleted_at_idx").on(table.deletedAt),
     index("food_products_submitted_by_idx").on(table.submittedByUserId),
