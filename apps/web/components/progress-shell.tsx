@@ -1,6 +1,6 @@
 "use client";
 
-import type { MacroGoals, WeightPageData } from "@macro-tracker/db";
+import type { MacroGoals, WeightEntryRecord, WeightPageData } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
@@ -9,6 +9,7 @@ import {
   saveGoalsAction,
   saveWeightEntryAction,
   saveWeightGoalAction,
+  updateWeightEntryAction,
 } from "@/lib/actions";
 import {
   getGoalsMutationCacheKeys,
@@ -192,6 +193,7 @@ function WeightPanel({
   const [weightKg, setWeightKg] = useState("");
   const [bodyFatPct, setBodyFatPct] = useState("");
   const [notes, setNotes] = useState("");
+  const [editingEntry, setEditingEntry] = useState<WeightEntryRecord | null>(null);
   const [goalWeightKg, setGoalWeightKg] = useState(
     weightData.goalWeightKg != null ? String(weightData.goalWeightKg) : "",
   );
@@ -201,6 +203,32 @@ function WeightPanel({
   useEffect(() => {
     setFormDate(selectedDate);
   }, [selectedDate]);
+
+  function resetEntryForm() {
+    setFormDate(selectedDate);
+    setWeightKg("");
+    setBodyFatPct("");
+    setNotes("");
+    setEditingEntry(null);
+    setError(null);
+  }
+
+  function handleStartEdit(entry: WeightEntryRecord) {
+    setFormDate(entry.date);
+    setWeightKg(String(entry.weightKg));
+    setBodyFatPct(entry.bodyFatPct != null ? String(entry.bodyFatPct) : "");
+    setNotes(entry.notes ?? "");
+    setEditingEntry(entry);
+    setError(null);
+
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => {
+        document
+          .getElementById("weight-entry-form")
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
+  }
 
   function handleSaveEntry() {
     const parsedWeight = Number(weightKg);
@@ -220,22 +248,33 @@ function WeightPanel({
 
     setError(null);
     startTransition(async () => {
-      const result = await saveWeightEntryAction({
-        date: formDate,
-        weightKg: parsedWeight,
-        bodyFatPct: parsedBodyFat,
-        notes: notes.trim() || null,
-      });
+      const submittedDate = formDate;
+      const originalDate = editingEntry?.date ?? submittedDate;
+      const result = editingEntry
+        ? await updateWeightEntryAction({
+            id: editingEntry.id,
+            date: submittedDate,
+            weightKg: parsedWeight,
+            bodyFatPct: parsedBodyFat,
+            notes: notes.trim() || null,
+          })
+        : await saveWeightEntryAction({
+            date: submittedDate,
+            weightKg: parsedWeight,
+            bodyFatPct: parsedBodyFat,
+            notes: notes.trim() || null,
+          });
 
       if (!result.ok) {
         setError(result.error ?? "Unable to save weight.");
         return;
       }
 
-      setWeightKg("");
-      setBodyFatPct("");
-      setNotes("");
-      invalidateAppDataCache(getWeightMutationCacheKeys(formDate));
+      resetEntryForm();
+      invalidateAppDataCache([
+        ...getWeightMutationCacheKeys(originalDate),
+        ...getWeightMutationCacheKeys(submittedDate),
+      ]);
       router.refresh();
     });
   }
@@ -266,6 +305,9 @@ function WeightPanel({
       if (!result.ok) {
         setError(result.error ?? "Unable to delete entry.");
         return;
+      }
+      if (editingEntry?.id === entryId) {
+        resetEntryForm();
       }
       invalidateAppDataCache(getWeightMutationCacheKeys(entryDate));
       router.refresh();
@@ -300,7 +342,25 @@ function WeightPanel({
         </div>
       </div>
 
-      <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
+      <section
+        id="weight-entry-form"
+        className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5"
+      >
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
+            {editingEntry ? "Edit Entry" : "Entry"}
+          </h3>
+          {editingEntry ? (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={resetEntryForm}
+              className="text-xs font-semibold text-[var(--color-muted)] transition hover:text-[var(--color-ink)] disabled:opacity-50"
+            >
+              Cancel edit
+            </button>
+          ) : null}
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label>
             <span className="mb-1 block text-xs text-[var(--color-muted)]">Date</span>
@@ -349,7 +409,7 @@ function WeightPanel({
           onClick={handleSaveEntry}
           className="mt-4 w-full rounded-xl bg-[var(--color-accent)] py-2.5 text-sm font-semibold text-white transition hover:-translate-y-0.5 disabled:opacity-50"
         >
-          Save entry
+          {isPending ? "Saving..." : editingEntry ? "Update entry" : "Save entry"}
         </button>
       </section>
 
@@ -400,24 +460,48 @@ function WeightPanel({
                 key={entry.id}
                 className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3"
               >
-                <div>
-                  <p className="text-sm font-semibold text-[var(--color-ink)]">{entry.weightKg} kg</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-[var(--color-ink)]">
+                    {entry.weightKg} kg
+                    {entry.bodyFatPct != null ? (
+                      <span className="ml-3 text-xs font-normal text-[var(--color-muted)]">
+                        {entry.bodyFatPct}% bf
+                      </span>
+                    ) : null}
+                  </p>
                   <p className="mt-0.5 text-xs text-[var(--color-muted)]">
                     {formatShortDate(entry.date)}
-                    {entry.bodyFatPct != null ? ` - ${entry.bodyFatPct}% bf` : ""}
+                    {entry.notes ? ` - ${entry.notes}` : ""}
                   </p>
                 </div>
-                <ConfirmDeleteButton
-                  disabled={isPending}
-                  onConfirm={() => handleDeleteEntry(entry.id, entry.date)}
-                  ariaLabel="Delete entry"
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-muted)] transition hover:text-[var(--color-danger)]"
-                >
-                  <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                    <line x1="3" y1="3" x2="12" y2="12" />
-                    <line x1="12" y1="3" x2="3" y2="12" />
-                  </svg>
-                </ConfirmDeleteButton>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => handleStartEdit(entry)}
+                    className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+                      editingEntry?.id === entry.id
+                        ? "bg-[var(--color-accent)]/15 text-[var(--color-accent)]"
+                        : "text-[var(--color-muted)] hover:text-[var(--color-accent)]"
+                    } disabled:opacity-50`}
+                    aria-label={`Edit entry from ${formatShortDate(entry.date)}`}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9.5 2.5l2 2L4 12H2v-2L9.5 2.5z" />
+                    </svg>
+                  </button>
+                  <ConfirmDeleteButton
+                    disabled={isPending}
+                    onConfirm={() => handleDeleteEntry(entry.id, entry.date)}
+                    ariaLabel="Delete entry"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-muted)] transition hover:text-[var(--color-danger)]"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                      <line x1="3" y1="3" x2="12" y2="12" />
+                      <line x1="12" y1="3" x2="3" y2="12" />
+                    </svg>
+                  </ConfirmDeleteButton>
+                </div>
               </div>
             ))}
           </div>

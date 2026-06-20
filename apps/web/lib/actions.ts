@@ -7,7 +7,7 @@ import {
   createRecipe,
   createTemplate,
   createTemplateFromDate,
-  completeUserOnboarding,
+  completeOnboardingSetup,
   deleteMealGroup,
   createWeightEntry,
   deleteMealEntry,
@@ -269,31 +269,27 @@ export async function completeOnboardingAction(
   const sessionUser = await requireSessionUser();
 
   try {
-    await saveUserGoals(sessionUser.userId, input.goals);
-    await saveWeightGoal(sessionUser.userId, input.goalWeightKg);
-
-    if (
+    const currentWeight =
       input.currentWeightKg != null &&
       Number.isFinite(input.currentWeightKg) &&
       input.currentWeightKg > 0
-    ) {
-      await createWeightEntry(sessionUser.userId, {
-        date: input.currentWeightDate,
-        weightKg: input.currentWeightKg,
-        bodyFatPct: null,
-        notes: "Onboarding",
-      });
-    }
+        ? {
+            date: input.currentWeightDate,
+            weightKg: input.currentWeightKg,
+            bodyFatPct: null,
+            notes: "Onboarding",
+          }
+        : null;
+    const starterTemplate = input.starterTemplate?.label.trim()
+      ? singleFoodTemplateInput(input.starterTemplate)
+      : null;
 
-    if (input.starterTemplate?.label.trim()) {
-      await createTemplate(
-        sessionUser.userId,
-        singleFoodTemplateInput(input.starterTemplate),
-      );
-    }
-
-    await completeUserOnboarding(sessionUser.userId, {
+    await completeOnboardingSetup(sessionUser.userId, {
       preferredWeightUnit: input.preferredWeightUnit,
+      goals: input.goals,
+      goalWeightKg: input.goalWeightKg,
+      currentWeight,
+      starterTemplate,
     });
 
     revalidatePath("/", "layout");

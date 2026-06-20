@@ -266,3 +266,31 @@ test("weight goal validation errors stay visible on the page", async ({
     page.getByText("Enter a valid goal weight."),
   ).toBeVisible();
 });
+
+test("weight entries can be edited from the progress weight tab", async ({
+  page,
+}) => {
+  await page.goto("/api/test/session?email=user@example.com");
+  await page.goto("/weight?date=2026-03-19");
+  await expect(page).toHaveURL(/\/progress\?date=2026-03-19&tab=weight/);
+
+  await page.getByLabel("Weight (kg)").first().fill("82.5");
+  await page.getByLabel("Body fat %").first().fill("18.4");
+  await page.getByLabel("Notes").first().fill("Morning");
+  await page.getByRole("button", { name: "Save entry" }).click();
+  await expect(page.getByText(/Morning/)).toBeVisible();
+
+  await page.getByRole("button", { name: /Edit entry from/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Edit Entry" }),
+  ).toBeVisible();
+  await page.getByLabel("Weight (kg)").first().fill("81.9");
+  await page.getByLabel("Body fat %").first().fill("18.1");
+  await page.getByLabel("Notes").first().fill("After workout");
+  await page.getByRole("button", { name: "Update entry" }).click();
+
+  await expect(page.getByText("81.9 kg").first()).toBeVisible();
+  await expect(page.getByText("18.1% bf")).toBeVisible();
+  await expect(page.getByText(/After workout/)).toBeVisible();
+  await expect(page.getByText("82.5 kg")).toHaveCount(0);
+});

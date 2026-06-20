@@ -1514,6 +1514,46 @@ export async function saveUserGoals(
     .where(eq(users.id, userId));
 }
 
+type CompleteOnboardingSetupInput = {
+  preferredWeightUnit: WeightUnit;
+  goals: MacroGoals;
+  goalWeightKg: number | null;
+  currentWeight: WeightEntryInput | null;
+  starterTemplate: MealTemplateInput | null;
+};
+
+export async function completeOnboardingSetup(
+  userId: string,
+  input: CompleteOnboardingSetupInput,
+  db?: DatabaseClient,
+): Promise<AppUser> {
+  const database = await resolveDb(db);
+
+  return (database as any).transaction(async (tx: any) => {
+    await saveUserGoals(userId, input.goals, tx);
+    await saveWeightGoal(userId, input.goalWeightKg, tx);
+
+    if (input.currentWeight) {
+      await createWeightEntry(userId, input.currentWeight, tx);
+    }
+
+    if (input.starterTemplate) {
+      await createTemplate(userId, input.starterTemplate, tx);
+    }
+
+    const user = await completeUserOnboarding(
+      userId,
+      { preferredWeightUnit: input.preferredWeightUnit },
+      tx,
+    );
+    if (!user) {
+      throw new Error("User not found.");
+    }
+
+    return user;
+  });
+}
+
 export async function completeUserOnboarding(
   userId: string,
   input: CompleteOnboardingInput,

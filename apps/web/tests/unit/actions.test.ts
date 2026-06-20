@@ -8,6 +8,7 @@ const mocked = vi.hoisted(() => ({
   createTemplate: vi.fn(),
   createTemplateFromDate: vi.fn(),
   createWeightEntry: vi.fn(),
+  completeOnboardingSetup: vi.fn(),
   completeUserOnboarding: vi.fn(),
   deleteMealGroup: vi.fn(),
   deleteMealEntry: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock("@macro-tracker/db", () => ({
   createTemplate: mocked.createTemplate,
   createTemplateFromDate: mocked.createTemplateFromDate,
   createWeightEntry: mocked.createWeightEntry,
+  completeOnboardingSetup: mocked.completeOnboardingSetup,
   completeUserOnboarding: mocked.completeUserOnboarding,
   deleteMealGroup: mocked.deleteMealGroup,
   deleteMealEntry: mocked.deleteMealEntry,
@@ -83,6 +85,7 @@ import {
   deleteRecipeAction,
   deleteTemplateAction,
   deleteWeightEntryAction,
+  completeOnboardingAction,
   fetchLeaderboardStatsAction,
   logRecipePortionAction,
   updateTemplateAction,
@@ -262,5 +265,87 @@ describe("server actions", () => {
       error: "This template cannot be edited from the single-food template form.",
     });
     expect(mocked.updateTemplate).not.toHaveBeenCalled();
+  });
+
+  it("completes onboarding through the atomic setup helper", async () => {
+    mocked.completeOnboardingSetup.mockResolvedValue({
+      id: "user-1",
+      email: "coach@example.com",
+      shooPairwiseSub: "shoo-1",
+      displayName: null,
+      pictureUrl: null,
+      role: "user",
+      createdAt: "2026-06-20T00:00:00.000Z",
+      lastLoginAt: "2026-06-20T00:00:00.000Z",
+      goalCaloriesKcal: 2200,
+      goalProteinG: 170,
+      goalCarbsG: 240,
+      goalFatG: 70,
+      goalWeightKg: 78,
+      onboardingCompletedAt: "2026-06-20T00:00:00.000Z",
+      preferredWeightUnit: "kg",
+    });
+
+    const result = await completeOnboardingAction({
+      preferredWeightUnit: "kg",
+      goals: {
+        caloriesKcal: 2200,
+        proteinG: 170,
+        carbsG: 240,
+        fatG: 70,
+      },
+      goalWeightKg: 78,
+      currentWeightKg: 82.5,
+      currentWeightDate: "2026-06-20",
+      starterTemplate: {
+        label: "Greek yogurt",
+        proteinG: 30,
+        carbsG: 12,
+        fatG: 2,
+        caloriesKcal: 186,
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocked.completeOnboardingSetup).toHaveBeenCalledWith("user-1", {
+      preferredWeightUnit: "kg",
+      goals: {
+        caloriesKcal: 2200,
+        proteinG: 170,
+        carbsG: 240,
+        fatG: 70,
+      },
+      goalWeightKg: 78,
+      currentWeight: {
+        date: "2026-06-20",
+        weightKg: 82.5,
+        bodyFatPct: null,
+        notes: "Onboarding",
+      },
+      starterTemplate: {
+        type: "meal",
+        label: "Greek yogurt",
+        items: [
+          {
+            productId: null,
+            mealGroupLabel: null,
+            label: "Greek yogurt",
+            quantity: 1,
+            unit: "serving",
+            servingMultiplier: 1,
+            proteinG: 30,
+            carbsG: 12,
+            fatG: 2,
+            caloriesKcal: 186,
+          },
+        ],
+      },
+    });
+    expect(mocked.saveUserGoals).not.toHaveBeenCalled();
+    expect(mocked.saveWeightGoal).not.toHaveBeenCalled();
+    expect(mocked.createWeightEntry).not.toHaveBeenCalled();
+    expect(mocked.createTemplate).not.toHaveBeenCalled();
+    expect(mocked.completeUserOnboarding).not.toHaveBeenCalled();
+    expect(mocked.revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 });

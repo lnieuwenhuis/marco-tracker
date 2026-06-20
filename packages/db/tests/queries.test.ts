@@ -3,6 +3,7 @@ import {
   createMealGroup,
   createRecipe,
   createMealEntry,
+  completeOnboardingSetup,
   createPersonalFoodProduct,
   createTemplate,
   deleteMealGroup,
@@ -14,6 +15,10 @@ import {
   getRecipeById,
   getRecentQuickAddCandidates,
   getStatsPageData,
+  getTemplates,
+  getUserById,
+  getUserGoals,
+  getWeightPageData,
   lookupBarcodeFoodProduct,
   markMealEntryStatus,
   applyTemplateToDate,
@@ -1277,6 +1282,113 @@ describe("database queries", () => {
       observedUseDays: 3,
       peakHourUtc: 7,
       habitCount: 3,
+    });
+  });
+
+  it("completes onboarding setup with goals, weight, starter template, and user preferences", async () => {
+    const user = await completeOnboardingSetup(
+      userId,
+      {
+        preferredWeightUnit: "lb",
+        goals: {
+          caloriesKcal: 2200,
+          proteinG: 170,
+          carbsG: 240,
+          fatG: 70,
+        },
+        goalWeightKg: 78,
+        currentWeight: {
+          date: "2026-06-20",
+          weightKg: 82.5,
+          bodyFatPct: null,
+          notes: "Onboarding",
+        },
+        starterTemplate: {
+          type: "meal",
+          label: "Greek yogurt",
+          items: [
+            {
+              label: "Greek yogurt",
+              proteinG: 30,
+              carbsG: 12,
+              fatG: 2,
+              caloriesKcal: 186,
+            },
+          ],
+        },
+      },
+      runtime.db,
+    );
+
+    expect(user).toMatchObject({
+      onboardingCompletedAt: expect.any(String),
+      preferredWeightUnit: "lb",
+    });
+    await expect(getUserGoals(userId, runtime.db)).resolves.toEqual({
+      caloriesKcal: 2200,
+      proteinG: 170,
+      carbsG: 240,
+      fatG: 70,
+    });
+    const weightData = await getWeightPageData(userId, "2026-06-20", runtime.db);
+    expect(weightData.goalWeightKg).toBe(78);
+    expect(weightData.entries).toMatchObject([
+      {
+        date: "2026-06-20",
+        weightKg: 82.5,
+        notes: "Onboarding",
+      },
+    ]);
+    await expect(getTemplates(userId, runtime.db)).resolves.toMatchObject([
+      {
+        label: "Greek yogurt",
+        type: "meal",
+      },
+    ]);
+  });
+
+  it("rolls back onboarding setup when starter template creation fails", async () => {
+    await expect(
+      completeOnboardingSetup(
+        userId,
+        {
+          preferredWeightUnit: "kg",
+          goals: {
+            caloriesKcal: 2200,
+            proteinG: 170,
+            carbsG: 240,
+            fatG: 70,
+          },
+          goalWeightKg: 78,
+          currentWeight: {
+            date: "2026-06-20",
+            weightKg: 82.5,
+            bodyFatPct: null,
+            notes: "Onboarding",
+          },
+          starterTemplate: {
+            type: "meal",
+            label: "Broken starter",
+            items: [],
+          },
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("A template must include at least one item.");
+
+    await expect(getUserGoals(userId, runtime.db)).resolves.toEqual({
+      caloriesKcal: null,
+      proteinG: null,
+      carbsG: null,
+      fatG: null,
+    });
+    const weightData = await getWeightPageData(userId, "2026-06-20", runtime.db);
+    expect(weightData.goalWeightKg).toBeNull();
+    expect(weightData.entries).toHaveLength(0);
+    await expect(getTemplates(userId, runtime.db)).resolves.toEqual([]);
+    await expect(getUserById(userId, runtime.db)).resolves.toMatchObject({
+      onboardingCompletedAt: null,
+      preferredWeightUnit: "kg",
     });
   });
 
