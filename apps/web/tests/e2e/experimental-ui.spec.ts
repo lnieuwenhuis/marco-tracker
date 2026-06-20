@@ -71,6 +71,29 @@ test("experimental mode supports the bottom add flow and merged progress routes"
   await expect(page).toHaveURL(/\/summary\?date=2026-03-19/);
 });
 
+test("goals page includes the macro calculator and applies calculated targets", async ({
+  page,
+}) => {
+  await page.goto("/api/test/session?email=user@example.com");
+  await page.goto("/progress?date=2026-03-19&tab=goals");
+
+  await expect(page.getByRole("heading", { name: "Macro calculator" })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "Age yrs" }).fill("30");
+  await page.getByRole("spinbutton", { name: "Height cm" }).fill("180");
+  await page.getByRole("spinbutton", { name: "Weight kg" }).fill("80");
+  await page.getByRole("button", { name: /Moderate cut/ }).click();
+
+  await expect(page.getByText("2259 kcal").first()).toBeVisible();
+  await expect(page.getByText("144 g")).toBeVisible();
+
+  await page.getByRole("button", { name: "Apply to targets" }).click();
+
+  await expect(page.getByRole("spinbutton", { name: "Calories kcal" })).toHaveValue("2259");
+  await expect(page.getByRole("spinbutton", { name: "Protein g" })).toHaveValue("144");
+  await expect(page.getByRole("spinbutton", { name: "Carbs g" })).toHaveValue("210.4");
+  await expect(page.getByRole("spinbutton", { name: "Fat g" })).toHaveValue("93.5");
+});
+
 test("photo estimate modal stays open while analyzing", async ({ page }) => {
   await page.route("/api/ai/food-photo", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 250));
