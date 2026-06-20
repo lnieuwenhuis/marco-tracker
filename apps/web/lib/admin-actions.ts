@@ -61,7 +61,8 @@ function toActionError(error: unknown) {
 
   if (
     error.message.includes("barcode_products_barcode_key") ||
-    error.message.includes("food_products_barcode_key")
+    error.message.includes("food_products_barcode_key") ||
+    error.message.includes("food_products_active_global_barcode_key")
   ) {
     return "That barcode already exists.";
   }
