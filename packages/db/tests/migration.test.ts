@@ -1,10 +1,9 @@
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createDatabaseRuntime, type DatabaseRuntime } from "../src";
-import { foodProducts, recipeIngredients } from "../src/schema";
 
 const migrationFiles = [
   "0000_yielding_the_spike.sql",
@@ -92,19 +91,30 @@ describe("database migrations", () => {
 
     await applyMigration(runtime, "0008_product_model_meal_planning.sql");
 
-    const products = await runtime.db
-      .select()
-      .from(foodProducts)
-      .where(eq(foodProducts.ownerUserId, userId));
+    const productResult = await runtime.db.execute<{
+      id: string;
+      name: string;
+    }>(sql.raw(`
+      SELECT "id", "name"
+      FROM "food_products"
+      WHERE "owner_user_id" = '${userId}'
+    `));
+    const products = productResult.rows;
     expect(products).toHaveLength(2);
     expect(products.map((product) => product.name.toLowerCase()).sort()).toEqual([
       "oats",
       "rice",
     ]);
 
-    const migratedIngredients = await runtime.db.select().from(recipeIngredients);
+    const migratedIngredientResult = await runtime.db.execute<{
+      product_id: string | null;
+    }>(sql.raw(`
+      SELECT "product_id"
+      FROM "recipe_ingredients"
+    `));
+    const migratedIngredients = migratedIngredientResult.rows;
     const ingredientProductIds = new Set(
-      migratedIngredients.map((ingredient) => ingredient.productId),
+      migratedIngredients.map((ingredient) => ingredient.product_id),
     );
     expect(ingredientProductIds.size).toBe(1);
     expect([...ingredientProductIds][0]).toBeTruthy();
@@ -144,20 +154,37 @@ describe("database migrations", () => {
 
     await applyMigration(runtime, "0009_sync_barcode_food_products.sql");
 
-    const products = await runtime.db
-      .select()
-      .from(foodProducts)
-      .where(eq(foodProducts.barcode, "8712345000001"));
+    const productResult = await runtime.db.execute<{
+      owner_user_id: string | null;
+      scope: string;
+      source: string;
+      barcode: string;
+      name: string;
+      brand: string;
+      calories_per_100: number;
+    }>(sql.raw(`
+      SELECT
+        "owner_user_id",
+        "scope",
+        "source",
+        "barcode",
+        "name",
+        "brand",
+        "calories_per_100"
+      FROM "food_products"
+      WHERE "barcode" = '8712345000001'
+    `));
+    const products = productResult.rows;
 
     expect(products).toHaveLength(1);
     expect(products[0]).toMatchObject({
-      ownerUserId: null,
+      owner_user_id: null,
       scope: "global",
       source: "barcode",
       barcode: "8712345000001",
       name: "Community Protein Drink",
       brand: "Macro Lab",
-      caloriesPer100: 130,
+      calories_per_100: 130,
     });
   });
 });

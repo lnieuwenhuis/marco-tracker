@@ -59,7 +59,10 @@ function toActionError(error: unknown) {
     return "Something went wrong.";
   }
 
-  if (error.message.includes("barcode_products_barcode_key")) {
+  if (
+    error.message.includes("barcode_products_barcode_key") ||
+    error.message.includes("food_products_barcode_key")
+  ) {
     return "That barcode already exists.";
   }
 

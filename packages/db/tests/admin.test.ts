@@ -5,7 +5,7 @@ import {
   listAdminAuditEvents,
   listAdminBarcodeProducts,
   listAdminUsers,
-  lookupCustomBarcodeProduct,
+  lookupBarcodeFoodProduct,
   searchFoodProducts,
   setUserRole,
   softDeleteAdminBarcodeProduct,
@@ -118,8 +118,9 @@ describe("admin queries", () => {
       runtime.db,
     );
 
-    expect(await lookupCustomBarcodeProduct("9900000000001", runtime.db)).toMatchObject({
+    expect(await lookupBarcodeFoodProduct("9900000000001", runtime.db)).toMatchObject({
       name: "Admin Peanut Butter",
+      submittedByUserId: adminId,
     });
     expect(
       await searchFoodProducts(userId, "Admin Peanut Butter", runtime.db),
@@ -148,8 +149,8 @@ describe("admin queries", () => {
     );
 
     expect(updated.name).toBe("Admin Peanut Butter Deluxe");
-    expect(await lookupCustomBarcodeProduct("9900000000001", runtime.db)).toBeNull();
-    expect(await lookupCustomBarcodeProduct("9900000000002", runtime.db)).toMatchObject({
+    expect(await lookupBarcodeFoodProduct("9900000000001", runtime.db)).toBeNull();
+    expect(await lookupBarcodeFoodProduct("9900000000002", runtime.db)).toMatchObject({
       name: "Admin Peanut Butter Deluxe",
     });
     expect(await searchFoodProducts(userId, "Deluxe", runtime.db)).toMatchObject([
@@ -173,9 +174,9 @@ describe("admin queries", () => {
       created.id,
       runtime.db,
     );
-    expect(deleted.status).toBe("deleted");
-    expect(await lookupCustomBarcodeProduct("9900000000001", runtime.db)).toBeNull();
-    expect(await lookupCustomBarcodeProduct("9900000000002", runtime.db)).toBeNull();
+    expect(deleted.deletedAt).toBeTruthy();
+    expect(await lookupBarcodeFoodProduct("9900000000001", runtime.db)).toBeNull();
+    expect(await lookupBarcodeFoodProduct("9900000000002", runtime.db)).toBeNull();
     expect(await searchFoodProducts(userId, "Deluxe", runtime.db)).toEqual([]);
 
     const deletedOnly = await listAdminBarcodeProducts(
@@ -192,8 +193,8 @@ describe("admin queries", () => {
       created.id,
       runtime.db,
     );
-    expect(restored.status).toBe("active");
-    expect(await lookupCustomBarcodeProduct("9900000000002", runtime.db)).toMatchObject({
+    expect(restored.deletedAt).toBeNull();
+    expect(await lookupBarcodeFoodProduct("9900000000002", runtime.db)).toMatchObject({
       name: "Admin Peanut Butter Deluxe",
     });
     expect(await searchFoodProducts(userId, "Deluxe", runtime.db)).toMatchObject([
@@ -208,7 +209,7 @@ describe("admin queries", () => {
 
     const audit = await listAdminAuditEvents(
       {
-        targetType: "barcode_product",
+        targetType: "food_product",
         targetId: created.id,
         pageSize: 10,
       },

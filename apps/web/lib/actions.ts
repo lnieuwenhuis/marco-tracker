@@ -4,33 +4,35 @@ import {
   createMealEntry,
   createMealGroup,
   createPersonalFoodProduct,
-  createPreset,
   createRecipe,
+  createTemplate,
+  createTemplateFromDate,
+  completeUserOnboarding,
   deleteMealGroup,
   createWeightEntry,
   deleteMealEntry,
-  deletePreset,
   deleteRecipe,
+  deleteTemplate,
   deleteWeightEntry,
   getLeaderboardStats,
   getRecipeById,
   markMealEntryStatus,
+  applyTemplateToDate,
   reorderMealGroups,
-  saveCustomBarcodeProduct,
+  saveBarcodeFoodProduct,
   saveUserGoals,
   saveWeightGoal,
   searchFoodProducts,
   searchMealEntries,
-  touchPresetLastUsed,
   updateMealGroup,
   updateMealEntry,
   updatePersonalFoodProduct,
-  updatePreset,
   updateRecipe,
+  updateTemplate,
   updateWeightEntry,
   isValidDateString,
 } from "@macro-tracker/db";
-import type { CustomBarcodeProduct, FoodPreset, FoodProduct, FoodProductInput, LeaderboardStats, MealEntryRecord, MealEntryStatus, MealGroup, QuantityUnit, RecipeRecord } from "@macro-tracker/db";
+import type { BarcodeFoodProductInput, FoodProduct, FoodProductInput, LeaderboardStats, MealEntryRecord, MealEntryStatus, MealGroup, MealTemplate, QuantityUnit, RecipeRecord, WeightUnit } from "@macro-tracker/db";
 import { revalidatePath } from "next/cache";
 
 import { requireSessionUser } from "./auth";
@@ -243,27 +245,112 @@ export async function saveGoalsAction(input: SaveGoalsInput): Promise<ActionResu
   }
 }
 
-type SavePresetInput = Omit<FoodPreset, "id" | "userId">;
-type SavePresetResult = ActionResult & { preset?: FoodPreset };
+type CompleteOnboardingActionInput = {
+  preferredWeightUnit: WeightUnit;
+  goals: SaveGoalsInput;
+  goalWeightKg: number | null;
+  currentWeightKg: number | null;
+  currentWeightDate: string;
+  starterTemplate:
+    | {
+        label: string;
+        proteinG: number;
+        carbsG: number;
+        fatG: number;
+        caloriesKcal: number;
+      }
+    | null;
+};
 
-export async function savePresetAction(input: SavePresetInput): Promise<SavePresetResult> {
+export async function completeOnboardingAction(
+  input: CompleteOnboardingActionInput,
+): Promise<ActionResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    const preset = await createPreset(sessionUser.userId, input);
-    return { ok: true, preset };
+    await saveUserGoals(sessionUser.userId, input.goals);
+    await saveWeightGoal(sessionUser.userId, input.goalWeightKg);
+
+    if (
+      input.currentWeightKg != null &&
+      Number.isFinite(input.currentWeightKg) &&
+      input.currentWeightKg > 0
+    ) {
+      await createWeightEntry(sessionUser.userId, {
+        date: input.currentWeightDate,
+        weightKg: input.currentWeightKg,
+        bodyFatPct: null,
+        notes: "Onboarding",
+      });
+    }
+
+    if (input.starterTemplate?.label.trim()) {
+      await createTemplate(
+        sessionUser.userId,
+        singleFoodTemplateInput(input.starterTemplate),
+      );
+    }
+
+    await completeUserOnboarding(sessionUser.userId, {
+      preferredWeightUnit: input.preferredWeightUnit,
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true };
   } catch (error) {
     return { ok: false, error: toActionError(error) };
   }
 }
 
-export async function deletePresetAction(input: { id: string }): Promise<ActionResult> {
+type SaveTemplateInput = {
+  label: string;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  caloriesKcal: number;
+};
+type SaveTemplateResult = ActionResult & { template?: MealTemplate };
+
+function singleFoodTemplateInput(input: SaveTemplateInput) {
+  return {
+    type: "meal" as const,
+    label: input.label,
+    items: [
+      {
+        label: input.label,
+        quantity: 1,
+        unit: "serving" as const,
+        servingMultiplier: 1,
+        proteinG: input.proteinG,
+        carbsG: input.carbsG,
+        fatG: input.fatG,
+        caloriesKcal: input.caloriesKcal,
+      },
+    ],
+  };
+}
+
+export async function saveTemplateAction(input: SaveTemplateInput): Promise<SaveTemplateResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    const deleted = await deletePreset(sessionUser.userId, input.id);
+    const template = await createTemplate(
+      sessionUser.userId,
+      singleFoodTemplateInput(input),
+    );
+    return { ok: true, template };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function deleteTemplateAction(input: { id: string }): Promise<ActionResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const deleted = await deleteTemplate(sessionUser.userId, input.id);
     if (!deleted) {
-      return { ok: false, error: "Preset not found." };
+      return { ok: false, error: "Template not found." };
     }
 
     return { ok: true };
@@ -272,34 +359,53 @@ export async function deletePresetAction(input: { id: string }): Promise<ActionR
   }
 }
 
-type UpdatePresetInput = { id: string } & Omit<FoodPreset, "id" | "userId">;
-type UpdatePresetResult = ActionResult & { preset?: FoodPreset };
+type UpdateTemplateInput = { id: string } & SaveTemplateInput;
+type UpdateTemplateResult = ActionResult & { template?: MealTemplate };
 
-export async function updatePresetAction(input: UpdatePresetInput): Promise<UpdatePresetResult> {
+export async function updateTemplateAction(input: UpdateTemplateInput): Promise<UpdateTemplateResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    const preset = await updatePreset(sessionUser.userId, input.id, {
-      label: input.label,
-      proteinG: input.proteinG,
-      carbsG: input.carbsG,
-      fatG: input.fatG,
-      caloriesKcal: input.caloriesKcal,
-    });
-    return { ok: true, preset };
+    const template = await updateTemplate(
+      sessionUser.userId,
+      input.id,
+      singleFoodTemplateInput(input),
+    );
+    return { ok: true, template };
   } catch (error) {
     return { ok: false, error: toActionError(error) };
   }
 }
 
-export async function touchPresetAction(
-  input: { id: string },
-): Promise<ActionResult> {
+type ApplyTemplateResult = ActionResult & { entries?: MealEntryRecord[] };
+
+export async function applyTemplateAction(input: {
+  templateId: string;
+  date: string;
+  status?: MealEntryStatus;
+}): Promise<ApplyTemplateResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    await touchPresetLastUsed(sessionUser.userId, input.id);
-    return { ok: true };
+    const entries = await applyTemplateToDate(sessionUser.userId, input);
+    revalidatePath("/", "layout");
+    return { ok: true, entries };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function createTemplateFromDateAction(input: {
+  date: string;
+  type: "meal" | "day";
+  label: string;
+}): Promise<SaveTemplateResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const template = await createTemplateFromDate(sessionUser.userId, input);
+    revalidatePath("/planner", "page");
+    return { ok: true, template };
   } catch (error) {
     return { ok: false, error: toActionError(error) };
   }
@@ -587,28 +693,17 @@ export async function logRecipePortionAction(
 // Community barcode catalogue
 // ---------------------------------------------------------------------------
 
-type SaveCustomBarcodeProductInput = {
-  barcode: string;
-  name: string;
-  brands: string;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
-  servingSizeG: number | null;
+type SaveBarcodeFoodProductResult = ActionResult & {
+  product?: FoodProduct;
 };
 
-type SaveCustomBarcodeProductResult = ActionResult & {
-  product?: CustomBarcodeProduct;
-};
-
-export async function saveCustomBarcodeProductAction(
-  input: SaveCustomBarcodeProductInput,
-): Promise<SaveCustomBarcodeProductResult> {
+export async function saveBarcodeFoodProductAction(
+  input: BarcodeFoodProductInput,
+): Promise<SaveBarcodeFoodProductResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    const product = await saveCustomBarcodeProduct(sessionUser.userId, input);
+    const product = await saveBarcodeFoodProduct(sessionUser.userId, input);
     return { ok: true, product };
   } catch (error) {
     return { ok: false, error: toActionError(error) };

@@ -10,39 +10,8 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-
-export const barcodeProducts = pgTable(
-  "barcode_products",
-  {
-    id: uuid("id").primaryKey().notNull(),
-    barcode: text("barcode").notNull(),
-    name: text("name").notNull(),
-    brands: text("brands").notNull().default(""),
-    proteinG: numeric("protein_g", { precision: 6, scale: 1 }).notNull(),
-    carbsG: numeric("carbs_g", { precision: 6, scale: 1 }).notNull(),
-    fatG: numeric("fat_g", { precision: 6, scale: 1 }).notNull(),
-    caloriesKcal: integer("calories_kcal").notNull(),
-    servingSizeG: numeric("serving_size_g", { precision: 6, scale: 1 }),
-    addedByUserId: uuid("added_by_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
-    deletedByUserId: uuid("deleted_by_user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-  },
-  (table) => [
-    uniqueIndex("barcode_products_barcode_key").on(table.barcode),
-    index("barcode_products_deleted_at_idx").on(table.deletedAt),
-  ],
-);
 
 export const users = pgTable(
   "users",
@@ -64,6 +33,12 @@ export const users = pgTable(
     goalCarbsG: numeric("goal_carbs_g", { precision: 6, scale: 1 }),
     goalFatG: numeric("goal_fat_g", { precision: 6, scale: 1 }),
     goalWeightKg: numeric("goal_weight_kg", { precision: 5, scale: 2 }),
+    onboardingCompletedAt: timestamp("onboarding_completed_at", {
+      withTimezone: true,
+    }),
+    preferredWeightUnit: text("preferred_weight_unit")
+      .notNull()
+      .default("kg"),
   },
   (table) => [
     uniqueIndex("users_shoo_pairwise_sub_key").on(table.shooPairwiseSub),
@@ -127,6 +102,19 @@ export const foodProducts = pgTable(
     caloriesPer100: integer("calories_per_100").notNull(),
     servingWeightG: numeric("serving_weight_g", { precision: 8, scale: 2 }),
     servingVolumeMl: numeric("serving_volume_ml", { precision: 8, scale: 2 }),
+    submittedByUserId: uuid("submitted_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    deletedByUserId: uuid("deleted_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    sourceProvider: text("source_provider"),
+    sourceConfidence: numeric("source_confidence", { precision: 4, scale: 2 }),
+    sourceMetadata: jsonb("source_metadata").notNull().default({}),
+    correctedFromProductId: uuid("corrected_from_product_id").references(
+      (): AnyPgColumn => foodProducts.id,
+      { onDelete: "set null" },
+    ),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -140,6 +128,31 @@ export const foodProducts = pgTable(
     index("food_products_barcode_idx").on(table.barcode),
     index("food_products_scope_source_idx").on(table.scope, table.source),
     index("food_products_deleted_at_idx").on(table.deletedAt),
+    index("food_products_submitted_by_idx").on(table.submittedByUserId),
+    index("food_products_corrected_from_idx").on(table.correctedFromProductId),
+  ],
+);
+
+export const foodProductRevisions = pgTable(
+  "food_product_revisions",
+  {
+    id: uuid("id").primaryKey().notNull(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => foodProducts.id, { onDelete: "cascade" }),
+    actorUserId: uuid("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    action: text("action").notNull(),
+    snapshotJson: jsonb("snapshot_json").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("food_product_revisions_product_idx").on(table.productId),
+    index("food_product_revisions_actor_idx").on(table.actorUserId),
+    index("food_product_revisions_created_at_idx").on(table.createdAt),
   ],
 );
 
@@ -221,28 +234,6 @@ export const mealEntries = pgTable(
       table.entryDate,
       table.sortOrder,
     ),
-  ],
-);
-
-export const foodPresets = pgTable(
-  "food_presets",
-  {
-    id: uuid("id").primaryKey().notNull(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    label: text("label").notNull(),
-    proteinG: numeric("protein_g", { precision: 6, scale: 1 }).notNull(),
-    carbsG: numeric("carbs_g", { precision: 6, scale: 1 }).notNull(),
-    fatG: numeric("fat_g", { precision: 6, scale: 1 }).notNull(),
-    caloriesKcal: integer("calories_kcal").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
-  },
-  (table) => [
-    index("food_presets_user_idx").on(table.userId),
   ],
 );
 
@@ -335,19 +326,79 @@ export const recipeIngredients = pgTable(
   ],
 );
 
-export type FoodPresetRow = typeof foodPresets.$inferSelect;
-export type NewFoodPresetRow = typeof foodPresets.$inferInsert;
+export const mealTemplates = pgTable(
+  "meal_templates",
+  {
+    id: uuid("id").primaryKey().notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull().default("meal"),
+    label: text("label").notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("meal_templates_user_type_idx").on(table.userId, table.type),
+    index("meal_templates_deleted_at_idx").on(table.deletedAt),
+  ],
+);
+
+export const mealTemplateItems = pgTable(
+  "meal_template_items",
+  {
+    id: uuid("id").primaryKey().notNull(),
+    templateId: uuid("template_id")
+      .notNull()
+      .references(() => mealTemplates.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => foodProducts.id, {
+      onDelete: "set null",
+    }),
+    mealGroupLabel: text("meal_group_label"),
+    sortOrder: integer("sort_order").notNull(),
+    label: text("label").notNull(),
+    quantity: numeric("quantity", { precision: 8, scale: 2 })
+      .notNull()
+      .default("1"),
+    unit: text("unit").notNull().default("serving"),
+    servingMultiplier: numeric("serving_multiplier", { precision: 8, scale: 2 })
+      .notNull()
+      .default("1"),
+    proteinG: numeric("protein_g", { precision: 6, scale: 1 }).notNull(),
+    carbsG: numeric("carbs_g", { precision: 6, scale: 1 }).notNull(),
+    fatG: numeric("fat_g", { precision: 6, scale: 1 }).notNull(),
+    caloriesKcal: integer("calories_kcal").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("meal_template_items_template_idx").on(table.templateId),
+    index("meal_template_items_product_idx").on(table.productId),
+  ],
+);
+
 export type WeightEntryRow = typeof weightEntries.$inferSelect;
 export type NewWeightEntryRow = typeof weightEntries.$inferInsert;
 export type RecipeRow = typeof recipes.$inferSelect;
 export type NewRecipeRow = typeof recipes.$inferInsert;
 export type RecipeIngredientRow = typeof recipeIngredients.$inferSelect;
 export type NewRecipeIngredientRow = typeof recipeIngredients.$inferInsert;
-export type BarcodeProductRow = typeof barcodeProducts.$inferSelect;
-export type NewBarcodeProductRow = typeof barcodeProducts.$inferInsert;
 export type FoodProductRow = typeof foodProducts.$inferSelect;
 export type NewFoodProductRow = typeof foodProducts.$inferInsert;
+export type FoodProductRevisionRow = typeof foodProductRevisions.$inferSelect;
+export type NewFoodProductRevisionRow = typeof foodProductRevisions.$inferInsert;
 export type MealGroupRow = typeof mealGroups.$inferSelect;
 export type NewMealGroupRow = typeof mealGroups.$inferInsert;
+export type MealTemplateRow = typeof mealTemplates.$inferSelect;
+export type NewMealTemplateRow = typeof mealTemplates.$inferInsert;
+export type MealTemplateItemRow = typeof mealTemplateItems.$inferSelect;
+export type NewMealTemplateItemRow = typeof mealTemplateItems.$inferInsert;
 export type AdminAuditEventRow = typeof adminAuditEvents.$inferSelect;
 export type NewAdminAuditEventRow = typeof adminAuditEvents.$inferInsert;

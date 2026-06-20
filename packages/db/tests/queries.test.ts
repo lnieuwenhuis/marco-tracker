@@ -13,10 +13,10 @@ import {
   getRecipeById,
   getRecentQuickAddCandidates,
   getStatsPageData,
-  lookupCustomBarcodeProduct,
+  lookupBarcodeFoodProduct,
   markMealEntryStatus,
   resolveProductNutritionForQuantity,
-  saveCustomBarcodeProduct,
+  saveBarcodeFoodProduct,
   saveUserGoals,
   searchFoodProducts,
   updateRecipe,
@@ -24,7 +24,7 @@ import {
   upsertUserFromShooProfile,
   type DatabaseRuntime,
 } from "../src";
-import { barcodeProducts, foodProducts, mealEntries, recipeIngredients, recipes } from "../src/schema";
+import { foodProducts, mealEntries, recipeIngredients, recipes } from "../src/schema";
 import { createTestDatabase } from "../src/testing";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -967,20 +967,20 @@ describe("database queries", () => {
     };
 
     await expect(
-      saveCustomBarcodeProduct(userId, input, createFailingBarcodeFoodProductDb()),
+      saveBarcodeFoodProduct(userId, input, createFailingBarcodeFoodProductDb()),
     ).rejects.toThrow("Forced barcode food product insert failure.");
 
-    expect(await lookupCustomBarcodeProduct(input.barcode, runtime.db)).toBeNull();
-    expect(await runtime.db.select().from(barcodeProducts)).toHaveLength(0);
+    expect(await lookupBarcodeFoodProduct(input.barcode, runtime.db)).toBeNull();
     expect(await searchFoodProducts(userId, "Community Protein", runtime.db)).toEqual(
       [],
     );
 
-    const saved = await saveCustomBarcodeProduct(userId, input, runtime.db);
+    const saved = await saveBarcodeFoodProduct(userId, input, runtime.db);
     expect(saved).toMatchObject({
       barcode: input.barcode,
       name: input.name,
-      addedByUserId: userId,
+      submittedByUserId: userId,
+      sourceProvider: "community",
     });
 
     const products = await searchFoodProducts(

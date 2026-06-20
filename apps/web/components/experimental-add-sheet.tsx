@@ -19,9 +19,9 @@ const ACTIONS: Array<{
   icon: React.ReactNode;
 }> = [
   {
-    action: "preset",
-    label: "Preset",
-    description: "Reuse a saved meal",
+    action: "template",
+    label: "Template",
+    description: "Reuse saved items",
     icon: (
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="12" height="12" rx="2.5" />

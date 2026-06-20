@@ -148,7 +148,9 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "goal_protein_g" numeric(6, 1),
       "goal_carbs_g" numeric(6, 1),
       "goal_fat_g" numeric(6, 1),
-      "goal_weight_kg" numeric(5, 2)
+      "goal_weight_kg" numeric(5, 2),
+      "onboarding_completed_at" timestamp with time zone,
+      "preferred_weight_unit" text DEFAULT 'kg' NOT NULL
     )
   `));
   await db.execute(
@@ -166,6 +168,21 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "role" text DEFAULT 'user' NOT NULL`,
     ),
   );
+  await db.execute(
+    sql.raw(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "onboarding_completed_at" timestamp with time zone`,
+    ),
+  );
+  await db.execute(
+    sql.raw(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "preferred_weight_unit" text DEFAULT 'kg' NOT NULL`,
+    ),
+  );
+  await db.execute(sql.raw(`
+    UPDATE "users"
+    SET "onboarding_completed_at" = COALESCE("onboarding_completed_at", "created_at", now())
+    WHERE "onboarding_completed_at" IS NULL
+  `));
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS "food_products" (
       "id" uuid PRIMARY KEY NOT NULL,
@@ -183,11 +200,23 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "calories_per_100" integer NOT NULL,
       "serving_weight_g" numeric(8, 2),
       "serving_volume_ml" numeric(8, 2),
+      "submitted_by_user_id" uuid REFERENCES "users"("id") ON DELETE SET NULL,
+      "deleted_by_user_id" uuid REFERENCES "users"("id") ON DELETE SET NULL,
+      "source_provider" text,
+      "source_confidence" numeric(4, 2),
+      "source_metadata" jsonb DEFAULT '{}'::jsonb NOT NULL,
+      "corrected_from_product_id" uuid REFERENCES "food_products"("id") ON DELETE SET NULL,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL,
       "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
       "deleted_at" timestamp with time zone
     )
   `));
+  await db.execute(sql.raw(`ALTER TABLE "food_products" ADD COLUMN IF NOT EXISTS "submitted_by_user_id" uuid REFERENCES "users"("id") ON DELETE SET NULL`));
+  await db.execute(sql.raw(`ALTER TABLE "food_products" ADD COLUMN IF NOT EXISTS "deleted_by_user_id" uuid REFERENCES "users"("id") ON DELETE SET NULL`));
+  await db.execute(sql.raw(`ALTER TABLE "food_products" ADD COLUMN IF NOT EXISTS "source_provider" text`));
+  await db.execute(sql.raw(`ALTER TABLE "food_products" ADD COLUMN IF NOT EXISTS "source_confidence" numeric(4, 2)`));
+  await db.execute(sql.raw(`ALTER TABLE "food_products" ADD COLUMN IF NOT EXISTS "source_metadata" jsonb DEFAULT '{}'::jsonb NOT NULL`));
+  await db.execute(sql.raw(`ALTER TABLE "food_products" ADD COLUMN IF NOT EXISTS "corrected_from_product_id" uuid REFERENCES "food_products"("id") ON DELETE SET NULL`));
   await db.execute(
     sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_owner_name_idx" ON "food_products" USING btree ("owner_user_id","name")`),
   );
@@ -196,6 +225,34 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
   );
   await db.execute(
     sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_scope_source_idx" ON "food_products" USING btree ("scope","source")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_deleted_at_idx" ON "food_products" USING btree ("deleted_at")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_submitted_by_idx" ON "food_products" USING btree ("submitted_by_user_id")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "food_products_corrected_from_idx" ON "food_products" USING btree ("corrected_from_product_id")`),
+  );
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "food_product_revisions" (
+      "id" uuid PRIMARY KEY NOT NULL,
+      "product_id" uuid NOT NULL REFERENCES "food_products"("id") ON DELETE cascade,
+      "actor_user_id" uuid REFERENCES "users"("id") ON DELETE SET NULL,
+      "action" text NOT NULL,
+      "snapshot_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `));
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "food_product_revisions_product_idx" ON "food_product_revisions" USING btree ("product_id")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "food_product_revisions_actor_idx" ON "food_product_revisions" USING btree ("actor_user_id")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "food_product_revisions_created_at_idx" ON "food_product_revisions" USING btree ("created_at")`),
   );
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS "meal_groups" (
@@ -270,16 +327,110 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "last_used_at" timestamp with time zone
     )
   `));
+  await db.execute(sql.raw(`ALTER TABLE "food_presets" ADD COLUMN IF NOT EXISTS "last_used_at" timestamp with time zone`));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "meal_templates" (
+      "id" uuid PRIMARY KEY NOT NULL,
+      "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+      "type" text DEFAULT 'meal' NOT NULL,
+      "label" text NOT NULL,
+      "notes" text,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "deleted_at" timestamp with time zone
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "meal_template_items" (
+      "id" uuid PRIMARY KEY NOT NULL,
+      "template_id" uuid NOT NULL REFERENCES "meal_templates"("id") ON DELETE cascade,
+      "product_id" uuid REFERENCES "food_products"("id") ON DELETE SET NULL,
+      "meal_group_label" text,
+      "sort_order" integer NOT NULL,
+      "label" text NOT NULL,
+      "quantity" numeric(8, 2) DEFAULT '1' NOT NULL,
+      "unit" text DEFAULT 'serving' NOT NULL,
+      "serving_multiplier" numeric(8, 2) DEFAULT '1' NOT NULL,
+      "protein_g" numeric(6, 1) NOT NULL,
+      "carbs_g" numeric(6, 1) NOT NULL,
+      "fat_g" numeric(6, 1) NOT NULL,
+      "calories_kcal" integer NOT NULL,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `));
   await db.execute(
-    sql.raw(
-      `ALTER TABLE "food_presets" ADD COLUMN IF NOT EXISTS "last_used_at" timestamp with time zone`,
-    ),
+    sql.raw(`CREATE INDEX IF NOT EXISTS "meal_templates_user_type_idx" ON "meal_templates" USING btree ("user_id","type")`),
   );
   await db.execute(
-    sql.raw(
-      `CREATE INDEX IF NOT EXISTS "food_presets_user_idx" ON "food_presets" USING btree ("user_id")`,
-    ),
+    sql.raw(`CREATE INDEX IF NOT EXISTS "meal_templates_deleted_at_idx" ON "meal_templates" USING btree ("deleted_at")`),
   );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "meal_template_items_template_idx" ON "meal_template_items" USING btree ("template_id")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "meal_template_items_product_idx" ON "meal_template_items" USING btree ("product_id")`),
+  );
+  await db.execute(sql.raw(`
+    INSERT INTO "meal_templates" (
+      "id",
+      "user_id",
+      "type",
+      "label",
+      "created_at",
+      "updated_at"
+    )
+    SELECT
+      "food_presets"."id",
+      "food_presets"."user_id",
+      'meal',
+      "food_presets"."label",
+      "food_presets"."created_at",
+      COALESCE("food_presets"."last_used_at", "food_presets"."created_at")
+    FROM "food_presets"
+    ON CONFLICT ("id") DO NOTHING
+  `));
+  await db.execute(sql.raw(`
+    INSERT INTO "meal_template_items" (
+      "id",
+      "template_id",
+      "product_id",
+      "meal_group_label",
+      "sort_order",
+      "label",
+      "quantity",
+      "unit",
+      "serving_multiplier",
+      "protein_g",
+      "carbs_g",
+      "fat_g",
+      "calories_kcal",
+      "created_at"
+    )
+    SELECT
+      (
+        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 1, 8) || '-' ||
+        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 9, 4) || '-' ||
+        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 13, 4) || '-' ||
+        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 17, 4) || '-' ||
+        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 21, 12)
+      )::uuid,
+      "food_presets"."id",
+      NULL,
+      NULL,
+      0,
+      "food_presets"."label",
+      '1.00',
+      'serving',
+      '1.00',
+      "food_presets"."protein_g",
+      "food_presets"."carbs_g",
+      "food_presets"."fat_g",
+      "food_presets"."calories_kcal",
+      "food_presets"."created_at"
+    FROM "food_presets"
+    ON CONFLICT ("id") DO NOTHING
+  `));
+  await db.execute(sql.raw(`DROP TABLE IF EXISTS "food_presets"`));
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS "weight_entries" (
       "id" uuid PRIMARY KEY NOT NULL,
@@ -401,6 +552,13 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "calories_per_100" = "barcode_products"."calories_kcal",
       "serving_weight_g" = COALESCE("barcode_products"."serving_size_g", '100.00'),
       "serving_volume_ml" = NULL,
+      "submitted_by_user_id" = "barcode_products"."added_by_user_id",
+      "deleted_by_user_id" = "barcode_products"."deleted_by_user_id",
+      "source_provider" = COALESCE("food_products"."source_provider", 'community'),
+      "source_metadata" = jsonb_build_object(
+        'legacyBarcodeProductId', "barcode_products"."id",
+        'servingSizeG', "barcode_products"."serving_size_g"
+      ),
       "updated_at" = "barcode_products"."updated_at",
       "deleted_at" = "barcode_products"."deleted_at"
     FROM "barcode_products"
@@ -427,6 +585,8 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
         "barcode_products"."fat_g",
         "barcode_products"."calories_kcal",
         "barcode_products"."serving_size_g",
+        "barcode_products"."added_by_user_id",
+        "barcode_products"."deleted_by_user_id",
         "barcode_products"."created_at",
         "barcode_products"."updated_at",
         "barcode_products"."deleted_at"
@@ -448,6 +608,10 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "calories_per_100",
       "serving_weight_g",
       "serving_volume_ml",
+      "submitted_by_user_id",
+      "deleted_by_user_id",
+      "source_provider",
+      "source_metadata",
       "created_at",
       "updated_at",
       "deleted_at"
@@ -468,6 +632,13 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "calories_kcal",
       COALESCE("serving_size_g", '100.00'),
       NULL,
+      "added_by_user_id",
+      "deleted_by_user_id",
+      'community',
+      jsonb_build_object(
+        'legacyBarcodeProductId', "id",
+        'servingSizeG', "serving_size_g"
+      ),
       "created_at",
       "updated_at",
       "deleted_at"
@@ -482,19 +653,49 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
     )
   `));
   await db.execute(sql.raw(`
-    UPDATE "food_products"
-    SET
-      "deleted_at" = COALESCE("food_products"."deleted_at", now()),
-      "updated_at" = now()
-    WHERE
-      "food_products"."owner_user_id" IS NULL
-      AND "food_products"."source" = 'barcode'
-      AND NOT EXISTS (
-        SELECT 1
-        FROM "barcode_products"
-        WHERE "barcode_products"."barcode" = "food_products"."barcode"
-      )
+    INSERT INTO "food_product_revisions" (
+      "id",
+      "product_id",
+      "actor_user_id",
+      "action",
+      "snapshot_json",
+      "created_at"
+    )
+    SELECT
+      (
+        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 1, 8) || '-' ||
+        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 9, 4) || '-' ||
+        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 13, 4) || '-' ||
+        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 17, 4) || '-' ||
+        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 21, 12)
+      )::uuid,
+      "food_products"."id",
+      "food_products"."submitted_by_user_id",
+      'imported',
+      jsonb_build_object(
+        'id', "food_products"."id",
+        'scope', "food_products"."scope",
+        'source', "food_products"."source",
+        'barcode', "food_products"."barcode",
+        'name', "food_products"."name",
+        'brand', "food_products"."brand",
+        'proteinPer100', "food_products"."protein_per_100",
+        'carbsPer100', "food_products"."carbs_per_100",
+        'fatPer100', "food_products"."fat_per_100",
+        'caloriesPer100', "food_products"."calories_per_100",
+        'servingWeightG', "food_products"."serving_weight_g",
+        'servingVolumeMl', "food_products"."serving_volume_ml"
+      ),
+      "food_products"."created_at"
+    FROM "food_products"
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM "food_product_revisions"
+      WHERE "food_product_revisions"."product_id" = "food_products"."id"
+    )
+    ON CONFLICT ("id") DO NOTHING
   `));
+  await db.execute(sql.raw(`DROP TABLE IF EXISTS "barcode_products"`));
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS "admin_audit_events" (
       "id" uuid PRIMARY KEY NOT NULL,

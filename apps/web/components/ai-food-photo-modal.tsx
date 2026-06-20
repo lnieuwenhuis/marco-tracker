@@ -374,7 +374,7 @@ export function AiFoodPhotoModal({
                     }}
                     className="w-full rounded-xl border border-[var(--color-accent)] py-2.5 text-sm font-semibold text-[var(--color-accent)] transition hover:-translate-y-0.5 disabled:opacity-50"
                   >
-                    {savedPreset ? "Saved!" : "Save preset"}
+                    {savedPreset ? "Saved!" : "Save template"}
                   </button>
                 </>
               )}

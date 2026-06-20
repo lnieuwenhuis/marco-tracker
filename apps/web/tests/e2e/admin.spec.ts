@@ -30,9 +30,9 @@ test("owner bootstrap account sees the admin entry and can open /admin", async (
   page,
 }) => {
   await page.goto("/api/test/session?email=owner@example.com");
-  await page.getByRole("button", { name: "Open menu" }).click();
-  await expect(page.getByRole("link", { name: "Admin" })).toBeVisible();
-  await page.getByRole("link", { name: "Admin" }).click();
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await expect(page.getByRole("link", { name: "Admin Panel" })).toBeVisible();
+  await page.getByRole("link", { name: "Admin Panel" }).click();
 
   await expect(page).toHaveURL(/\/admin$/);
   await expect(page.getByText("Operations Panel")).toBeVisible();
@@ -42,8 +42,8 @@ test("non-admin users do not see the admin link and get a 404 at /admin", async 
   page,
 }) => {
   await page.goto("/api/test/session?email=user@example.com");
-  await page.getByRole("button", { name: "Open menu" }).click();
-  await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await expect(page.getByRole("link", { name: "Admin Panel" })).toHaveCount(0);
 
   await page.goto("/admin");
   await expect(page.getByText("This page could not be found.")).toBeVisible();

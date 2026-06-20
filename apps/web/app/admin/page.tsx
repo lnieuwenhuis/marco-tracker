@@ -70,7 +70,7 @@ export default async function AdminDashboardPage() {
                   <tr>
                     <th className="pb-3 pr-4">Product</th>
                     <th className="pb-3 pr-4">Barcode</th>
-                    <th className="pb-3 pr-4">Submitter</th>
+                    <th className="pb-3 pr-4">Source</th>
                     <th className="pb-3 pr-4">Status</th>
                     <th className="pb-3">Created</th>
                   </tr>
@@ -90,11 +90,11 @@ export default async function AdminDashboardPage() {
                         {item.barcode}
                       </td>
                       <td className="py-3 pr-4 text-[var(--color-muted)]">
-                        {item.addedByEmail ?? "Unknown"}
+                        {item.sourceProvider ?? item.source}
                       </td>
                       <td className="py-3 pr-4">
                         <span className="rounded-full bg-[var(--color-card-muted)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
-                          {item.status}
+                          {item.deletedAt ? "deleted" : "active"}
                         </span>
                       </td>
                       <td className="py-3 text-[var(--color-muted)]">

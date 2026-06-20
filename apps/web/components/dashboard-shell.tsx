@@ -1,25 +1,22 @@
 "use client";
 
-import type { DailySummary, FoodPreset, MacroGoals, MealEntryRecord, MealEntryStatus, MealGroup, QuickAddCandidate, RecipeRecord } from "@macro-tracker/db";
+import type { DailySummary, MacroGoals, MealEntryRecord, MealEntryStatus, MealGroup, MealTemplate, QuickAddCandidate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useMemo, useRef, useState, useTransition } from "react";
 
-import { createMealGroupAction, deleteMealGroupAction, deletePresetAction, deleteMealEntryAction, markMealEntryStatusAction, savePresetAction, saveMealEntryAction, touchPresetAction, updateMealGroupAction, updatePresetAction } from "@/lib/actions";
+import { createMealGroupAction, deleteMealGroupAction, deleteTemplateAction, deleteMealEntryAction, markMealEntryStatusAction, saveTemplateAction, saveMealEntryAction, updateMealGroupAction, updateTemplateAction } from "@/lib/actions";
 import {
   getDailyMutationCacheKeys,
-  getPresetMutationCacheKeys,
+  getTemplateMutationCacheKeys,
 } from "@/lib/app-warmup";
 import type { ComposeAction } from "@/lib/compose";
 import { computeLiveTotals, computeRemaining, rankCandidates } from "@/lib/quick-add";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
 import type { OpenFoodFactsProduct } from "@/lib/openfoodfacts";
 import { getLocalDateString } from "@/lib/startup-date";
-import type { UiMode } from "@/lib/ui-mode";
 
-import { AddFoodButton } from "./add-food-button";
 import { AiFoodPhotoModal } from "./ai-food-photo-modal";
 import { invalidateAppDataCache } from "./app-data-cache";
-import { AppShell } from "./app-shell";
 import { BarcodeResult } from "./barcode-result";
 import { BarcodeScanner } from "./barcode-scanner";
 import { ExperimentalAppShell } from "./experimental-app-shell";
@@ -36,10 +33,9 @@ type DashboardShellProps = {
   selectedDate: string;
   dailySummary: DailySummary;
   goals: MacroGoals;
-  presets: FoodPreset[];
+  templates: MealTemplate[];
   recipes: RecipeRecord[];
   recentCandidates: QuickAddCandidate[];
-  uiMode?: UiMode;
   initialComposeAction?: ComposeAction | null;
 };
 
@@ -111,18 +107,24 @@ function createEmptyDraft(sortOrder: number, status: MealEntryStatus): MealDraft
   };
 }
 
-function createDraftFromPreset(preset: FoodPreset, sortOrder: number, status: MealEntryStatus): MealDraft {
+function templateItem(template: MealTemplate) {
+  return template.items[0] ?? null;
+}
+
+function createDraftFromTemplate(template: MealTemplate, sortOrder: number, status: MealEntryStatus): MealDraft {
+  const item = templateItem(template);
   return {
     clientId: `draft-${crypto.randomUUID()}`,
     status,
-    label: preset.label,
+    productId: item?.productId ?? null,
+    label: item?.label ?? template.label,
     quantity: "1",
     unit: "serving",
     servingMultiplier: "1",
-    proteinG: String(preset.proteinG),
-    carbsG: String(preset.carbsG),
-    fatG: String(preset.fatG),
-    caloriesKcal: String(preset.caloriesKcal),
+    proteinG: String(item?.proteinG ?? 0),
+    carbsG: String(item?.carbsG ?? 0),
+    fatG: String(item?.fatG ?? 0),
+    caloriesKcal: String(item?.caloriesKcal ?? 0),
     sortOrder,
   };
 }
@@ -162,10 +164,9 @@ export function DashboardShell({
   selectedDate,
   dailySummary,
   goals,
-  presets: initialPresets,
+  templates: initialTemplates,
   recipes,
   recentCandidates,
-  uiMode = "experimental",
   initialComposeAction = null,
 }: DashboardShellProps) {
   const router = useRouter();
@@ -183,7 +184,7 @@ export function DashboardShell({
   const [isPending, beginMutation] = useTransition();
 
   const [showPresetsModal, setShowPresetsModal] = useState(false);
-  const [localPresets, setLocalPresets] = useState<FoodPreset[]>(initialPresets);
+  const [localTemplates, setLocalTemplates] = useState<MealTemplate[]>(initialTemplates);
   const [presetMutation, setPresetMutation] = useState<PresetMutationState | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
   const [localMealGroups, setLocalMealGroups] = useState<MealGroup[]>(
@@ -241,19 +242,22 @@ export function DashboardShell({
   // Quick-add rails
   // ---------------------------------------------------------------------------
 
-  // Build a unified candidate pool: preset candidates + recent history candidates
+  // Build a unified candidate pool: template candidates + recent history candidates
   const allCandidates = useMemo<QuickAddCandidate[]>(() => {
-    const presetCandidates: QuickAddCandidate[] = localPresets.map((p) => ({
-      label: p.label,
-      proteinG: p.proteinG,
-      carbsG: p.carbsG,
-      fatG: p.fatG,
-      caloriesKcal: p.caloriesKcal,
+    const templateCandidates: QuickAddCandidate[] = localTemplates.map((template) => {
+      const item = templateItem(template);
+      return {
+      label: item?.label ?? template.label,
+      proteinG: item?.proteinG ?? 0,
+      carbsG: item?.carbsG ?? 0,
+      fatG: item?.fatG ?? 0,
+      caloriesKcal: item?.caloriesKcal ?? 0,
       source: "preset" as const,
-      presetId: p.id,
-    }));
-    return [...presetCandidates, ...recentCandidates];
-  }, [localPresets, recentCandidates]);
+      presetId: template.id,
+      };
+    });
+    return [...templateCandidates, ...recentCandidates];
+  }, [localTemplates, recentCandidates]);
 
   // Single unified quick-add list: ranked by routine signals, not macro fit.
   const quickAddItems = useMemo(
@@ -385,16 +389,12 @@ export function DashboardShell({
     setDrafts((currentDrafts) => [...currentDrafts, createEmptyDraft(nextSortOrder(), defaultEntryStatus)]);
   }
 
-  function addDraftFromPreset(preset: FoodPreset) {
+  function addDraftFromPreset(template: MealTemplate) {
     setDrafts((currentDrafts) => [
       ...currentDrafts,
-      createDraftFromPreset(preset, nextSortOrder(), defaultEntryStatus),
+      createDraftFromTemplate(template, nextSortOrder(), defaultEntryStatus),
     ]);
     setPresetError(null);
-    // Fire-and-forget: mark this preset as most-recently-used so the next time
-    // the modal opens it floats to the top of the list. We don't block the UI
-    // on the result or surface errors — sort order is best-effort.
-    void touchPresetAction({ id: preset.id });
     setShowPresetsModal(false);
   }
 
@@ -426,10 +426,6 @@ export function DashboardShell({
       createDraftFromCandidate(candidate, nextSortOrder(), defaultEntryStatus),
     ]);
 
-    // If this was a preset candidate, touch it so its sort order floats up.
-    if (candidate.source === "preset" && candidate.presetId) {
-      void touchPresetAction({ id: candidate.presetId });
-    }
   }
 
   function handleSearchEntrySaved(entry: MealEntryRecord) {
@@ -628,22 +624,34 @@ export function DashboardShell({
     });
   }
 
-  async function handleSavePreset(input: Omit<FoodPreset, "id" | "userId">) {
+  async function handleSavePreset(input: {
+    label: string;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+    caloriesKcal: number;
+  }) {
     setPresetError(null);
     setPresetMutation({ type: "save" });
 
     try {
-      const result = await savePresetAction(input);
-      const savedPreset = result.preset;
-      if (!result.ok || !savedPreset) {
-        setPresetError(result.error ?? "Unable to save preset.");
+      const result = await saveTemplateAction({
+        label: input.label,
+        proteinG: input.proteinG,
+        carbsG: input.carbsG,
+        fatG: input.fatG,
+        caloriesKcal: input.caloriesKcal,
+      });
+      const savedTemplate = result.template;
+      if (!result.ok || !savedTemplate) {
+        setPresetError(result.error ?? "Unable to save template.");
         return false;
       }
 
-      setLocalPresets((prev) =>
-        [...prev, savedPreset].sort((a, b) => a.label.localeCompare(b.label)),
+      setLocalTemplates((prev) =>
+        [...prev, savedTemplate].sort((a, b) => a.label.localeCompare(b.label)),
       );
-      invalidateAppDataCache(getPresetMutationCacheKeys());
+      invalidateAppDataCache(getTemplateMutationCacheKeys());
       return true;
     } finally {
       setPresetMutation(null);
@@ -651,45 +659,58 @@ export function DashboardShell({
   }
 
   async function handleDeletePreset(presetId: string) {
-    const previousPresets = localPresets;
+    const previousTemplates = localTemplates;
 
     setPresetError(null);
     setPresetMutation({ type: "delete", presetId });
-    setLocalPresets((prev) => prev.filter((p) => p.id !== presetId));
+    setLocalTemplates((prev) => prev.filter((p) => p.id !== presetId));
 
     try {
-      const result = await deletePresetAction({ id: presetId });
+      const result = await deleteTemplateAction({ id: presetId });
       if (!result.ok) {
-        setLocalPresets(previousPresets);
-        setPresetError(result.error ?? "Unable to delete preset.");
+        setLocalTemplates(previousTemplates);
+        setPresetError(result.error ?? "Unable to delete template.");
         return false;
       }
 
-      invalidateAppDataCache(getPresetMutationCacheKeys());
+      invalidateAppDataCache(getTemplateMutationCacheKeys());
       return true;
     } finally {
       setPresetMutation(null);
     }
   }
 
-  async function handleUpdatePreset(id: string, input: Omit<FoodPreset, "id" | "userId">) {
+  async function handleUpdatePreset(id: string, input: {
+    label: string;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+    caloriesKcal: number;
+  }) {
     setPresetError(null);
     setPresetMutation({ type: "update", presetId: id });
 
     try {
-      const result = await updatePresetAction({ id, ...input });
-      const updatedPreset = result.preset;
-      if (!result.ok || !updatedPreset) {
-        setPresetError(result.error ?? "Unable to update preset.");
+      const result = await updateTemplateAction({
+        id,
+        label: input.label,
+        proteinG: input.proteinG,
+        carbsG: input.carbsG,
+        fatG: input.fatG,
+        caloriesKcal: input.caloriesKcal,
+      });
+      const updatedTemplate = result.template;
+      if (!result.ok || !updatedTemplate) {
+        setPresetError(result.error ?? "Unable to update template.");
         return false;
       }
 
-      setLocalPresets((prev) =>
+      setLocalTemplates((prev) =>
         prev
-          .map((preset) => (preset.id === id ? updatedPreset : preset))
+          .map((preset) => (preset.id === id ? updatedTemplate : preset))
           .sort((a, b) => a.label.localeCompare(b.label)),
       );
-      invalidateAppDataCache(getPresetMutationCacheKeys());
+      invalidateAppDataCache(getTemplateMutationCacheKeys());
       return true;
     } finally {
       setPresetMutation(null);
@@ -772,7 +793,6 @@ export function DashboardShell({
   }
 
   const isViewingToday = selectedDate === todayStr;
-  const isExperimental = uiMode === "experimental";
   const localMealGroupIds = new Set(localMealGroups.map((group) => group.id));
   const groupedDrafts = localMealGroups.map((group) => ({
     group,
@@ -861,7 +881,7 @@ export function DashboardShell({
       case "custom":
         addCustomDraft();
         break;
-      case "preset":
+      case "template":
         setPresetError(null);
         setShowPresetsModal(true);
         break;
@@ -903,22 +923,17 @@ export function DashboardShell({
   }, [initialComposeAction, router, selectedDate]);
 
   const content = (
-    <div className={isExperimental ? "space-y-6" : "space-y-5"}>
-      <section className={isExperimental
-        ? "overflow-hidden rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] shadow-[0_20px_40px_rgba(0,0,0,0.08)]"
-        : "rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.06)]"}
-      >
-        <div className={isExperimental ? "border-b border-[var(--color-border)] p-5 pb-4" : "mb-4 flex items-center justify-between"}>
-          <div className={isExperimental ? "flex items-start justify-between gap-4" : "flex items-center justify-between w-full"}>
+    <div className="space-y-6">
+      <section className="overflow-hidden rounded-[2rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] shadow-[0_20px_40px_rgba(0,0,0,0.08)]">
+        <div className="border-b border-[var(--color-border)] p-5 pb-4">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
                 Daily Report
               </h2>
-              {isExperimental ? (
-                <p className="mt-1.5 text-sm text-[var(--color-muted)]">
-                  Your logged intake for {isViewingToday ? "today" : "this selected day"}.
-                </p>
-              ) : null}
+              <p className="mt-1.5 text-sm text-[var(--color-muted)]">
+                Your logged intake for {isViewingToday ? "today" : "this selected day"}.
+              </p>
             </div>
             <span className="text-2xl font-bold tabular-nums text-[var(--color-ink)]">
               {liveTotals.caloriesKcal}
@@ -927,7 +942,7 @@ export function DashboardShell({
           </div>
         </div>
 
-        <div className={isExperimental ? "p-5 pt-4" : ""}>
+        <div className="p-5 pt-4">
           <MacroBarGroup
             proteinG={liveTotals.proteinG}
             carbsG={liveTotals.carbsG}
@@ -951,16 +966,14 @@ export function DashboardShell({
       </section>
 
       <section>
-        <div className={isExperimental ? "mb-3 flex items-end justify-between gap-3" : ""}>
+        <div className="mb-3 flex items-end justify-between gap-3">
           <div>
             <h2 className="mb-2.5 text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
               Quick Add
             </h2>
-            {isExperimental ? (
-              <p className="mb-2 text-sm text-[var(--color-muted)]">
-                Repeat foods that already fit your routine.
-              </p>
-            ) : null}
+            <p className="mb-2 text-sm text-[var(--color-muted)]">
+              Repeat foods that already fit your routine.
+            </p>
           </div>
         </div>
         <QuickAddRail
@@ -968,7 +981,7 @@ export function DashboardShell({
           onAdd={addDraftFromCandidate}
           emptyState={
             <p className="text-sm text-[var(--color-muted)]">
-              Log some foods or add presets to see suggestions here.
+              Log some foods or add templates to see suggestions here.
             </p>
           }
         />
@@ -980,11 +993,9 @@ export function DashboardShell({
             <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
               Food Items
             </h2>
-            {isExperimental ? (
-              <p className="mt-1 text-sm text-[var(--color-muted)]">
-                The main log for the day. Use the center + button to add more.
-              </p>
-            ) : null}
+            <p className="mt-1 text-sm text-[var(--color-muted)]">
+              The main log for the day. Use the center + button to add more.
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -1008,22 +1019,6 @@ export function DashboardShell({
             >
               Groups
             </button>
-            {!isExperimental ? (
-              <AddFoodButton
-                onCustom={addCustomDraft}
-                onPreset={() => {
-                  setPresetError(null);
-                  setShowPresetsModal(true);
-                }}
-                onScan={() => {
-                  setScanResult(null);
-                  setNotFoundBarcode(null);
-                  setShowScanner(true);
-                }}
-                onPhoto={() => setShowPhotoModal(true)}
-                onRecipe={() => setShowRecipePickerModal(true)}
-              />
-            ) : null}
           </div>
         </div>
 
@@ -1039,7 +1034,7 @@ export function DashboardShell({
                 }}
                 className="rounded-full border border-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-[var(--color-accent)] transition hover:-translate-y-0.5"
               >
-                From preset
+                From template
               </button>
               <button
                 type="button"
@@ -1168,28 +1163,17 @@ export function DashboardShell({
 
   return (
     <>
-      {isExperimental ? (
-        <ExperimentalAppShell
-          userEmail={userEmail}
-          canAccessAdmin={canAccessAdmin}
-          selectedDate={selectedDate}
-          title="Food Log"
-          activeTab="log"
-          showDateNavigation
-          onComposeAction={handleComposeAction}
-        >
-          {content}
-        </ExperimentalAppShell>
-      ) : (
-        <AppShell
-          userEmail={userEmail}
-          canAccessAdmin={canAccessAdmin}
-          selectedDate={selectedDate}
-          activeTab="log"
-        >
-          {content}
-        </AppShell>
-      )}
+      <ExperimentalAppShell
+        userEmail={userEmail}
+        canAccessAdmin={canAccessAdmin}
+        selectedDate={selectedDate}
+        title="Food Log"
+        activeTab="log"
+        showDateNavigation
+        onComposeAction={handleComposeAction}
+      >
+        {content}
+      </ExperimentalAppShell>
 
       {showSearchModal && (
         <FoodSearchModal
@@ -1206,7 +1190,7 @@ export function DashboardShell({
 
       {showPresetsModal && (
         <PresetModal
-          presets={localPresets}
+          presets={localTemplates}
           mutation={presetMutation}
           errorMessage={presetError}
           onClose={() => {

@@ -4,8 +4,8 @@ import {
   getDailyMutationCacheKeys,
   getGoalsMutationCacheKeys,
   getNearbyDateStrings,
-  getPresetMutationCacheKeys,
   getRecipeMutationCacheKeys,
+  getTemplateMutationCacheKeys,
   getWarmupRoutes,
   getWeightMutationCacheKeys,
 } from "@/lib/app-warmup";
@@ -27,6 +27,8 @@ describe("app warmup helpers", () => {
       "/progress?date=2026-03-19&tab=goals",
       "/progress?date=2026-03-19&tab=weight",
       "/recipes?date=2026-03-19",
+      "/planner?date=2026-03-19",
+      "/library?date=2026-03-19",
       "/summary?date=2026-03-19",
     ]);
   });
@@ -42,7 +44,7 @@ describe("app warmup helpers", () => {
       "summary:2026-03-19",
       "stats",
     ]);
-    expect(getPresetMutationCacheKeys()).toEqual(["presets"]);
+    expect(getTemplateMutationCacheKeys()).toEqual(["templates"]);
     expect(getRecipeMutationCacheKeys("2026-03-19")).toEqual([
       "recipes",
       "dailySummary:2026-03-19",

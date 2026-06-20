@@ -9,7 +9,7 @@ async function startCustomFoodDraft(page: Page) {
   }
 
   await page.getByRole("button", { name: "Add food" }).click();
-  await page.getByRole("button", { name: "Custom" }).click();
+  await page.getByRole("button", { name: "Custom", exact: true }).click();
 }
 
 async function addCustomFood(
@@ -34,7 +34,9 @@ async function addCustomFood(
   await mealCard.getByLabel("Fat").fill(input.fatG);
   await mealCard.getByLabel("Calories").fill(input.caloriesKcal);
   await mealCard.getByRole("button", { name: "Save" }).click();
-  await expect(mealCard.getByRole("button", { name: "Expand", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: input.label }).last(),
+  ).toBeVisible();
 }
 
 test("redirects unauthenticated users to login", async ({ page }) => {
@@ -49,9 +51,9 @@ test("allows an allowlisted user to track food items across days", async ({
   page,
 }) => {
   await page.goto("/api/test/session?email=coach@example.com");
-  await expect(page.getByRole("button", { name: "Open menu" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
-  const datePicker = page.getByLabel("Pick a day");
+  const datePicker = page.getByLabel("Pick a day").first();
   const currentBrowserDate = await page.evaluate(() => {
     const value = new Date();
     const year = value.getFullYear();
@@ -90,11 +92,10 @@ test("allows an allowlisted user to track food items across days", async ({
   await expect(dailyTotalsCard).toContainText("620 kcal");
 
   await page.goto("/summary?date=2026-03-19");
-  const rolling7Card = page
-    .locator("section")
-    .filter({ hasText: "Rolling 7 days" })
-    .first();
-  await expect(rolling7Card).toContainText("2 days");
+  await expect(
+    page.getByRole("heading", { name: "Last 7 Days" }),
+  ).toBeVisible();
+  await expect(page.locator("body")).toContainText(/13 Mar to 19 Mar .* 2 days/);
 });
 
 test("blocks non-allowlisted test logins", async ({ request }) => {
@@ -109,12 +110,16 @@ test("fresh users see the current dashboard empty states", async ({
   page,
 }) => {
   await page.goto("/api/test/session?email=user@example.com");
-  await expect(page.getByRole("button", { name: "Open menu" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
-  await expect(page.getByText("Daily Report")).toBeVisible();
-  await expect(page.getByText("Quick Add")).toBeVisible();
   await expect(
-    page.getByText("Log some foods or add presets to see suggestions here."),
+    page.getByRole("heading", { name: "Daily Report" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Quick Add" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Log some foods or add templates to see suggestions here.").first(),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Add custom" })).toBeVisible();
 });
@@ -125,11 +130,9 @@ test("recent foods appear in quick add and create a prefilled draft", async ({
   const label = `Quick Add Item ${Date.now()}`;
 
   await page.goto("/api/test/session?email=user@example.com");
-  await expect(page.getByRole("button", { name: "Open menu" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
-  const datePicker = page.getByLabel("Pick a day");
-  await datePicker.fill("2026-03-17");
-  await expect(page).toHaveURL(/date=2026-03-17/);
+  await page.goto("/?date=2026-03-17");
 
   await addCustomFood(page, {
     label,
@@ -139,8 +142,7 @@ test("recent foods appear in quick add and create a prefilled draft", async ({
     caloriesKcal: "231",
   });
 
-  await datePicker.fill("2026-03-18");
-  await expect(page).toHaveURL(/date=2026-03-18/);
+  await page.goto("/?date=2026-03-18");
 
   const quickAddCard = page.getByRole("button", { name: `Quick add ${label}` });
   await expect(quickAddCard).toBeVisible();
@@ -160,11 +162,12 @@ test("stats and weight pages load without day navigation chrome", async ({
   page,
 }) => {
   await page.goto("/api/test/session?email=coach@example.com");
-  await expect(page.getByRole("button", { name: "Open menu" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
   await page.goto("/stats?date=2026-03-19");
+  await expect(page).toHaveURL(/\/summary\?date=2026-03-19/);
   await expect(
-    page.getByRole("heading", { name: "Stats", exact: true }),
+    page.getByRole("heading", { name: "Macro Trends", exact: true }),
   ).toBeVisible();
   await expect(page.locator("body")).toContainText(/No stats yet|Overview/);
   await expect(page.getByRole("button", { name: "Previous day" })).toHaveCount(0);
@@ -172,7 +175,10 @@ test("stats and weight pages load without day navigation chrome", async ({
   await expect(page.getByLabel("Pick a day")).toHaveCount(0);
 
   await page.goto("/weight?date=2026-03-19");
-  await expect(page.getByText("Log Weight")).toBeVisible();
+  await expect(page).toHaveURL(/\/progress\?date=2026-03-19&tab=weight/);
+  await expect(
+    page.getByRole("heading", { name: "Log Weight" }).first(),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Previous day" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Next day" })).toHaveCount(0);
   await expect(page.getByLabel("Pick a day")).toHaveCount(0);
@@ -184,14 +190,14 @@ test("weight goal validation errors stay visible on the page", async ({
   await page.goto("/api/test/session?email=user@example.com");
   await page.goto("/weight?date=2026-03-19");
 
-  await page.getByLabel("Weight (kg)").fill("82.5");
-  await page.getByRole("button", { name: "Save Entry" }).click();
-  await expect(page.getByPlaceholder("e.g. 75")).toBeVisible();
+  await page.getByLabel("Weight (kg)").first().fill("82.5");
+  await page.getByRole("button", { name: "Save entry" }).click();
+  await expect(page.getByLabel("Target (kg)").first()).toBeVisible();
 
-  await page.getByPlaceholder("e.g. 75").fill("0");
+  await page.getByLabel("Target (kg)").first().fill("0");
   await page.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect(
-    page.getByText("Please enter a valid goal weight."),
+    page.getByText("Enter a valid goal weight."),
   ).toBeVisible();
 });
