@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 import { defineConfig, devices } from "@playwright/test";
 
-const appUrl = "http://localhost:3000";
+const appPort = process.env.PLAYWRIGHT_PORT ?? "3000";
+const appUrl = `http://localhost:${appPort}`;
 const e2eDatabaseUrl = `file:${join(
   tmpdir(),
   `macro-tracker-playwright-db-${Date.now()}`,
@@ -18,7 +19,7 @@ export default defineConfig({
     ...devices["Pixel 7"],
   },
   webServer: {
-    command: "pnpm dev --port 3000",
+    command: `pnpm dev --port ${appPort}`,
     url: appUrl,
     reuseExistingServer: false,
     env: {

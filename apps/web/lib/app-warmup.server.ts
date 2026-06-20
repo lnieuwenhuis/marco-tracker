@@ -2,11 +2,11 @@ import {
   canAccessAdmin,
   getDailySummary,
   getPeriodAverages,
-  getPresets,
   getRecentDailyOverviews,
   getRecentQuickAddCandidates,
   getRecipes,
   getStatsPageData,
+  getTemplates,
   getUserById,
   getUserGoals,
   getWeightPageData,
@@ -22,7 +22,7 @@ import {
 export type AppWarmupBuilderDeps = {
   getUserById: typeof getUserById;
   getUserGoals: typeof getUserGoals;
-  getPresets: typeof getPresets;
+  getTemplates: typeof getTemplates;
   getRecipes: typeof getRecipes;
   getRecentQuickAddCandidates: typeof getRecentQuickAddCandidates;
   getDailySummary: typeof getDailySummary;
@@ -35,7 +35,7 @@ export type AppWarmupBuilderDeps = {
 const defaultDeps: AppWarmupBuilderDeps = {
   getUserById,
   getUserGoals,
-  getPresets,
+  getTemplates,
   getRecipes,
   getRecentQuickAddCandidates,
   getDailySummary,
@@ -59,7 +59,7 @@ export async function buildAppWarmupPayload({
   const [
     user,
     goals,
-    presets,
+    templates,
     recipes,
     recentCandidates,
     previousSummary,
@@ -72,7 +72,7 @@ export async function buildAppWarmupPayload({
   ] = await Promise.all([
     deps.getUserById(sessionUser.userId),
     deps.getUserGoals(sessionUser.userId),
-    deps.getPresets(sessionUser.userId),
+    deps.getTemplates(sessionUser.userId),
     deps.getRecipes(sessionUser.userId),
     deps.getRecentQuickAddCandidates(sessionUser.userId),
     deps.getDailySummary(sessionUser.userId, previousDate),
@@ -90,7 +90,7 @@ export async function buildAppWarmupPayload({
       canAccessAdmin: user ? canAccessAdmin(user.role) : false,
     },
     goals,
-    presets,
+    templates,
     recipes,
     recentCandidates,
     days: {

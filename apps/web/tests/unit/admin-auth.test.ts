@@ -28,7 +28,12 @@ vi.mock("next/navigation", () => ({
   notFound: mocked.notFound,
 }));
 
-import { getCurrentAppUser, requireAdminUser, requireOwnerUser } from "@/lib/auth";
+import {
+  getCurrentAppUser,
+  requireAdminUser,
+  requireOnboardedSessionUser,
+  requireOwnerUser,
+} from "@/lib/auth";
 import { resetServerEnvForTests } from "@/lib/env";
 
 function buildUser(overrides?: Partial<Awaited<ReturnType<typeof getCurrentAppUser>>>) {
@@ -46,6 +51,8 @@ function buildUser(overrides?: Partial<Awaited<ReturnType<typeof getCurrentAppUs
     goalCarbsG: null,
     goalFatG: null,
     goalWeightKg: null,
+    onboardingCompletedAt: "2026-04-17T10:00:00.000Z",
+    preferredWeightUnit: "kg",
     ...overrides,
   };
 }
@@ -102,5 +109,41 @@ describe("admin auth helpers", () => {
 
     expect(user.role).toBe("owner");
     expect(mocked.notFound).not.toHaveBeenCalled();
+  });
+
+  it("redirects authenticated users who have not completed onboarding", async () => {
+    mocked.getSessionUserFromCookies.mockResolvedValue({
+      userId: "user-1",
+      email: "user@example.com",
+    });
+    mocked.getUserById.mockResolvedValue(
+      buildUser({
+        email: "user@example.com",
+        onboardingCompletedAt: null,
+      }),
+    );
+
+    await expect(requireOnboardedSessionUser()).rejects.toThrow(
+      "redirect:/onboarding",
+    );
+    expect(mocked.redirect).toHaveBeenCalledWith("/onboarding");
+  });
+
+  it("returns session identity for users who have completed onboarding", async () => {
+    mocked.getSessionUserFromCookies.mockResolvedValue({
+      userId: "user-1",
+      email: "user@example.com",
+    });
+    mocked.getUserById.mockResolvedValue(
+      buildUser({
+        email: "user@example.com",
+        onboardingCompletedAt: "2026-04-17T10:00:00.000Z",
+      }),
+    );
+
+    await expect(requireOnboardedSessionUser()).resolves.toEqual({
+      userId: "user-1",
+      email: "user@example.com",
+    });
   });
 });

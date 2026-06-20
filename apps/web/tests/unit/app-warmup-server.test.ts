@@ -54,6 +54,8 @@ function buildUser(overrides?: Partial<AppUser>): AppUser {
     goalCarbsG: null,
     goalFatG: null,
     goalWeightKg: null,
+    onboardingCompletedAt: "2026-03-01T00:00:00.000Z",
+    preferredWeightUnit: "kg",
     ...overrides,
   };
 }
@@ -126,7 +128,7 @@ function buildDeps(overrides?: Partial<AppWarmupBuilderDeps>): AppWarmupBuilderD
   return {
     getUserById: vi.fn().mockResolvedValue(buildUser({ role: "admin" })),
     getUserGoals: vi.fn().mockResolvedValue(zeroGoals),
-    getPresets: vi.fn().mockResolvedValue([]),
+    getTemplates: vi.fn().mockResolvedValue([]),
     getRecipes: vi.fn().mockResolvedValue([]),
     getRecentQuickAddCandidates: vi.fn().mockResolvedValue([]),
     getDailySummary: vi.fn(async (_userId: string, date: string) => buildSummary(date)),

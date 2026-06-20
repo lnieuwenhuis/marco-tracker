@@ -1,7 +1,12 @@
 "use client";
 
-import type { FoodPreset } from "@macro-tracker/db";
+import type { MealTemplate } from "@macro-tracker/db";
 import { useEffect, useState } from "react";
+
+import {
+  canEditAsSingleFoodTemplate,
+  getTemplateMacroTotals,
+} from "@/lib/template-macros";
 
 import { ConfirmDeleteButton } from "./confirm-delete-button";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
@@ -11,14 +16,22 @@ type PresetMutationState =
   | { type: "update" | "delete"; presetId: string };
 
 type PresetModalProps = {
-  presets: FoodPreset[];
+  presets: MealTemplate[];
   mutation: PresetMutationState | null;
   errorMessage: string | null;
   onClose: () => void;
-  onSelect: (preset: FoodPreset) => void;
-  onSave: (input: Omit<FoodPreset, "id" | "userId">) => Promise<boolean>;
-  onUpdate: (id: string, input: Omit<FoodPreset, "id" | "userId">) => Promise<boolean>;
+  onSelect: (preset: MealTemplate) => void;
+  onSave: (input: TemplateMacroInput) => Promise<boolean>;
+  onUpdate: (id: string, input: TemplateMacroInput) => Promise<boolean>;
   onDelete: (presetId: string) => Promise<boolean>;
+};
+
+type TemplateMacroInput = {
+  label: string;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  caloriesKcal: number;
 };
 
 type PresetDraft = {
@@ -33,13 +46,14 @@ function emptyDraft(): PresetDraft {
   return { label: "", proteinG: "", carbsG: "", fatG: "", caloriesKcal: "" };
 }
 
-function presetToDraft(preset: FoodPreset): PresetDraft {
+function presetToDraft(preset: MealTemplate): PresetDraft {
+  const item = preset.items[0] ?? null;
   return {
     label: preset.label,
-    proteinG: String(preset.proteinG),
-    carbsG: String(preset.carbsG),
-    fatG: String(preset.fatG),
-    caloriesKcal: String(preset.caloriesKcal),
+    proteinG: String(item?.proteinG ?? 0),
+    carbsG: String(item?.carbsG ?? 0),
+    fatG: String(item?.fatG ?? 0),
+    caloriesKcal: String(item?.caloriesKcal ?? 0),
   };
 }
 
@@ -147,7 +161,11 @@ export function PresetModal({
     setShowCreateForm(false);
   }
 
-  function startEdit(preset: FoodPreset) {
+  function startEdit(preset: MealTemplate) {
+    if (!canEditAsSingleFoodTemplate(preset)) {
+      return;
+    }
+
     setEditingId(preset.id);
     setEditDraft(presetToDraft(preset));
     setShowCreateForm(false);
@@ -183,13 +201,13 @@ export function PresetModal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Food Presets"
+        aria-label="Meal Templates"
         aria-busy={mutation ? "true" : "false"}
         className="fixed inset-x-4 top-[8%] z-50 mx-auto max-h-[82vh] max-w-sm overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5 shadow-2xl"
       >
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-bold text-[var(--color-ink)]">Food Presets</h2>
+          <h2 className="text-base font-bold text-[var(--color-ink)]">Meal Templates</h2>
           <button
             type="button"
             onClick={onClose}
@@ -213,15 +231,19 @@ export function PresetModal({
         {/* Empty state */}
         {presets.length === 0 && (
           <p className="py-3 text-center text-sm text-[var(--color-muted)]">
-            No presets yet — save one below.
+            No templates yet. Save one below.
           </p>
         )}
 
         {/* Preset list */}
         {presets.length > 0 && (
           <div className="space-y-2">
-            {presets.map((preset) =>
-              editingId === preset.id ? (
+            {presets.map((preset) => {
+              const totals = getTemplateMacroTotals(preset.items);
+              const canEditPreset = canEditAsSingleFoodTemplate(preset);
+              const itemCount = preset.items.length;
+
+              return editingId === preset.id ? (
                 /* Inline edit form */
                 <div
                   key={preset.id}
@@ -275,10 +297,13 @@ export function PresetModal({
                       {preset.label}
                     </p>
                     <div className="mt-1 flex flex-wrap gap-x-2.5 gap-y-0.5">
-                      <span className="text-[10px] font-semibold text-[var(--color-bar-protein)]">P {preset.proteinG}g</span>
-                      <span className="text-[10px] font-semibold text-[var(--color-bar-carbs)]">C {preset.carbsG}g</span>
-                      <span className="text-[10px] font-semibold text-[var(--color-bar-fat)]">F {preset.fatG}g</span>
-                      <span className="text-[10px] font-semibold text-[var(--color-muted)]">{preset.caloriesKcal} kcal</span>
+                      <span className="text-[10px] font-semibold text-[var(--color-bar-protein)]">P {totals.proteinG}g</span>
+                      <span className="text-[10px] font-semibold text-[var(--color-bar-carbs)]">C {totals.carbsG}g</span>
+                      <span className="text-[10px] font-semibold text-[var(--color-bar-fat)]">F {totals.fatG}g</span>
+                      <span className="text-[10px] font-semibold text-[var(--color-muted)]">{totals.caloriesKcal} kcal</span>
+                      {itemCount > 1 ? (
+                        <span className="text-[10px] font-semibold text-[var(--color-muted)]">{itemCount} items</span>
+                      ) : null}
                     </div>
                   </div>
 
@@ -291,17 +316,19 @@ export function PresetModal({
                     Add
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => startEdit(preset)}
-                    disabled={mutationsDisabled}
-                    className="shrink-0 rounded-lg p-1.5 text-[var(--color-muted)] transition hover:text-[var(--color-accent)]"
-                    aria-label={`Edit ${preset.label}`}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M9.5 2.5l2 2L4 12H2v-2L9.5 2.5z" />
-                    </svg>
-                  </button>
+                  {canEditPreset ? (
+                    <button
+                      type="button"
+                      onClick={() => startEdit(preset)}
+                      disabled={mutationsDisabled}
+                      className="shrink-0 rounded-lg p-1.5 text-[var(--color-muted)] transition hover:text-[var(--color-accent)]"
+                      aria-label={`Edit ${preset.label}`}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9.5 2.5l2 2L4 12H2v-2L9.5 2.5z" />
+                      </svg>
+                    </button>
+                  ) : null}
 
                   <ConfirmDeleteButton
                     onConfirm={() => void onDelete(preset.id)}
@@ -315,8 +342,8 @@ export function PresetModal({
                     </svg>
                   </ConfirmDeleteButton>
                 </div>
-              )
-            )}
+              );
+            })}
           </div>
         )}
 
@@ -337,7 +364,7 @@ export function PresetModal({
               </>
             )}
           </svg>
-          {showCreateForm ? "Cancel" : "Save new preset"}
+          {showCreateForm ? "Cancel" : "Save new template"}
         </button>
 
         {/* Inline create form */}
@@ -370,7 +397,7 @@ export function PresetModal({
               disabled={!draft.label.trim() || mutationsDisabled}
               className="mt-3 w-full rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {mutation?.type === "save" ? "Saving preset..." : "Save preset"}
+              {mutation?.type === "save" ? "Saving template..." : "Save template"}
             </button>
           </div>
         )}

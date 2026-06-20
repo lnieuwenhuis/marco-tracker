@@ -1,9 +1,8 @@
-import { canAccessAdmin, ensureDateString, getDailySummary, getPresets, getRecentQuickAddCandidates, getRecipes, getUserById, getUserGoals } from "@macro-tracker/db";
+import { canAccessAdmin, ensureDateString, getDailySummary, getRecentQuickAddCandidates, getRecipes, getTemplates, getUserById, getUserGoals } from "@macro-tracker/db";
 
 import { DashboardShell } from "@/components/dashboard-shell";
-import { requireSessionUser } from "@/lib/auth";
+import { requireOnboardedSessionUser } from "@/lib/auth";
 import { normalizeComposeAction } from "@/lib/compose";
-import { getServerUiMode } from "@/lib/ui-mode-server";
 
 type HomePageProps = {
   searchParams: Promise<{
@@ -13,17 +12,16 @@ type HomePageProps = {
 };
 
 export default async function HomePage({ searchParams }: HomePageProps) {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const params = await searchParams;
   const selectedDate = ensureDateString(params.date);
-  const uiMode = await getServerUiMode();
   const initialComposeAction = normalizeComposeAction(params.compose);
 
-  const [dailySummary, goals, user, presets, recipes, recentCandidates] = await Promise.all([
+  const [dailySummary, goals, user, templates, recipes, recentCandidates] = await Promise.all([
     getDailySummary(sessionUser.userId, selectedDate),
     getUserGoals(sessionUser.userId),
     getUserById(sessionUser.userId),
-    getPresets(sessionUser.userId),
+    getTemplates(sessionUser.userId),
     getRecipes(sessionUser.userId),
     getRecentQuickAddCandidates(sessionUser.userId),
   ]);
@@ -37,10 +35,9 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       selectedDate={selectedDate}
       dailySummary={dailySummary}
       goals={goals}
-      presets={presets}
+      templates={templates}
       recipes={recipes}
       recentCandidates={recentCandidates}
-      uiMode={uiMode}
       initialComposeAction={initialComposeAction}
     />
   );

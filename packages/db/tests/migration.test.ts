@@ -1,10 +1,11 @@
-import { eq, sql } from "drizzle-orm";
-import { readFile } from "node:fs/promises";
+import { sql } from "drizzle-orm";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createDatabaseRuntime, type DatabaseRuntime } from "../src";
-import { foodProducts, recipeIngredients } from "../src/schema";
 
 const migrationFiles = [
   "0000_yielding_the_spike.sql",
@@ -17,6 +18,8 @@ const migrationFiles = [
   "0007_admin_panel.sql",
   "0008_product_model_meal_planning.sql",
   "0009_sync_barcode_food_products.sql",
+  "0010_templates_food_product_cleanup.sql",
+  "0011_active_global_barcode_unique.sql",
 ] as const;
 
 async function applyMigration(runtime: DatabaseRuntime, fileName: string) {
@@ -34,10 +37,15 @@ async function applyMigration(runtime: DatabaseRuntime, fileName: string) {
 
 describe("database migrations", () => {
   let runtime: DatabaseRuntime | undefined;
+  let tempDir: string | undefined;
 
   afterEach(async () => {
     await runtime?.close();
     runtime = undefined;
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+      tempDir = undefined;
+    }
   });
 
   it("collapses duplicate normalized legacy product labels during meal-planning migration", async () => {
@@ -92,19 +100,30 @@ describe("database migrations", () => {
 
     await applyMigration(runtime, "0008_product_model_meal_planning.sql");
 
-    const products = await runtime.db
-      .select()
-      .from(foodProducts)
-      .where(eq(foodProducts.ownerUserId, userId));
+    const productResult = await runtime.db.execute<{
+      id: string;
+      name: string;
+    }>(sql.raw(`
+      SELECT "id", "name"
+      FROM "food_products"
+      WHERE "owner_user_id" = '${userId}'
+    `));
+    const products = productResult.rows;
     expect(products).toHaveLength(2);
     expect(products.map((product) => product.name.toLowerCase()).sort()).toEqual([
       "oats",
       "rice",
     ]);
 
-    const migratedIngredients = await runtime.db.select().from(recipeIngredients);
+    const migratedIngredientResult = await runtime.db.execute<{
+      product_id: string | null;
+    }>(sql.raw(`
+      SELECT "product_id"
+      FROM "recipe_ingredients"
+    `));
+    const migratedIngredients = migratedIngredientResult.rows;
     const ingredientProductIds = new Set(
-      migratedIngredients.map((ingredient) => ingredient.productId),
+      migratedIngredients.map((ingredient) => ingredient.product_id),
     );
     expect(ingredientProductIds.size).toBe(1);
     expect([...ingredientProductIds][0]).toBeTruthy();
@@ -144,20 +163,242 @@ describe("database migrations", () => {
 
     await applyMigration(runtime, "0009_sync_barcode_food_products.sql");
 
-    const products = await runtime.db
-      .select()
-      .from(foodProducts)
-      .where(eq(foodProducts.barcode, "8712345000001"));
+    const productResult = await runtime.db.execute<{
+      owner_user_id: string | null;
+      scope: string;
+      source: string;
+      barcode: string;
+      name: string;
+      brand: string;
+      calories_per_100: number;
+    }>(sql.raw(`
+      SELECT
+        "owner_user_id",
+        "scope",
+        "source",
+        "barcode",
+        "name",
+        "brand",
+        "calories_per_100"
+      FROM "food_products"
+      WHERE "barcode" = '8712345000001'
+    `));
+    const products = productResult.rows;
 
     expect(products).toHaveLength(1);
     expect(products[0]).toMatchObject({
-      ownerUserId: null,
+      owner_user_id: null,
       scope: "global",
       source: "barcode",
       barcode: "8712345000001",
       name: "Community Protein Drink",
       brand: "Macro Lab",
-      caloriesPer100: 130,
+      calories_per_100: 130,
     });
+  });
+
+  it("remaps legacy barcode audit events to migrated food products", async () => {
+    runtime = await createDatabaseRuntime("memory:");
+
+    for (const fileName of migrationFiles.slice(0, 9)) {
+      await applyMigration(runtime, fileName);
+    }
+
+    const adminId = "11111111-1111-4111-8111-111111111111";
+    const barcodeProductId = "77777777-7777-4777-8777-777777777777";
+    const auditId = "88888888-8888-4888-8888-888888888888";
+
+    await runtime.db.execute(sql.raw(`
+      INSERT INTO "users" ("id", "shoo_pairwise_sub", "email", "display_name", "role")
+      VALUES ('${adminId}', 'audit_admin', 'admin@example.com', 'Admin', 'admin')
+    `));
+    await runtime.db.execute(sql.raw(`
+      INSERT INTO "barcode_products" (
+        "id",
+        "barcode",
+        "name",
+        "brands",
+        "protein_g",
+        "carbs_g",
+        "fat_g",
+        "calories_kcal",
+        "serving_size_g",
+        "added_by_user_id"
+      )
+      VALUES (
+        '${barcodeProductId}',
+        '8712345000099',
+        'Audited Protein Drink',
+        'Macro Lab',
+        20.0,
+        8.0,
+        2.0,
+        130,
+        250.0,
+        '${adminId}'
+      )
+    `));
+    await runtime.db.execute(sql.raw(`
+      INSERT INTO "admin_audit_events" (
+        "id",
+        "actor_user_id",
+        "actor_role",
+        "action",
+        "target_type",
+        "target_id",
+        "details_json"
+      )
+      VALUES (
+        '${auditId}',
+        '${adminId}',
+        'admin',
+        'barcode.updated',
+        'barcode_product',
+        '${barcodeProductId}',
+        '{"name":"Audited Protein Drink"}'::jsonb
+      )
+    `));
+
+    await applyMigration(runtime, "0009_sync_barcode_food_products.sql");
+    await applyMigration(runtime, "0010_templates_food_product_cleanup.sql");
+
+    const productResult = await runtime.db.execute<{
+      id: string;
+    }>(sql.raw(`
+      SELECT "id"
+      FROM "food_products"
+      WHERE "barcode" = '8712345000099'
+    `));
+    const productId = productResult.rows[0]?.id;
+    expect(productId).toBeTruthy();
+
+    const auditResult = await runtime.db.execute<{
+      target_type: string;
+      target_id: string;
+      legacy_id: string;
+    }>(sql.raw(`
+      SELECT
+        "target_type",
+        "target_id",
+        "details_json"->>'legacyBarcodeProductId' AS legacy_id
+      FROM "admin_audit_events"
+      WHERE "id" = '${auditId}'
+    `));
+
+    expect(auditResult.rows[0]).toEqual({
+      target_type: "food_product",
+      target_id: productId,
+      legacy_id: barcodeProductId,
+    });
+  });
+
+  it("deduplicates active global barcode products before local bootstrap creates the unique index", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "macro-tracker-bootstrap-"));
+    const connectionString = `file:${tempDir}`;
+    runtime = await createDatabaseRuntime(connectionString);
+
+    for (const fileName of migrationFiles.slice(0, 11)) {
+      await applyMigration(runtime, fileName);
+    }
+
+    await runtime.db.execute(sql.raw(`
+      INSERT INTO "food_products" (
+        "id",
+        "owner_user_id",
+        "scope",
+        "source",
+        "barcode",
+        "name",
+        "brand",
+        "default_serving_quantity",
+        "default_serving_unit",
+        "protein_per_100",
+        "carbs_per_100",
+        "fat_per_100",
+        "calories_per_100",
+        "serving_weight_g",
+        "source_metadata",
+        "created_at",
+        "updated_at"
+      )
+      VALUES
+        (
+          '99999999-9999-4999-8999-999999999991',
+          NULL,
+          'global',
+          'barcode',
+          '8712345000777',
+          'Older Duplicate Drink',
+          'Macro Lab',
+          '1.00',
+          'serving',
+          '20.00',
+          '8.00',
+          '2.00',
+          130,
+          '250.00',
+          '{}'::jsonb,
+          '2026-06-01T10:00:00Z',
+          '2026-06-01T10:00:00Z'
+        ),
+        (
+          '99999999-9999-4999-8999-999999999992',
+          NULL,
+          'global',
+          'barcode',
+          '8712345000777',
+          'Newer Duplicate Drink',
+          'Macro Lab',
+          '1.00',
+          'serving',
+          '21.00',
+          '9.00',
+          '3.00',
+          140,
+          '250.00',
+          '{}'::jsonb,
+          '2026-06-02T10:00:00Z',
+          '2026-06-02T10:00:00Z'
+        )
+    `));
+
+    await runtime.close();
+    runtime = undefined;
+
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    try {
+      runtime = await createDatabaseRuntime(connectionString);
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+
+    const productResult = await runtime.db.execute<{
+      id: string;
+      deleted_at: Date | string | null;
+      dedupe_marker: string | null;
+    }>(sql.raw(`
+      SELECT
+        "id",
+        "deleted_at",
+        "source_metadata"->>'deduplicatedByMigration' AS "dedupe_marker"
+      FROM "food_products"
+      WHERE "barcode" = '8712345000777'
+      ORDER BY "id"
+    `));
+
+    expect(productResult.rows).toHaveLength(2);
+    expect(productResult.rows).toEqual([
+      {
+        id: "99999999-9999-4999-8999-999999999991",
+        deleted_at: expect.anything(),
+        dedupe_marker: "0011_active_global_barcode_unique",
+      },
+      {
+        id: "99999999-9999-4999-8999-999999999992",
+        deleted_at: null,
+        dedupe_marker: null,
+      },
+    ]);
   });
 });

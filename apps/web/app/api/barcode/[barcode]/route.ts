@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { lookupCustomBarcodeProduct } from "@macro-tracker/db";
+import { lookupBarcodeFoodProduct } from "@macro-tracker/db";
 
 import { lookupBarcodeChain } from "@/lib/barcode-providers";
 
@@ -17,23 +17,23 @@ export async function GET(
     );
   }
 
-  // 0. Check our community catalogue first — fastest and most reliable.
+  // 0. Check our barcode food catalogue first — fastest and most reliable.
   //    Wrapped in try/catch so a database error never blocks the external
   //    provider chain that follows.
   try {
-    const customProduct = await lookupCustomBarcodeProduct(barcode);
-    if (customProduct) {
+    const product = await lookupBarcodeFoodProduct(barcode);
+    if (product) {
       return NextResponse.json({
         found: true,
         product: {
-          name: customProduct.name,
-          brands: customProduct.brands,
-          barcode: customProduct.barcode,
-          proteinG: customProduct.proteinG,
-          carbsG: customProduct.carbsG,
-          fatG: customProduct.fatG,
-          caloriesKcal: customProduct.caloriesKcal,
-          servingSizeG: customProduct.servingSizeG,
+          name: product.name,
+          brands: product.brand,
+          barcode: product.barcode,
+          proteinG: product.proteinPer100,
+          carbsG: product.carbsPer100,
+          fatG: product.fatPer100,
+          caloriesKcal: product.caloriesPer100,
+          servingSizeG: product.servingWeightG,
           imageUrl: null,
           source: "custom",
         },

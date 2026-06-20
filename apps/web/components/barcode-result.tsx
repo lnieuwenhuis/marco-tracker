@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { saveCustomBarcodeProductAction } from "@/lib/actions";
+import { saveBarcodeFoodProductAction } from "@/lib/actions";
 import type { OpenFoodFactsProduct } from "@/lib/openfoodfacts";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 
@@ -102,7 +102,7 @@ function NotFoundForm({
     setIsSaving(true);
     setSaveError(null);
 
-    const result = await saveCustomBarcodeProductAction({
+    const result = await saveBarcodeFoodProductAction({
       barcode,
       name,
       brands: form.brands.trim(),
@@ -123,13 +123,13 @@ function NotFoundForm({
     // Hand the saved product back up so the normal product view can render
     onProductSaved({
       name: result.product.name,
-      brands: result.product.brands,
-      barcode: result.product.barcode,
-      proteinG: result.product.proteinG,
-      carbsG: result.product.carbsG,
-      fatG: result.product.fatG,
-      caloriesKcal: result.product.caloriesKcal,
-      servingSizeG: result.product.servingSizeG,
+      brands: result.product.brand,
+      barcode: result.product.barcode ?? barcode,
+      proteinG: result.product.proteinPer100,
+      carbsG: result.product.carbsPer100,
+      fatG: result.product.fatPer100,
+      caloriesKcal: result.product.caloriesPer100,
+      servingSizeG: result.product.servingWeightG,
       imageUrl: null,
       source: "custom",
     });
@@ -376,7 +376,7 @@ export function BarcodeResult({
   const [servingG, setServingG] = useState(String(defaultServing));
   const [savedPreset, setSavedPreset] = useState(false);
   // When isEditing is true, the macro display switches to editable inputs and
-  // scaling is paused. Add-to-log and Save-as-preset send these raw edited
+  // scaling is paused. Add-to-log and Save-as-template send these raw edited
   // values instead of the scaled ones.
   const [isEditing, setIsEditing] = useState(false);
   const [edited, setEdited] = useState<EditedValues>(emptyEdited);
@@ -632,7 +632,7 @@ export function BarcodeResult({
 
           {isEditing ? (
             <p className="mt-2 text-[10px] text-[var(--color-muted)]">
-              Editing values directly — serving size scaling paused.
+              Editing values directly. Serving size scaling is paused.
             </p>
           ) : (
             <p className="mt-2 text-[10px] text-[var(--color-muted)]">
@@ -667,7 +667,7 @@ export function BarcodeResult({
                 }}
                 className="flex-1 rounded-xl border border-[var(--color-accent)] py-2.5 text-sm font-semibold text-[var(--color-accent)] transition hover:-translate-y-0.5 disabled:opacity-50"
               >
-                {savedPreset ? "Saved!" : "Save as preset"}
+                {savedPreset ? "Saved!" : "Save as template"}
               </button>
               <button
                 type="button"

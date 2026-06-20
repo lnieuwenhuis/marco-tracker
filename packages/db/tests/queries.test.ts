@@ -3,7 +3,9 @@ import {
   createMealGroup,
   createRecipe,
   createMealEntry,
+  completeOnboardingSetup,
   createPersonalFoodProduct,
+  createTemplate,
   deleteMealGroup,
   deleteMealEntry,
   ensureDefaultMealGroups,
@@ -13,10 +15,15 @@ import {
   getRecipeById,
   getRecentQuickAddCandidates,
   getStatsPageData,
-  lookupCustomBarcodeProduct,
+  getTemplates,
+  getUserById,
+  getUserGoals,
+  getWeightPageData,
+  lookupBarcodeFoodProduct,
   markMealEntryStatus,
+  applyTemplateToDate,
   resolveProductNutritionForQuantity,
-  saveCustomBarcodeProduct,
+  saveBarcodeFoodProduct,
   saveUserGoals,
   searchFoodProducts,
   updateRecipe,
@@ -24,7 +31,7 @@ import {
   upsertUserFromShooProfile,
   type DatabaseRuntime,
 } from "../src";
-import { barcodeProducts, foodProducts, mealEntries, recipeIngredients, recipes } from "../src/schema";
+import { foodProducts, mealEntries, recipeIngredients, recipes } from "../src/schema";
 import { createTestDatabase } from "../src/testing";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -123,6 +130,39 @@ describe("database queries", () => {
             return (table: unknown) => {
               if (table === foodProducts) {
                 throw new Error("Forced barcode food product insert failure.");
+              }
+
+              return target.insert(table);
+            };
+          }
+
+          if (prop === "transaction") {
+            return async (callback: (tx: unknown) => unknown) =>
+              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
+          }
+
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    }
+
+    return wrapClient(runtime.db as any);
+  }
+
+  function createFailingMealEntryInsertDb(failOnMealEntryInsertNumber: number) {
+    let mealEntryInsertCount = 0;
+
+    function wrapClient(client: any) {
+      return new Proxy(client, {
+        get(target, prop, receiver) {
+          if (prop === "insert") {
+            return (table: unknown) => {
+              if (table === mealEntries) {
+                mealEntryInsertCount += 1;
+                if (mealEntryInsertCount === failOnMealEntryInsertNumber) {
+                  throw new Error("Forced meal entry insert failure.");
+                }
               }
 
               return target.insert(table);
@@ -605,6 +645,102 @@ describe("database queries", () => {
     expect(summary.meals[0]?.sourceLabel).toBeNull();
   });
 
+  it("prevalidates all template item product access before applying a template", async () => {
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's shake",
+        source: "manual",
+        proteinPer100: 24,
+        carbsPer100: 12,
+        fatPer100: 3,
+        caloriesPer100: 171,
+      },
+      runtime.db,
+    );
+    const template = await createTemplate(
+      userId,
+      {
+        type: "day",
+        label: "Blocked template",
+        items: [
+          {
+            label: "Accessible oats",
+            proteinG: 20,
+            carbsG: 40,
+            fatG: 8,
+            caloriesKcal: 312,
+          },
+          {
+            productId: otherProduct.id,
+            label: "Cross-user shake",
+            proteinG: 24,
+            carbsG: 12,
+            fatG: 3,
+            caloriesKcal: 171,
+          },
+        ],
+      },
+      runtime.db,
+    );
+
+    await expect(
+      applyTemplateToDate(
+        userId,
+        {
+          templateId: template.id,
+          date: "2026-05-03",
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const summary = await getDailySummary(userId, "2026-05-03", runtime.db);
+    expect(summary.meals).toHaveLength(0);
+  });
+
+  it("rolls back all template entries when one item insert fails", async () => {
+    const template = await createTemplate(
+      userId,
+      {
+        type: "day",
+        label: "Two item template",
+        items: [
+          {
+            label: "Oats",
+            proteinG: 20,
+            carbsG: 40,
+            fatG: 8,
+            caloriesKcal: 312,
+          },
+          {
+            label: "Yogurt",
+            proteinG: 25,
+            carbsG: 12,
+            fatG: 2,
+            caloriesKcal: 166,
+          },
+        ],
+      },
+      runtime.db,
+    );
+
+    await expect(
+      applyTemplateToDate(
+        userId,
+        {
+          templateId: template.id,
+          date: "2026-05-04",
+        },
+        createFailingMealEntryInsertDb(2),
+      ),
+    ).rejects.toThrow("Forced meal entry insert failure.");
+
+    const summary = await getDailySummary(userId, "2026-05-04", runtime.db);
+    expect(summary.meals).toHaveLength(0);
+  });
+
   it("rejects inaccessible recipe ingredient products on create", async () => {
     const otherUserId = await createOtherUser();
     const otherProduct = await createPersonalFoodProduct(
@@ -967,20 +1103,20 @@ describe("database queries", () => {
     };
 
     await expect(
-      saveCustomBarcodeProduct(userId, input, createFailingBarcodeFoodProductDb()),
+      saveBarcodeFoodProduct(userId, input, createFailingBarcodeFoodProductDb()),
     ).rejects.toThrow("Forced barcode food product insert failure.");
 
-    expect(await lookupCustomBarcodeProduct(input.barcode, runtime.db)).toBeNull();
-    expect(await runtime.db.select().from(barcodeProducts)).toHaveLength(0);
+    expect(await lookupBarcodeFoodProduct(input.barcode, runtime.db)).toBeNull();
     expect(await searchFoodProducts(userId, "Community Protein", runtime.db)).toEqual(
       [],
     );
 
-    const saved = await saveCustomBarcodeProduct(userId, input, runtime.db);
+    const saved = await saveBarcodeFoodProduct(userId, input, runtime.db);
     expect(saved).toMatchObject({
       barcode: input.barcode,
       name: input.name,
-      addedByUserId: userId,
+      submittedByUserId: userId,
+      sourceProvider: "community",
     });
 
     const products = await searchFoodProducts(
@@ -1146,6 +1282,113 @@ describe("database queries", () => {
       observedUseDays: 3,
       peakHourUtc: 7,
       habitCount: 3,
+    });
+  });
+
+  it("completes onboarding setup with goals, weight, starter template, and user preferences", async () => {
+    const user = await completeOnboardingSetup(
+      userId,
+      {
+        preferredWeightUnit: "lb",
+        goals: {
+          caloriesKcal: 2200,
+          proteinG: 170,
+          carbsG: 240,
+          fatG: 70,
+        },
+        goalWeightKg: 78,
+        currentWeight: {
+          date: "2026-06-20",
+          weightKg: 82.5,
+          bodyFatPct: null,
+          notes: "Onboarding",
+        },
+        starterTemplate: {
+          type: "meal",
+          label: "Greek yogurt",
+          items: [
+            {
+              label: "Greek yogurt",
+              proteinG: 30,
+              carbsG: 12,
+              fatG: 2,
+              caloriesKcal: 186,
+            },
+          ],
+        },
+      },
+      runtime.db,
+    );
+
+    expect(user).toMatchObject({
+      onboardingCompletedAt: expect.any(String),
+      preferredWeightUnit: "lb",
+    });
+    await expect(getUserGoals(userId, runtime.db)).resolves.toEqual({
+      caloriesKcal: 2200,
+      proteinG: 170,
+      carbsG: 240,
+      fatG: 70,
+    });
+    const weightData = await getWeightPageData(userId, "2026-06-20", runtime.db);
+    expect(weightData.goalWeightKg).toBe(78);
+    expect(weightData.entries).toMatchObject([
+      {
+        date: "2026-06-20",
+        weightKg: 82.5,
+        notes: "Onboarding",
+      },
+    ]);
+    await expect(getTemplates(userId, runtime.db)).resolves.toMatchObject([
+      {
+        label: "Greek yogurt",
+        type: "meal",
+      },
+    ]);
+  });
+
+  it("rolls back onboarding setup when starter template creation fails", async () => {
+    await expect(
+      completeOnboardingSetup(
+        userId,
+        {
+          preferredWeightUnit: "kg",
+          goals: {
+            caloriesKcal: 2200,
+            proteinG: 170,
+            carbsG: 240,
+            fatG: 70,
+          },
+          goalWeightKg: 78,
+          currentWeight: {
+            date: "2026-06-20",
+            weightKg: 82.5,
+            bodyFatPct: null,
+            notes: "Onboarding",
+          },
+          starterTemplate: {
+            type: "meal",
+            label: "Broken starter",
+            items: [],
+          },
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("A template must include at least one item.");
+
+    await expect(getUserGoals(userId, runtime.db)).resolves.toEqual({
+      caloriesKcal: null,
+      proteinG: null,
+      carbsG: null,
+      fatG: null,
+    });
+    const weightData = await getWeightPageData(userId, "2026-06-20", runtime.db);
+    expect(weightData.goalWeightKg).toBeNull();
+    expect(weightData.entries).toHaveLength(0);
+    await expect(getTemplates(userId, runtime.db)).resolves.toEqual([]);
+    await expect(getUserById(userId, runtime.db)).resolves.toMatchObject({
+      onboardingCompletedAt: null,
+      preferredWeightUnit: "kg",
     });
   });
 

@@ -31,6 +31,31 @@ export const FOOD_PRODUCT_SOURCE_VALUES = [
 ] as const;
 export type FoodProductSource = (typeof FOOD_PRODUCT_SOURCE_VALUES)[number];
 
+export const WEIGHT_UNIT_VALUES = ["kg", "lb"] as const;
+export type WeightUnit = (typeof WEIGHT_UNIT_VALUES)[number];
+
+export function isWeightUnit(value: string): value is WeightUnit {
+  return WEIGHT_UNIT_VALUES.includes(value as WeightUnit);
+}
+
+export const MEAL_TEMPLATE_TYPE_VALUES = ["meal", "day"] as const;
+export type MealTemplateType = (typeof MEAL_TEMPLATE_TYPE_VALUES)[number];
+
+export function isMealTemplateType(value: string): value is MealTemplateType {
+  return MEAL_TEMPLATE_TYPE_VALUES.includes(value as MealTemplateType);
+}
+
+export const FOOD_PRODUCT_REVISION_ACTION_VALUES = [
+  "created",
+  "updated",
+  "corrected",
+  "deleted",
+  "restored",
+  "imported",
+] as const;
+export type FoodProductRevisionAction =
+  (typeof FOOD_PRODUCT_REVISION_ACTION_VALUES)[number];
+
 export type MacroGoals = {
   proteinG: number | null;
   carbsG: number | null;
@@ -52,6 +77,12 @@ export type FoodProductInput = {
   caloriesPer100: number;
   servingWeightG?: number | null;
   servingVolumeMl?: number | null;
+  submittedByUserId?: string | null;
+  deletedByUserId?: string | null;
+  sourceProvider?: string | null;
+  sourceConfidence?: number | null;
+  sourceMetadata?: Record<string, unknown> | null;
+  correctedFromProductId?: string | null;
 };
 
 export type FoodProduct = Required<
@@ -74,6 +105,24 @@ export type FoodProduct = Required<
   defaultServingUnit: QuantityUnit;
   servingWeightG: number | null;
   servingVolumeMl: number | null;
+  submittedByUserId: string | null;
+  deletedByUserId: string | null;
+  sourceProvider: string | null;
+  sourceConfidence: number | null;
+  sourceMetadata: Record<string, unknown>;
+  correctedFromProductId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type FoodProductRevision = {
+  id: string;
+  productId: string;
+  actorUserId: string | null;
+  action: FoodProductRevisionAction;
+  snapshot: Record<string, unknown>;
+  createdAt: string;
 };
 
 export type MealGroup = {
@@ -181,16 +230,17 @@ export type AppUser = {
   goalCarbsG: number | null;
   goalFatG: number | null;
   goalWeightKg: number | null;
+  onboardingCompletedAt: string | null;
+  preferredWeightUnit: WeightUnit;
 };
 
-export type FoodPreset = {
-  id: string;
-  userId: string;
-  label: string;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
+export type UserPreferences = {
+  onboardingCompletedAt: string | null;
+  preferredWeightUnit: WeightUnit;
+};
+
+export type CompleteOnboardingInput = {
+  preferredWeightUnit: WeightUnit;
 };
 
 export type WeightEntryInput = {
@@ -252,20 +302,57 @@ export type RecipeRecord = {
   perPortionMacros: MacroNumbers;
 };
 
-export type CustomBarcodeProductInput = {
+export type MealTemplateItemInput = {
+  productId?: string | null;
+  mealGroupLabel?: string | null;
+  label: string;
+  quantity?: number;
+  unit?: QuantityUnit;
+  servingMultiplier?: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  caloriesKcal: number;
+};
+
+export type MealTemplateInput = {
+  type: MealTemplateType;
+  label: string;
+  notes?: string | null;
+  items: MealTemplateItemInput[];
+};
+
+export type MealTemplateItem = MealTemplateItemInput & {
+  id: string;
+  templateId: string;
+  productId: string | null;
+  mealGroupLabel: string | null;
+  quantity: number;
+  unit: QuantityUnit;
+  servingMultiplier: number;
+  sortOrder: number;
+};
+
+export type MealTemplate = {
+  id: string;
+  userId: string;
+  type: MealTemplateType;
+  label: string;
+  notes: string | null;
+  items: MealTemplateItem[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BarcodeFoodProductInput = {
   barcode: string;
   name: string;
-  brands: string;
+  brands?: string | null;
   proteinG: number;
   carbsG: number;
   fatG: number;
   caloriesKcal: number;
   servingSizeG: number | null;
-};
-
-export type CustomBarcodeProduct = CustomBarcodeProductInput & {
-  id: string;
-  addedByUserId: string | null;
 };
 
 export type AdminAuditEvent = {
@@ -325,14 +412,14 @@ export type AdminUserDetail = {
     mealEntries: number;
     weightEntries: number;
     recipes: number;
-    presets: number;
+    templates: number;
     barcodeSubmissions: number;
   };
   recentMeals: MealEntryRecord[];
   recentWeights: WeightEntryRecord[];
   recentRecipes: AdminRecipeSummary[];
-  recentPresets: FoodPreset[];
-  recentBarcodeSubmissions: AdminBarcodeRecord[];
+  recentTemplates: MealTemplate[];
+  recentBarcodeSubmissions: FoodProduct[];
 };
 
 export type AdminPagination = {
@@ -348,7 +435,7 @@ export type AdminUserListPage = {
 };
 
 export type AdminBarcodeListPage = {
-  items: AdminBarcodeRecord[];
+  items: FoodProduct[];
   pagination: AdminPagination;
 };
 
@@ -365,7 +452,7 @@ export type AdminDashboardData = {
   activeUsersLast7Days: number;
   activeBarcodeCount: number;
   deletedBarcodeCount: number;
-  recentBarcodeAdditions: AdminBarcodeRecord[];
+  recentBarcodeAdditions: FoodProduct[];
   recentAuditEvents: AdminAuditEvent[];
 };
 

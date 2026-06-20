@@ -81,7 +81,7 @@ export function AddFoodButton({
               <line x1="7.5" y1="5" x2="7.5" y2="10" />
               <line x1="5" y1="7.5" x2="10" y2="7.5" />
             </svg>
-            Preset
+            Template
           </button>
           <button
             type="button"

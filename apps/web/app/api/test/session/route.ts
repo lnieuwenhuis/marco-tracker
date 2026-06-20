@@ -1,4 +1,4 @@
-import { getDb, upsertUserFromShooProfile } from "@macro-tracker/db";
+import { completeUserOnboarding, getDb, upsertUserFromShooProfile } from "@macro-tracker/db";
 import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
@@ -102,6 +102,7 @@ async function createTestSessionResponse(
     },
     db,
   );
+  await completeUserOnboarding(user.id, { preferredWeightUnit: "kg" }, db);
   const response = options.redirectOnSuccess
     ? NextResponse.redirect(new URL("/", request.url))
     : NextResponse.json({

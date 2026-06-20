@@ -137,7 +137,7 @@ export default async function AdminBarcodesPage({
               <tr>
                 <th className="pb-3 pr-4">Product</th>
                 <th className="pb-3 pr-4">Barcode</th>
-                <th className="pb-3 pr-4">Submitter</th>
+                <th className="pb-3 pr-4">Source</th>
                 <th className="pb-3 pr-4">Status</th>
                 <th className="pb-3">Updated</th>
               </tr>
@@ -152,19 +152,27 @@ export default async function AdminBarcodesPage({
                     >
                       {item.name}
                     </Link>
-                    {item.brands ? (
-                      <p className="mt-1 text-xs text-[var(--color-muted)]">{item.brands}</p>
+                    {item.brand ? (
+                      <p className="mt-1 text-xs text-[var(--color-muted)]">{item.brand}</p>
                     ) : null}
                   </td>
                   <td className="py-3 pr-4 font-mono text-xs text-[var(--color-muted)]">
                     {item.barcode}
                   </td>
                   <td className="py-3 pr-4 text-[var(--color-muted)]">
-                    {item.addedByEmail ?? "Unknown"}
+                    <span>{item.sourceProvider ?? item.source}</span>
+                    {item.sourceConfidence != null ? (
+                      <span className="ml-1 text-xs">
+                        ({Math.round(item.sourceConfidence * 100)}%)
+                      </span>
+                    ) : null}
+                    {item.submittedByUserId ? (
+                      <p className="mt-1 font-mono text-[10px]">{item.submittedByUserId}</p>
+                    ) : null}
                   </td>
                   <td className="py-3 pr-4">
                     <span className="rounded-full bg-[var(--color-card-muted)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
-                      {item.status}
+                      {item.deletedAt ? "deleted" : "active"}
                     </span>
                   </td>
                   <td className="py-3 text-[var(--color-muted)]">

@@ -320,6 +320,7 @@ export function ExperimentalAppShell({
         open={profileOpen}
         userEmail={userEmail}
         canAccessAdmin={canAccessAdmin}
+        selectedDate={selectedDate}
         onClose={() => setProfileOpen(false)}
       />
     </>

@@ -1,8 +1,8 @@
 import type {
   DailyOverview,
   DailySummary,
-  FoodPreset,
   MacroGoals,
+  MealTemplate,
   PeriodAverage,
   QuickAddCandidate,
   RecipeRecord,
@@ -18,7 +18,7 @@ export type AppWarmupPayload = {
     canAccessAdmin: boolean;
   };
   goals: MacroGoals;
-  presets: FoodPreset[];
+  templates: MealTemplate[];
   recipes: RecipeRecord[];
   recentCandidates: QuickAddCandidate[];
   days: Record<string, DailySummary>;
@@ -32,7 +32,7 @@ export type AppWarmupPayload = {
 
 export type AppWarmupCacheKey =
   | "goals"
-  | "presets"
+  | "templates"
   | "recipes"
   | "stats"
   | `dailySummary:${string}`
@@ -57,6 +57,8 @@ export function getWarmupRoutes(selectedDate: string) {
     `/progress?date=${selectedDate}&tab=goals`,
     `/progress?date=${selectedDate}&tab=weight`,
     `/recipes?date=${selectedDate}`,
+    `/planner?date=${selectedDate}`,
+    `/library?date=${selectedDate}`,
     `/summary?date=${selectedDate}`,
   ];
 }
@@ -69,8 +71,8 @@ export function getGoalsMutationCacheKeys(date?: string): AppWarmupCacheKey[] {
   return date ? ["goals", `summary:${date}`, "stats"] : ["goals", "stats"];
 }
 
-export function getPresetMutationCacheKeys(): AppWarmupCacheKey[] {
-  return ["presets"];
+export function getTemplateMutationCacheKeys(): AppWarmupCacheKey[] {
+  return ["templates"];
 }
 
 export function getRecipeMutationCacheKeys(date?: string): AppWarmupCacheKey[] {

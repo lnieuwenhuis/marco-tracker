@@ -5,8 +5,9 @@ async function enableExperimentalUi(page: Page) {
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 }
 
-test("users can switch between default and legacy ui modes", async ({ page }) => {
+test("canonical app navigation and settings are visible", async ({ page }) => {
   await page.goto("/api/test/session?email=coach@example.com");
+  await page.goto("/?date=2026-03-19");
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
   await expect(page.getByRole("link", { name: "Food Log" })).toBeVisible();
@@ -18,10 +19,16 @@ test("users can switch between default and legacy ui modes", async ({ page }) =>
 
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByText("Theme", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Food Library" })).toHaveAttribute(
+    "href",
+    "/library?date=2026-03-19",
+  );
+  await expect(page.getByRole("link", { name: "Meal Planner" })).toHaveAttribute(
+    "href",
+    "/planner?date=2026-03-19",
+  );
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
-  await page.getByRole("switch", { name: /Legacy UI/i }).click();
-
-  await expect(page.getByRole("button", { name: "Open menu" })).toBeVisible();
+  await expect(page.getByRole("switch", { name: /Legacy UI/i })).toHaveCount(0);
 });
 
 test("experimental mode supports the bottom add flow and merged progress routes", async ({
@@ -64,7 +71,7 @@ test("experimental mode supports the bottom add flow and merged progress routes"
   await expect(page).toHaveURL(/\/summary\?date=2026-03-19/);
 });
 
-test("legacy photo estimate modal stays open while analyzing", async ({ page }) => {
+test("photo estimate modal stays open while analyzing", async ({ page }) => {
   await page.route("/api/ai/food-photo", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     await route.fulfill({
@@ -88,9 +95,6 @@ test("legacy photo estimate modal stays open while analyzing", async ({ page }) 
   });
 
   await page.goto("/api/test/session?email=user@example.com");
-  await page.getByRole("button", { name: "Open settings" }).click();
-  await page.getByRole("switch", { name: /Legacy UI/i }).click();
-  await expect(page.getByRole("button", { name: "Open menu" })).toBeVisible();
 
   await page.getByRole("button", { name: "Add food" }).click();
   await page.getByRole("button", { name: "Photo" }).click();

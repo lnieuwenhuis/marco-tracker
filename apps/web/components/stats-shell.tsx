@@ -3,16 +3,7 @@
 import type { MacroGoals, StatsPageData } from "@macro-tracker/db";
 import { useState } from "react";
 
-import { AppShell } from "./app-shell";
 import { formatShortDate } from "@/lib/formatting";
-
-type StatsShellProps = {
-  userEmail: string;
-  canAccessAdmin: boolean;
-  selectedDate: string;
-  statsData: StatsPageData;
-  goals: MacroGoals;
-};
 
 type MacroField = "caloriesKcal" | "proteinG" | "carbsG" | "fatG";
 
@@ -204,26 +195,6 @@ function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
-}
-
-export function StatsShell({
-  userEmail,
-  canAccessAdmin,
-  selectedDate,
-  statsData,
-  goals,
-}: StatsShellProps) {
-  return (
-    <AppShell
-      userEmail={userEmail}
-      canAccessAdmin={canAccessAdmin}
-      selectedDate={selectedDate}
-      activeTab="stats"
-      showDateNavigation={false}
-    >
-      <StatsPanels statsData={statsData} goals={goals} />
-    </AppShell>
-  );
 }
 
 export function StatsPanels({

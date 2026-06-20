@@ -61,7 +61,7 @@ export default async function AdminBarcodeDetailPage({
   const [barcode, audit] = await Promise.all([
     getAdminBarcodeProductById(id),
     listAdminAuditEvents({
-      targetType: "barcode_product",
+      targetType: "food_product",
       targetId: id,
       page: 1,
       pageSize: 10,
@@ -90,24 +90,24 @@ export default async function AdminBarcodeDetailPage({
 
       <AdminSection
         title={barcode.name}
-        description={`${barcode.barcode} • ${barcode.status}`}
+        description={`${barcode.barcode ?? "No barcode"} • ${barcode.deletedAt ? "deleted" : "active"}`}
       >
         <form action={updateAdminBarcodeProductAction} className="grid gap-4 lg:grid-cols-2">
           <input type="hidden" name="id" value={barcode.id} />
-          <EditField label="Barcode" name="barcode" defaultValue={barcode.barcode} required />
+          <EditField label="Barcode" name="barcode" defaultValue={barcode.barcode ?? ""} required />
           <EditField label="Name" name="name" defaultValue={barcode.name} required />
-          <EditField label="Brand" name="brands" defaultValue={barcode.brands} />
+          <EditField label="Brand" name="brands" defaultValue={barcode.brand} />
           <EditField
             label="Serving size (g)"
             name="servingSizeG"
-            defaultValue={barcode.servingSizeG ?? ""}
+            defaultValue={barcode.servingWeightG ?? ""}
             type="number"
             step="0.1"
           />
           <EditField
             label="Protein (g)"
             name="proteinG"
-            defaultValue={barcode.proteinG}
+            defaultValue={barcode.proteinPer100}
             type="number"
             step="0.1"
             required
@@ -115,7 +115,7 @@ export default async function AdminBarcodeDetailPage({
           <EditField
             label="Carbs (g)"
             name="carbsG"
-            defaultValue={barcode.carbsG}
+            defaultValue={barcode.carbsPer100}
             type="number"
             step="0.1"
             required
@@ -123,7 +123,7 @@ export default async function AdminBarcodeDetailPage({
           <EditField
             label="Fat (g)"
             name="fatG"
-            defaultValue={barcode.fatG}
+            defaultValue={barcode.fatPer100}
             type="number"
             step="0.1"
             required
@@ -131,7 +131,7 @@ export default async function AdminBarcodeDetailPage({
           <EditField
             label="Calories"
             name="caloriesKcal"
-            defaultValue={barcode.caloriesKcal}
+            defaultValue={barcode.caloriesPer100}
             type="number"
             step="1"
             required
@@ -167,13 +167,17 @@ export default async function AdminBarcodeDetailPage({
       <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
         <AdminSection title="Metadata">
           <div className="space-y-3 text-sm text-[var(--color-muted)]">
-            <p>Submitter: {barcode.addedByEmail ?? "Unknown"}</p>
+            <p>Source: {barcode.sourceProvider ?? barcode.source}</p>
+            {barcode.sourceConfidence != null ? (
+              <p>Confidence: {Math.round(barcode.sourceConfidence * 100)}%</p>
+            ) : null}
+            <p>Submitter ID: {barcode.submittedByUserId ?? "Unknown"}</p>
             <p>Created: {formatAdminTimestamp(barcode.createdAt)}</p>
             <p>Updated: {formatAdminTimestamp(barcode.updatedAt)}</p>
             <p>
               Deleted: {barcode.deletedAt ? formatAdminTimestamp(barcode.deletedAt) : "No"}
             </p>
-            {barcode.deletedByEmail ? <p>Deleted by: {barcode.deletedByEmail}</p> : null}
+            {barcode.deletedByUserId ? <p>Deleted by ID: {barcode.deletedByUserId}</p> : null}
           </div>
         </AdminSection>
 
