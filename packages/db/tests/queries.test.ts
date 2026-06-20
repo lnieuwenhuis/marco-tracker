@@ -1138,6 +1138,13 @@ describe("database queries", () => {
       caloriesPer100: 130,
       servingWeightG: 250,
     });
+
+    await expect(
+      searchFoodProducts(userId, "Macro Lab", runtime.db),
+    ).resolves.toHaveLength(1);
+    await expect(
+      searchFoodProducts(userId, input.barcode, runtime.db),
+    ).resolves.toHaveLength(1);
   });
 
   it("forces user-created products to personal scope and validates product enums", async () => {

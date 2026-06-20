@@ -601,6 +601,56 @@ export async function searchFoodProductsAction(
   }
 }
 
+type SearchFoodsResult = ActionResult & {
+  results?: MealEntryRecord[];
+  products?: FoodProduct[];
+};
+
+export async function searchFoodsAction(
+  input: { query: string },
+): Promise<SearchFoodsResult> {
+  const sessionUser = await requireSessionUser();
+  const query = input.query.trim();
+
+  if (!query) {
+    return { ok: true, results: [], products: [] };
+  }
+
+  const [historyResult, productsResult] = await Promise.allSettled([
+    searchMealEntries(sessionUser.userId, query),
+    searchFoodProducts(sessionUser.userId, query),
+  ]);
+
+  const results =
+    historyResult.status === "fulfilled" ? historyResult.value : [];
+  const products =
+    productsResult.status === "fulfilled" ? productsResult.value : [];
+
+  if (historyResult.status === "rejected" && productsResult.status === "rejected") {
+    return { ok: false, error: toActionError(historyResult.reason) };
+  }
+
+  if (historyResult.status === "rejected") {
+    return {
+      ok: true,
+      results,
+      products,
+      error: "Food history search failed, but product results are still available.",
+    };
+  }
+
+  if (productsResult.status === "rejected") {
+    return {
+      ok: true,
+      results,
+      products,
+      error: "Product search failed, but history results are still available.",
+    };
+  }
+
+  return { ok: true, results, products };
+}
+
 type SaveFoodProductResult = ActionResult & { product?: FoodProduct };
 
 export async function createFoodProductAction(

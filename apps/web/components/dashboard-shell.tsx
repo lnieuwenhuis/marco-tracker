@@ -10,7 +10,7 @@ import {
   getTemplateMutationCacheKeys,
 } from "@/lib/app-warmup";
 import type { ComposeAction } from "@/lib/compose";
-import { computeLiveTotals, computeRemaining, rankCandidates } from "@/lib/quick-add";
+import { computeLiveTotals, rankCandidates } from "@/lib/quick-add";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
 import type { OpenFoodFactsProduct } from "@/lib/openfoodfacts";
 import { getLocalDateString } from "@/lib/startup-date";
@@ -48,6 +48,13 @@ type PresetMutationState =
   | { type: "save" }
   | { type: "apply"; presetId: string }
   | { type: "update" | "delete"; presetId: string };
+
+const QUICK_ADD_ROUTINE_RANKING_REMAINING = {
+  caloriesKcal: null,
+  proteinG: null,
+  carbsG: null,
+  fatG: null,
+};
 
 function mealToDraft(meal: MealEntryRecord): MealDraft {
   return {
@@ -141,6 +148,10 @@ function toNumber(value: string, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function getNextSortOrder(drafts: MealDraft[]) {
+  return drafts.reduce((highest, draft) => Math.max(highest, draft.sortOrder), -1) + 1;
+}
+
 export function DashboardShell({
   userEmail,
   canAccessAdmin,
@@ -209,14 +220,10 @@ export function DashboardShell({
   const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null);
 
   // ---------------------------------------------------------------------------
-  // Live totals + remaining (react to unsaved drafts immediately)
+  // Live totals react to unsaved drafts immediately.
   // ---------------------------------------------------------------------------
 
   const liveTotals = useMemo(() => computeLiveTotals(drafts), [drafts]);
-  const remaining = useMemo(
-    () => computeRemaining(liveTotals, goals),
-    [liveTotals, goals],
-  );
   const todayStr = useMemo(() => getLocalDateString(), []);
   const defaultEntryStatus: MealEntryStatus =
     selectedDate > todayStr ? "planned" : "eaten";
@@ -247,21 +254,17 @@ export function DashboardShell({
   // Single unified quick-add list: ranked by routine signals, not macro fit.
   const quickAddItems = useMemo(
     () =>
-      rankCandidates(allCandidates, remaining, {
+      rankCandidates(allCandidates, QUICK_ADD_ROUTINE_RANKING_REMAINING, {
         limit: 10,
         currentHourUtc: new Date().getUTCHours(),
         referenceDate: todayStr,
       }),
-    [allCandidates, remaining, todayStr],
+    [allCandidates, todayStr],
   );
 
   // ---------------------------------------------------------------------------
   // Draft helpers
   // ---------------------------------------------------------------------------
-
-  function nextSortOrder() {
-    return drafts.reduce((highest, draft) => Math.max(highest, draft.sortOrder), -1) + 1;
-  }
 
   function updateDraft(
     clientId: string,
@@ -371,7 +374,10 @@ export function DashboardShell({
   }
 
   function addCustomDraft() {
-    setDrafts((currentDrafts) => [...currentDrafts, createEmptyDraft(nextSortOrder(), defaultEntryStatus)]);
+    setDrafts((currentDrafts) => [
+      ...currentDrafts,
+      createEmptyDraft(getNextSortOrder(currentDrafts), defaultEntryStatus),
+    ]);
   }
 
   async function addDraftFromPreset(template: MealTemplate) {
@@ -420,7 +426,7 @@ export function DashboardShell({
         carbsG: String(macros.carbsG),
         fatG: String(macros.fatG),
         caloriesKcal: String(macros.caloriesKcal),
-        sortOrder: nextSortOrder(),
+        sortOrder: getNextSortOrder(currentDrafts),
       },
     ]);
     setShowRecipePickerModal(false);
@@ -430,9 +436,12 @@ export function DashboardShell({
   function addDraftFromCandidate(candidate: QuickAddCandidate) {
     setDrafts((currentDrafts) => [
       ...currentDrafts,
-      createDraftFromCandidate(candidate, nextSortOrder(), defaultEntryStatus),
+      createDraftFromCandidate(
+        candidate,
+        getNextSortOrder(currentDrafts),
+        defaultEntryStatus,
+      ),
     ]);
-
   }
 
   function handleSearchEntrySaved(entry: MealEntryRecord) {
@@ -800,13 +809,35 @@ export function DashboardShell({
   }
 
   const isViewingToday = selectedDate === todayStr;
-  const localMealGroupIds = new Set(localMealGroups.map((group) => group.id));
-  const groupedDrafts = localMealGroups.map((group) => ({
-    group,
-    drafts: drafts.filter((draft) => draft.mealGroupId === group.id),
-  }));
-  const ungroupedDrafts = drafts.filter(
-    (draft) => !draft.mealGroupId || !localMealGroupIds.has(draft.mealGroupId),
+  const groupedDraftSections = useMemo(
+    () => {
+      const knownGroupIds = new Set(localMealGroups.map((group) => group.id));
+      const draftsByGroupId = new Map<string, MealDraft[]>();
+      const ungroupedDrafts: MealDraft[] = [];
+
+      for (const draft of drafts) {
+        if (!draft.mealGroupId || !knownGroupIds.has(draft.mealGroupId)) {
+          ungroupedDrafts.push(draft);
+          continue;
+        }
+
+        const groupDrafts = draftsByGroupId.get(draft.mealGroupId);
+        if (groupDrafts) {
+          groupDrafts.push(draft);
+        } else {
+          draftsByGroupId.set(draft.mealGroupId, [draft]);
+        }
+      }
+
+      return [
+        ...localMealGroups.map((group) => ({
+          group,
+          drafts: draftsByGroupId.get(group.id) ?? [],
+        })),
+        { group: null, drafts: ungroupedDrafts },
+      ];
+    },
+    [drafts, localMealGroups],
   );
 
   function handleDuplicate(clientId: string) {
@@ -1127,7 +1158,7 @@ export function DashboardShell({
         ) : null}
 
         <div className="space-y-5">
-          {[...groupedDrafts, { group: null, drafts: ungroupedDrafts }].map(({ group, drafts: groupDrafts }) => {
+          {groupedDraftSections.map(({ group, drafts: groupDrafts }) => {
             if (groupDrafts.length === 0) return null;
             return (
               <div key={group?.id ?? "ungrouped"} className="space-y-2">
@@ -1236,7 +1267,7 @@ export function DashboardShell({
                 carbsG: String(macros.carbsG),
                 fatG: String(macros.fatG),
                 caloriesKcal: String(macros.caloriesKcal),
-                sortOrder: nextSortOrder(),
+                sortOrder: getNextSortOrder(currentDrafts),
               },
             ]);
             invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
@@ -1282,12 +1313,12 @@ export function DashboardShell({
                 carbsG: String(macros.carbsG),
                 fatG: String(macros.fatG),
                 caloriesKcal: String(macros.caloriesKcal),
-            sortOrder: nextSortOrder(),
-          },
-        ]);
-        invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
-        setScanResult(null);
-        setNotFoundBarcode(null);
+                sortOrder: getNextSortOrder(currentDrafts),
+              },
+            ]);
+            invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
+            setScanResult(null);
+            setNotFoundBarcode(null);
           }}
           onSaveAsPreset={(input) => {
             handleSavePreset(input);

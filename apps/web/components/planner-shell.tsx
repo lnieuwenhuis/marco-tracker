@@ -2,7 +2,7 @@
 
 import type { DailySummary, MealTemplate } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useDeferredValue, useMemo, useState, useTransition } from "react";
 
 import {
   applyTemplateAction,
@@ -15,6 +15,8 @@ import {
 
 import { invalidateAppDataCache } from "./app-data-cache";
 import { ExperimentalAppShell, ExperimentalSettingsButton } from "./experimental-app-shell";
+import { LibraryHubNav } from "./library-hub-nav";
+import { TransitionLink } from "./transition-link";
 
 type PlannerShellProps = {
   userEmail: string;
@@ -47,6 +49,18 @@ export function PlannerShell({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [templateLabel, setTemplateLabel] = useState("");
+  const [templateSearch, setTemplateSearch] = useState("");
+  const deferredTemplateSearch = useDeferredValue(templateSearch);
+  const normalizedTemplateSearch = deferredTemplateSearch.trim().toLowerCase();
+  const visibleTemplates = useMemo(
+    () =>
+      normalizedTemplateSearch
+        ? templates.filter((template) =>
+            template.label.toLowerCase().includes(normalizedTemplateSearch),
+          )
+        : templates,
+    [normalizedTemplateSearch, templates],
+  );
 
   function applyTemplate(templateId: string) {
     setError(null);
@@ -115,6 +129,8 @@ export function PlannerShell({
       )}
     >
       <div className="space-y-5">
+        <LibraryHubNav active="planner" selectedDate={selectedDate} />
+
         <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -123,12 +139,13 @@ export function PlannerShell({
                 {dailySummary.meals.length} entries, {dailySummary.plannedTotals.caloriesKcal} planned kcal
               </p>
             </div>
-            <a
+            <TransitionLink
               href={`/?date=${selectedDate}`}
+              motion="screen-backward"
               className="rounded-xl border border-[var(--color-border)] px-3 py-2 text-xs font-semibold text-[var(--color-ink)] transition hover:bg-[var(--color-card-muted)]"
             >
               Open log
-            </a>
+            </TransitionLink>
           </div>
         </section>
 
@@ -156,16 +173,31 @@ export function PlannerShell({
         {error ? <p className="text-sm text-[var(--color-danger)]">{error}</p> : null}
 
         <section>
-          <h3 className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
-            Templates
-          </h3>
+          <div className="mb-3 space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
+              Templates
+            </h3>
+            {templates.length > 0 ? (
+              <input
+                type="search"
+                value={templateSearch}
+                onChange={(event) => setTemplateSearch(event.target.value)}
+                placeholder="Search templates"
+                className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
+              />
+            ) : null}
+          </div>
           {templates.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-shell-panel)] px-5 py-8 text-center">
               <p className="text-sm text-[var(--color-muted)]">No templates yet.</p>
             </div>
+          ) : visibleTemplates.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-shell-panel)] px-5 py-8 text-center">
+              <p className="text-sm text-[var(--color-muted)]">No templates found.</p>
+            </div>
           ) : (
             <div className="space-y-3">
-              {templates.map((template) => {
+              {visibleTemplates.map((template) => {
                 const totals = templateTotals(template);
                 return (
                   <article

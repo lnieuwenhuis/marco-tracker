@@ -876,9 +876,14 @@ export async function searchFoodProducts(
   }
 
   const database = await resolveDb(db);
-  const wordConditions = words.map((word) =>
-    ilike(foodProducts.name, `%${escapeLikePattern(word)}%`),
-  );
+  const wordConditions = words.map((word) => {
+    const pattern = `%${escapeLikePattern(word)}%`;
+    return or(
+      ilike(foodProducts.name, pattern),
+      ilike(foodProducts.brand, pattern),
+      ilike(foodProducts.barcode, pattern),
+    );
+  });
 
   const rows = await database
     .select({

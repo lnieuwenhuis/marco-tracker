@@ -3,6 +3,7 @@
 import type { RecipeRecord } from "@macro-tracker/db";
 
 import { ExperimentalAppShell, ExperimentalSettingsButton } from "./experimental-app-shell";
+import { LibraryHubNav } from "./library-hub-nav";
 import { RecipeCard } from "./recipe-card";
 import { TransitionLink } from "./transition-link";
 
@@ -21,6 +22,8 @@ export function RecipesShell({
 }: RecipesShellProps) {
   const content = (
     <div className="space-y-5">
+      <LibraryHubNav active="recipes" selectedDate={selectedDate} />
+
       {recipes.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-shell-panel)] px-5 py-8 text-center">
           <p className="text-sm text-[var(--color-muted)]">
