@@ -2,7 +2,7 @@
 
 import type { MealTemplate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 
 import {
   deleteTemplateAction,
@@ -94,10 +94,19 @@ export function RecipeBuilderShell({
   const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null);
 
   // Computed totals
-  const totalProteinG = ingredients.reduce((sum, ing) => sum + toNumber(ing.proteinG), 0);
-  const totalCarbsG = ingredients.reduce((sum, ing) => sum + toNumber(ing.carbsG), 0);
-  const totalFatG = ingredients.reduce((sum, ing) => sum + toNumber(ing.fatG), 0);
-  const totalCaloriesKcal = ingredients.reduce((sum, ing) => sum + toNumber(ing.caloriesKcal), 0);
+  const recipeTotals = useMemo(
+    () =>
+      ingredients.reduce(
+        (totals, ing) => ({
+          proteinG: totals.proteinG + toNumber(ing.proteinG),
+          carbsG: totals.carbsG + toNumber(ing.carbsG),
+          fatG: totals.fatG + toNumber(ing.fatG),
+          caloriesKcal: totals.caloriesKcal + toNumber(ing.caloriesKcal),
+        }),
+        { proteinG: 0, carbsG: 0, fatG: 0, caloriesKcal: 0 },
+      ),
+    [ingredients],
+  );
   const parsedPortions = Math.max(Math.round(toNumber(portions)), 1);
 
   function addEmptyIngredient() {
@@ -392,10 +401,10 @@ export function RecipeBuilderShell({
         {/* Totals */}
         {ingredients.length > 0 && (
           <RecipeTotalsBar
-            totalProteinG={totalProteinG}
-            totalCarbsG={totalCarbsG}
-            totalFatG={totalFatG}
-            totalCaloriesKcal={totalCaloriesKcal}
+            totalProteinG={recipeTotals.proteinG}
+            totalCarbsG={recipeTotals.carbsG}
+            totalFatG={recipeTotals.fatG}
+            totalCaloriesKcal={recipeTotals.caloriesKcal}
             portions={parsedPortions}
           />
         )}

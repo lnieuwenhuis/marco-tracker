@@ -1,7 +1,7 @@
 "use client";
 
 import type { RecipeRecord } from "@macro-tracker/db";
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 
 type RecipePickerModalProps = {
@@ -15,6 +15,8 @@ export function RecipePickerModal({
   onClose,
   onSelect,
 }: RecipePickerModalProps) {
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   useBodyScrollLock();
 
   useEffect(() => {
@@ -24,6 +26,21 @@ export function RecipePickerModal({
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleRecipes = useMemo(
+    () =>
+      normalizedQuery
+        ? recipes.filter((recipe) =>
+            recipe.label.toLowerCase().includes(normalizedQuery),
+          )
+        : recipes,
+    [normalizedQuery, recipes],
+  );
 
   return (
     <OverlayPortal>
@@ -59,6 +76,17 @@ export function RecipePickerModal({
           </button>
         </div>
 
+        {recipes.length > 0 ? (
+          <input
+            ref={inputRef}
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search recipes"
+            className="mb-4 w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
+          />
+        ) : null}
+
         {/* Empty state */}
         {recipes.length === 0 && (
           <p className="py-3 text-center text-sm text-[var(--color-muted)]">
@@ -66,10 +94,16 @@ export function RecipePickerModal({
           </p>
         )}
 
+        {recipes.length > 0 && visibleRecipes.length === 0 ? (
+          <p className="py-3 text-center text-sm text-[var(--color-muted)]">
+            No recipes found.
+          </p>
+        ) : null}
+
         {/* Recipe list */}
-        {recipes.length > 0 && (
+        {visibleRecipes.length > 0 && (
           <div className="space-y-2">
-            {recipes.map((recipe) => (
+            {visibleRecipes.map((recipe) => (
               <div
                 key={recipe.id}
                 className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-card-subtle)] px-3 py-2.5"

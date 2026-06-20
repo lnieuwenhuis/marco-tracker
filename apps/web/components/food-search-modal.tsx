@@ -3,8 +3,12 @@
 import type { FoodProduct, MealEntryRecord } from "@macro-tracker/db";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { saveMealEntryAction, searchFoodProductsAction, searchMealEntriesAction } from "@/lib/actions";
+import { saveMealEntryAction, searchFoodsAction } from "@/lib/actions";
 import { getDailyMutationCacheKeys } from "@/lib/app-warmup";
+import {
+  hasCurrentFoodSearchResults,
+  normalizeFoodSearchQuery,
+} from "@/lib/food-search-state";
 import { formatSelectedDate } from "@/lib/formatting";
 import { buildMealEntryCopyInput } from "@/lib/meal-entry-copy";
 import { getLocalDateString } from "@/lib/startup-date";
@@ -19,6 +23,7 @@ type FoodSearchModalProps = {
 
 export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearchModalProps) {
   const [query, setQuery] = useState("");
+  const [resultQuery, setResultQuery] = useState("");
   const [results, setResults] = useState<MealEntryRecord[]>([]);
   const [products, setProducts] = useState<FoodProduct[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -29,6 +34,18 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
   useBodyScrollLock();
 
   const todayStr = useMemo(() => getLocalDateString(), []);
+  const trimmedQuery = normalizeFoodSearchQuery(query);
+  const hasCurrentResults = hasCurrentFoodSearchResults(resultQuery, trimmedQuery);
+  const visibleResults = hasCurrentResults ? results : [];
+  const visibleProducts = hasCurrentResults ? products : [];
+  const visibleError = hasCurrentResults ? error : null;
+  const shouldShowNoResults =
+    Boolean(trimmedQuery) &&
+    hasCurrentResults &&
+    !isSearching &&
+    visibleResults.length === 0 &&
+    visibleProducts.length === 0 &&
+    !visibleError;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -45,9 +62,10 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
   }, [onClose]);
 
   useEffect(() => {
-    if (!query.trim()) {
+    if (!trimmedQuery) {
       setResults([]);
       setProducts([]);
+      setResultQuery("");
       setError(null);
       setIsSearching(false);
       return;
@@ -55,23 +73,22 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
 
     let cancelled = false;
     setIsSearching(true);
+    setError(null);
+    setResults([]);
     setProducts([]);
+    setResultQuery(trimmedQuery);
 
     const timer = setTimeout(async () => {
       try {
-        const result = await searchMealEntriesAction({ query: query.trim() });
+        const result = await searchFoodsAction({ query: trimmedQuery });
         // Guard against the component having unmounted or the query having
         // changed while the network request was in flight.
         if (cancelled) return;
-        if (result.ok && result.results) {
-          setResults(result.results);
-          const productResult = await searchFoodProductsAction({ query: query.trim() });
-          if (!cancelled && productResult.ok && productResult.products) {
-            setProducts(productResult.products);
-          } else if (!cancelled) {
-            setProducts([]);
-          }
-          setError(null);
+        setResultQuery(trimmedQuery);
+        if (result.ok) {
+          setResults(result.results ?? []);
+          setProducts(result.products ?? []);
+          setError(result.error ?? null);
         } else {
           setError(result.error ?? "Search failed.");
           setResults([]);
@@ -80,13 +97,13 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
       } finally {
         if (!cancelled) setIsSearching(false);
       }
-    }, 350);
+    }, 250);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query]);
+  }, [trimmedQuery]);
 
   async function handleCopyToToday(entry: MealEntryRecord) {
     setCopyingId(entry.id);
@@ -211,32 +228,32 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
         </div>
 
         {/* Error */}
-        {error && (
+        {visibleError && (
           <p className="mb-3 rounded-xl border border-[var(--color-danger)]/20 bg-[var(--color-danger)]/8 px-3 py-2 text-sm text-[var(--color-danger)]">
-            {error}
+            {visibleError}
           </p>
         )}
 
         {/* Prompt state */}
-        {!query.trim() && (
+        {!trimmedQuery && (
           <p className="py-4 text-center text-sm text-[var(--color-muted)]">
             Type to search across all your logged days.
           </p>
         )}
 
         {/* No results */}
-        {query.trim() && !isSearching && results.length === 0 && products.length === 0 && !error && (
+        {shouldShowNoResults && (
           <p className="py-4 text-center text-sm text-[var(--color-muted)]">
             No food items found for &ldquo;{query}&rdquo;.
           </p>
         )}
 
-        {products.length > 0 && (
+        {visibleProducts.length > 0 && (
           <div className="mb-4 space-y-2">
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
               Products
             </p>
-            {products.map((product) => (
+            {visibleProducts.map((product) => (
               <div
                 key={product.id}
                 className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-card-subtle)] px-3 py-2.5"
@@ -263,9 +280,9 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
         )}
 
         {/* Results */}
-        {results.length > 0 && (
+        {visibleResults.length > 0 && (
           <div className="space-y-2">
-            {results.map((entry) => {
+            {visibleResults.map((entry) => {
               const isCopying = copyingId === entry.id;
               const isCopied = copiedIds.has(entry.id);
 
