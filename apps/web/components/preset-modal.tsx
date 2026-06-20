@@ -13,6 +13,7 @@ import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 
 type PresetMutationState =
   | { type: "save" }
+  | { type: "apply"; presetId: string }
   | { type: "update" | "delete"; presetId: string };
 
 type PresetModalProps = {
@@ -310,10 +311,12 @@ export function PresetModal({
                   <button
                     type="button"
                     onClick={() => onSelect(preset)}
-                    disabled={mutation?.type === "delete" && mutation.presetId === preset.id}
+                    disabled={mutationsDisabled}
                     className="shrink-0 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-xs font-semibold text-white transition hover:-translate-y-0.5"
                   >
-                    Add
+                    {mutation?.type === "apply" && mutation.presetId === preset.id
+                      ? "Adding..."
+                      : "Add"}
                   </button>
 
                   {canEditPreset ? (
