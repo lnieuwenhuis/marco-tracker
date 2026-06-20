@@ -2,8 +2,9 @@
 
 import type { FoodProduct, MealTemplate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
-import { useDeferredValue, useMemo, useState, useTransition } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 
+import { filterLibraryItemsByQuery } from "@/lib/library-search";
 import { ExperimentalAppShell, ExperimentalSettingsButton } from "./experimental-app-shell";
 import { LibraryHubNav } from "./library-hub-nav";
 import { TransitionLink } from "./transition-link";
@@ -42,6 +43,10 @@ export function LibraryShell({
   const [isSearching, startSearch] = useTransition();
   const deferredSearch = useDeferredValue(search);
 
+  useEffect(() => {
+    setSearch(query);
+  }, [query]);
+
   function submitSearch(event: React.FormEvent) {
     event.preventDefault();
     const params = new URLSearchParams();
@@ -52,24 +57,13 @@ export function LibraryShell({
     });
   }
 
-  const normalizedQuery = deferredSearch.trim().toLowerCase();
   const visibleTemplates = useMemo(
-    () =>
-      normalizedQuery
-        ? templates.filter((template) =>
-            template.label.toLowerCase().includes(normalizedQuery),
-          )
-        : templates,
-    [normalizedQuery, templates],
+    () => filterLibraryItemsByQuery(templates, deferredSearch, (template) => template.label),
+    [deferredSearch, templates],
   );
   const visibleRecipes = useMemo(
-    () =>
-      normalizedQuery
-        ? recipes.filter((recipe) =>
-            recipe.label.toLowerCase().includes(normalizedQuery),
-          )
-        : recipes,
-    [normalizedQuery, recipes],
+    () => filterLibraryItemsByQuery(recipes, deferredSearch, (recipe) => recipe.label),
+    [deferredSearch, recipes],
   );
 
   return (
