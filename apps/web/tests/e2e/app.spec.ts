@@ -112,6 +112,33 @@ test("blocks non-allowlisted test logins", async ({ request }) => {
   expect(response.status()).toBe(403);
 });
 
+test("new users can calculate daily goals during setup", async ({ page }) => {
+  await page.goto("/api/test/session?email=setup@example.com&onboarded=false");
+  await expect(page).toHaveURL(/\/onboarding$/);
+  await expect(
+    page.getByRole("heading", { name: "Set up your tracker" }),
+  ).toBeVisible();
+
+  await expect(page.getByRole("heading", { name: "Macro calculator" })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "Age yrs" }).fill("30");
+  await page.getByRole("spinbutton", { name: "Height cm" }).fill("180");
+  await page.getByRole("spinbutton", { name: "Weight kg" }).fill("80");
+  await page.getByRole("button", { name: /Moderate cut/ }).click();
+  await page.getByRole("button", { name: "Apply to daily goals" }).click();
+
+  const dailyGoals = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "Daily goals" }),
+  });
+  await expect(dailyGoals.getByRole("spinbutton", { name: "Calories kcal" })).toHaveValue("2259");
+  await expect(dailyGoals.getByRole("spinbutton", { name: "Protein g" })).toHaveValue("144");
+  await expect(dailyGoals.getByRole("spinbutton", { name: "Carbs g" })).toHaveValue("210.4");
+  await expect(dailyGoals.getByRole("spinbutton", { name: "Fat g" })).toHaveValue("93.5");
+
+  await page.getByRole("button", { name: "Start tracking" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
+});
+
 test("fresh users see the current dashboard empty states", async ({
   page,
 }) => {
@@ -255,7 +282,10 @@ test("weight goal validation errors stay visible on the page", async ({
   await page.goto("/api/test/session?email=user@example.com");
   await page.goto("/weight?date=2026-03-19");
 
-  await page.getByLabel("Weight (kg)").first().fill("82.5");
+  await expect(
+    page.getByRole("heading", { name: "Log Weight" }).first(),
+  ).toBeVisible();
+  await page.locator("#weight-entry-form").getByRole("spinbutton", { name: "Weight (kg)" }).fill("82.5");
   await page.getByRole("button", { name: "Save entry" }).click();
   await expect(page.getByLabel("Target (kg)").first()).toBeVisible();
 
@@ -273,10 +303,14 @@ test("weight entries can be edited from the progress weight tab", async ({
   await page.goto("/api/test/session?email=user@example.com");
   await page.goto("/weight?date=2026-03-19");
   await expect(page).toHaveURL(/\/progress\?date=2026-03-19&tab=weight/);
+  await expect(
+    page.getByRole("heading", { name: "Log Weight" }).first(),
+  ).toBeVisible();
 
-  await page.getByLabel("Weight (kg)").first().fill("82.5");
-  await page.getByLabel("Body fat %").first().fill("18.4");
-  await page.getByLabel("Notes").first().fill("Morning");
+  const entryForm = page.locator("#weight-entry-form");
+  await entryForm.getByRole("spinbutton", { name: "Weight (kg)" }).fill("82.5");
+  await entryForm.getByRole("spinbutton", { name: "Body fat %" }).fill("18.4");
+  await entryForm.getByRole("textbox", { name: "Notes" }).fill("Morning");
   await page.getByRole("button", { name: "Save entry" }).click();
   await expect(page.getByText(/Morning/)).toBeVisible();
 
@@ -284,9 +318,9 @@ test("weight entries can be edited from the progress weight tab", async ({
   await expect(
     page.getByRole("heading", { name: "Edit Entry" }),
   ).toBeVisible();
-  await page.getByLabel("Weight (kg)").first().fill("81.9");
-  await page.getByLabel("Body fat %").first().fill("18.1");
-  await page.getByLabel("Notes").first().fill("After workout");
+  await entryForm.getByRole("spinbutton", { name: "Weight (kg)" }).fill("81.9");
+  await entryForm.getByRole("spinbutton", { name: "Body fat %" }).fill("18.1");
+  await entryForm.getByRole("textbox", { name: "Notes" }).fill("After workout");
   await page.getByRole("button", { name: "Update entry" }).click();
 
   await expect(page.getByText("81.9 kg").first()).toBeVisible();

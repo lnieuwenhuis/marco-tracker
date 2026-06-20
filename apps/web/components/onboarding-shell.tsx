@@ -10,6 +10,11 @@ import {
   parsePositiveNumber,
 } from "@/lib/onboarding-weight";
 
+import {
+  MacroCalculatorPanel,
+  formatMacroInputValue,
+  type MacroTargetDraft,
+} from "./macro-calculator-panel";
 import { ThemePicker } from "./theme-toggle";
 
 type OnboardingShellProps = {
@@ -73,6 +78,14 @@ export function OnboardingShell({
   const [templateCalories, setTemplateCalories] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  function applyCalculatedTargets(targets: MacroTargetDraft) {
+    setCalories(String(targets.caloriesKcal));
+    setProtein(formatMacroInputValue(targets.proteinG));
+    setCarbs(formatMacroInputValue(targets.carbsG));
+    setFat(formatMacroInputValue(targets.fatG));
+    setError(null);
+  }
+
   function submit() {
     setError(null);
     startTransition(async () => {
@@ -122,6 +135,12 @@ export function OnboardingShell({
         </div>
 
         <div className="space-y-4">
+          <MacroCalculatorPanel
+            disabled={isPending}
+            applyLabel="Apply to daily goals"
+            onApplyTargets={applyCalculatedTargets}
+          />
+
           <section className="rounded-[1.75rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
             <h2 className="text-sm font-bold text-[var(--color-ink)]">Daily goals</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
