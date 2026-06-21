@@ -284,6 +284,83 @@ test("stats and weight pages load without day navigation chrome", async ({
   await expect(page.getByLabel("Pick a day")).toHaveCount(0);
 });
 
+test("macro trend chart shows planned intake as a translucent projection", async ({
+  page,
+}) => {
+  const suffix = Date.now();
+  const eatenLabel = `Projected lunch ${suffix}`;
+  const plannedLabel = `Projected dinner ${suffix}`;
+  const templateLabel = `Projected day ${suffix}`;
+  const plannedDate = "2026-07-04";
+
+  await page.goto("/api/test/session?email=user@example.com");
+  await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
+  const seedResult = await page.evaluate(
+    async ({ eatenLabel, plannedLabel, templateLabel }) => {
+      const response = await fetch("/api/test/templates", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "day",
+          label: templateLabel,
+          items: [
+            {
+              label: eatenLabel,
+              proteinG: 30,
+              carbsG: 40,
+              fatG: 10,
+              caloriesKcal: 370,
+            },
+            {
+              label: plannedLabel,
+              proteinG: 25,
+              carbsG: 50,
+              fatG: 15,
+              caloriesKcal: 435,
+            },
+          ],
+        }),
+      });
+      return { ok: response.ok, status: response.status };
+    },
+    { eatenLabel, plannedLabel, templateLabel },
+  );
+  expect(seedResult).toEqual({ ok: true, status: 200 });
+
+  await page.goto(`/?date=${plannedDate}`);
+  await page.getByRole("button", { name: "From template" }).click();
+  const modal = page.getByRole("dialog", { name: "Meal Templates" });
+  await expect(modal).toBeVisible();
+  await expect(modal.getByText(templateLabel)).toBeVisible();
+  const templateRow = modal
+    .getByText(templateLabel)
+    .locator("xpath=ancestor::div[contains(@class,'flex items-center gap-2')][1]");
+  await templateRow.getByRole("button", { name: "Add" }).click();
+  await expect(modal).toBeHidden();
+
+  const eatenCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: eatenLabel }),
+  });
+  const plannedCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: plannedLabel }),
+  });
+  await expect(eatenCard).toContainText("planned");
+  await expect(plannedCard).toContainText("planned");
+  await eatenCard.getByRole("button", { name: "Mark eaten", exact: true }).click();
+  await expect(eatenCard).toContainText("eaten");
+  await expect(plannedCard).toContainText("planned");
+
+  await page.goto(`/summary?date=${plannedDate}`);
+  const trendSection = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "Calories Trend" }),
+  }).last();
+
+  await expect(trendSection).toContainText("Projected 4 Jul:");
+  await expect(trendSection).toContainText("805 kcal");
+  await expect(trendSection).toContainText("370 eaten + 435 planned");
+  expect(await trendSection.locator('svg rect[opacity="0.28"]').count()).toBeGreaterThan(0);
+});
+
 test("weight goal validation errors stay visible on the page", async ({
   page,
 }) => {

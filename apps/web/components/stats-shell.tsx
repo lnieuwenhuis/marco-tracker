@@ -77,12 +77,19 @@ function MacroTrendChart({
     );
   }
 
-  const values = last30.map((d) => d[field]);
-  const maxVal = Math.max(...values, goal ?? 0, field === "caloriesKcal" ? 100 : 10);
+  const projectedValues = last30.map((d) => d[field] + d.plannedTotals[field]);
+  const maxVal = Math.max(...projectedValues, goal ?? 0, field === "caloriesKcal" ? 100 : 10);
   const barW = 8;
   const gap = 3;
   const chartH = 72;
   const totalW = last30.length * (barW + gap) - gap;
+  const plannedReferenceDay = [...last30]
+    .reverse()
+    .find((day) => day.plannedTotals[field] > 0);
+  const formatMacroValue = (value: number) => {
+    if (field === "caloriesKcal") return String(Math.round(value));
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  };
 
   return (
     <div>
@@ -109,21 +116,49 @@ function MacroTrendChart({
           )}
           {last30.map((d, i) => {
             const value = d[field];
-            const barH = Math.max(2, (value / maxVal) * chartH);
+            const plannedValue = d.plannedTotals[field];
+            const projectedValue = value + plannedValue;
+            const eatenBarH = value > 0 ? Math.max(2, (value / maxVal) * chartH) : 0;
+            const projectedBarH = projectedValue > 0 ? Math.max(2, (projectedValue / maxVal) * chartH) : 0;
             const x = i * (barW + gap);
-            const y = chartH - barH;
+            const projectedY = chartH - projectedBarH;
+            const eatenY = chartH - eatenBarH;
             const hitGoal = goal && goal > 0 && value >= goal * 0.9;
+            const barColor = hitGoal ? "var(--color-success)" : color;
+            const title = `${formatShortDate(d.date)}: ${formatMacroValue(value)} ${unit} eaten${
+              plannedValue > 0
+                ? `, ${formatMacroValue(projectedValue)} ${unit} after planned meals`
+                : ""
+            }`;
             return (
-              <rect
-                key={d.date}
-                x={x}
-                y={y}
-                width={barW}
-                height={barH}
-                fill={hitGoal ? "var(--color-success)" : color}
-                rx="2"
-                opacity="0.85"
-              />
+              <g key={d.date}>
+                {plannedValue > 0 ? (
+                  <rect
+                    x={x}
+                    y={projectedY}
+                    width={barW}
+                    height={projectedBarH}
+                    fill={barColor}
+                    rx="2"
+                    opacity="0.28"
+                  >
+                    <title>{title}</title>
+                  </rect>
+                ) : null}
+                {value > 0 ? (
+                  <rect
+                    x={x}
+                    y={eatenY}
+                    width={barW}
+                    height={eatenBarH}
+                    fill={barColor}
+                    rx="2"
+                    opacity="0.85"
+                  >
+                    <title>{title}</title>
+                  </rect>
+                ) : null}
+              </g>
             );
           })}
         </svg>
@@ -136,7 +171,11 @@ function MacroTrendChart({
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[var(--color-muted)]">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: color, opacity: 0.85 }} />
-          Under goal
+          Eaten
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: color, opacity: 0.28 }} />
+          Planned
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-2 rounded-sm bg-[var(--color-success)] opacity-85" />
@@ -148,6 +187,16 @@ function MacroTrendChart({
           </span>
         ) : null}
       </div>
+      {plannedReferenceDay ? (
+        <p className="mt-2 text-[11px] text-[var(--color-muted)]">
+          Projected {formatShortDate(plannedReferenceDay.date)}:{" "}
+          <span className="font-semibold text-[var(--color-ink)]">
+            {formatMacroValue(plannedReferenceDay[field] + plannedReferenceDay.plannedTotals[field])} {unit}
+          </span>{" "}
+          after planned meals ({formatMacroValue(plannedReferenceDay[field])} eaten +{" "}
+          {formatMacroValue(plannedReferenceDay.plannedTotals[field])} planned).
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -212,7 +261,7 @@ export function StatsPanels({
   const macroMeta = MACRO_META[selectedMacro];
   const goalForMacro = goals[selectedMacro];
 
-  if (totalDaysTracked === 0) {
+  if (totalDaysTracked === 0 && allDailyTotals.length === 0) {
     return (
       <section className="flex min-h-[60vh] items-center justify-center">
           <div className="w-full rounded-[2rem] border border-dashed border-[var(--color-border-strong)] bg-[var(--color-surface-strong)] px-6 py-10 text-center shadow-[0_18px_44px_rgba(0,0,0,0.06)]">
@@ -351,7 +400,7 @@ export function StatsPanels({
             <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
               {macroMeta.label} Trend
             </h2>
-            <p className="mt-1 text-[11px] text-[var(--color-muted)]">Last 30 logged days</p>
+            <p className="mt-1 text-[11px] text-[var(--color-muted)]">Last 30 days with eaten or planned entries</p>
           </div>
 
           {/* Pill tab selector */}
