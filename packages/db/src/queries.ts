@@ -2018,7 +2018,7 @@ export async function getStatsPageData(
 ): Promise<StatsPageData> {
   const database = await resolveDb(db);
 
-  const [dailyRows, labelRows, goals, weights, statusRows] = await Promise.all([
+  const [dailyRows, trendRows, labelRows, goals, weights, statusRows] = await Promise.all([
     database
       .select({
         entryDate: mealEntries.entryDate,
@@ -2030,6 +2030,24 @@ export async function getStatsPageData(
       .from(mealEntries)
       .where(eatenEntryPredicate(userId))
       .groupBy(mealEntries.entryDate)
+      .orderBy(asc(mealEntries.entryDate)),
+    database
+      .select({
+        entryDate: mealEntries.entryDate,
+        status: mealEntries.status,
+        proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
+        carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
+        fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
+        caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
+      })
+      .from(mealEntries)
+      .where(
+        and(
+          eq(mealEntries.userId, userId),
+          inArray(mealEntries.status, ["eaten", "planned"]),
+        ),
+      )
+      .groupBy(mealEntries.entryDate, mealEntries.status)
       .orderBy(asc(mealEntries.entryDate)),
     database
       .select({
@@ -2073,15 +2091,50 @@ export async function getStatsPageData(
     }
   }
 
-  const allDailyTotals = dailyRows.map((row) => ({
-      date: row.entryDate,
+  const eatenDailyTotals = dailyRows.map((row) => ({
+    date: row.entryDate,
+    proteinG: roundToSingleDecimal(toNumber(row.proteinG)),
+    carbsG: roundToSingleDecimal(toNumber(row.carbsG)),
+    fatG: roundToSingleDecimal(toNumber(row.fatG)),
+    caloriesKcal: Math.round(toNumber(row.caloriesKcal)),
+  }));
+
+  const trendDaysByDate = new Map<string, StatsPageData["allDailyTotals"][number]>();
+  const getTrendDay = (date: string) => {
+    let day = trendDaysByDate.get(date);
+    if (!day) {
+      day = {
+        date,
+        ...zeroMacros(),
+        plannedTotals: zeroMacros(),
+      };
+      trendDaysByDate.set(date, day);
+    }
+    return day;
+  };
+
+  for (const row of trendRows) {
+    const day = getTrendDay(row.entryDate);
+    const totals = {
       proteinG: roundToSingleDecimal(toNumber(row.proteinG)),
       carbsG: roundToSingleDecimal(toNumber(row.carbsG)),
       fatG: roundToSingleDecimal(toNumber(row.fatG)),
       caloriesKcal: Math.round(toNumber(row.caloriesKcal)),
-    }));
+    };
+
+    if (row.status === "planned") {
+      day.plannedTotals = totals;
+    } else {
+      day.proteinG = totals.proteinG;
+      day.carbsG = totals.carbsG;
+      day.fatG = totals.fatG;
+      day.caloriesKcal = totals.caloriesKcal;
+    }
+  }
+
+  const allDailyTotals = Array.from(trendDaysByDate.values());
   const averageForDays = (days: number) => {
-    const windowRows = allDailyTotals.slice(-days);
+    const windowRows = eatenDailyTotals.slice(-days);
     if (windowRows.length === 0) return zeroMacros();
     const totals = windowRows.reduce(
       (acc, row) => ({
@@ -2100,7 +2153,7 @@ export async function getStatsPageData(
     };
   };
   const hitRatesForDays = (days: number) => {
-    const windowRows = allDailyTotals.slice(-days);
+    const windowRows = eatenDailyTotals.slice(-days);
     const minimumRate = (field: keyof MacroNumbers, goal: number | null) => {
       if (goal == null || goal <= 0 || windowRows.length === 0) return null;
       const hits = windowRows.filter((row) => row[field] >= goal * 0.9).length;
@@ -2122,7 +2175,7 @@ export async function getStatsPageData(
   };
   const calorieDeviationRows =
     goals.caloriesKcal != null
-      ? allDailyTotals.map((row) => Math.abs(row.caloriesKcal - goals.caloriesKcal!))
+      ? eatenDailyTotals.map((row) => Math.abs(row.caloriesKcal - goals.caloriesKcal!))
       : [];
   const calorieAvgAbsoluteDeviation =
     calorieDeviationRows.length > 0
@@ -2135,16 +2188,16 @@ export async function getStatsPageData(
     calorieAvgAbsoluteDeviation != null && goals.caloriesKcal
       ? Math.max(0, Math.round(100 - (calorieAvgAbsoluteDeviation / goals.caloriesKcal) * 100))
       : null;
-  const avgCalories = allDailyTotals.length > 0
-    ? Math.round(totalCaloriesKcal / allDailyTotals.length)
+  const avgCalories = eatenDailyTotals.length > 0
+    ? Math.round(totalCaloriesKcal / eatenDailyTotals.length)
     : 0;
   const averageDailyDeltaKcal =
-    goals.caloriesKcal != null && allDailyTotals.length > 0
+    goals.caloriesKcal != null && eatenDailyTotals.length > 0
       ? avgCalories - goals.caloriesKcal
       : null;
   const latestWeight = weights[weights.length - 1]?.weightKg ?? null;
-  const avgProtein = allDailyTotals.length > 0
-    ? totalProteinG / allDailyTotals.length
+  const avgProtein = eatenDailyTotals.length > 0
+    ? totalProteinG / eatenDailyTotals.length
     : 0;
   const statusCounts = new Map(statusRows.map((row) => [row.status, toNumber(row.count)]));
   const plannedCount = statusCounts.get("planned") ?? 0;

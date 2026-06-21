@@ -334,6 +334,84 @@ describe("database queries", () => {
     expect(stats.goalHitRates.days7.caloriesKcal).toBe(50);
   });
 
+  it("includes planned macros in stats trend data without counting them as eaten totals", async () => {
+    await createMealEntry(
+      userId,
+      {
+        date: "2026-03-19",
+        label: "Logged lunch",
+        sortOrder: 0,
+        proteinG: 30,
+        carbsG: 40,
+        fatG: 10,
+        caloriesKcal: 370,
+      },
+      runtime.db,
+    );
+    await createMealEntry(
+      userId,
+      {
+        date: "2026-03-19",
+        status: "planned",
+        label: "Planned dinner",
+        sortOrder: 1,
+        proteinG: 25,
+        carbsG: 50,
+        fatG: 15,
+        caloriesKcal: 435,
+      },
+      runtime.db,
+    );
+    await createMealEntry(
+      userId,
+      {
+        date: "2026-03-20",
+        status: "planned",
+        label: "Tomorrow oats",
+        sortOrder: 0,
+        proteinG: 10,
+        carbsG: 35,
+        fatG: 5,
+        caloriesKcal: 225,
+      },
+      runtime.db,
+    );
+
+    const stats = await getStatsPageData(userId, "2026-03-20", runtime.db);
+
+    expect(stats.totalDaysTracked).toBe(1);
+    expect(stats.totalCaloriesKcal).toBe(370);
+    expect(stats.rollingAverages.days7.caloriesKcal).toBe(370);
+    expect(stats.allDailyTotals).toEqual([
+      {
+        date: "2026-03-19",
+        proteinG: 30,
+        carbsG: 40,
+        fatG: 10,
+        caloriesKcal: 370,
+        plannedTotals: {
+          proteinG: 25,
+          carbsG: 50,
+          fatG: 15,
+          caloriesKcal: 435,
+        },
+      },
+      {
+        date: "2026-03-20",
+        proteinG: 0,
+        carbsG: 0,
+        fatG: 0,
+        caloriesKcal: 0,
+        plannedTotals: {
+          proteinG: 10,
+          carbsG: 35,
+          fatG: 5,
+          caloriesKcal: 225,
+        },
+      },
+    ]);
+  });
+
   it("creates, updates, and deletes meal entries while keeping totals in sync", async () => {
     const breakfast = await createMealEntry(
       userId,

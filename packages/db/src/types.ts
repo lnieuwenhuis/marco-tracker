@@ -463,6 +463,7 @@ export type StatsPageData = {
     carbsG: number;
     fatG: number;
     caloriesKcal: number;
+    plannedTotals: MacroNumbers;
   }>;
   totalDaysTracked: number;
   currentStreak: number;
