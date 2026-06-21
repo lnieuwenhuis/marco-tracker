@@ -19,9 +19,9 @@ const ACTIONS: Array<{
   icon: React.ReactNode;
 }> = [
   {
-    action: "preset",
-    label: "Preset",
-    description: "Reuse a saved meal",
+    action: "template",
+    label: "Template",
+    description: "Reuse saved items",
     icon: (
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="12" height="12" rx="2.5" />
@@ -100,6 +100,14 @@ export function ExperimentalAddSheet({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+
+      const actionIndex = Number(event.key) - 1;
+      const action = ACTIONS[actionIndex]?.action;
+      if (action) {
+        event.preventDefault();
+        onSelect(action);
       }
     }
 
@@ -122,7 +130,7 @@ export function ExperimentalAddSheet({
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [onClose, open]);
+  }, [onClose, onSelect, open]);
 
   if (!open) {
     return null;

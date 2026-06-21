@@ -5,23 +5,49 @@ async function enableExperimentalUi(page: Page) {
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 }
 
-test("users can switch between default and legacy ui modes", async ({ page }) => {
+test("canonical app navigation and settings are visible", async ({ page }) => {
   await page.goto("/api/test/session?email=coach@example.com");
+  await page.goto("/?date=2026-03-19");
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
   await expect(page.getByRole("link", { name: "Food Log" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Progress" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add food" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Recipes" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Library" })).toHaveAttribute(
+    "href",
+    "/library?date=2026-03-19",
+  );
   await expect(page.getByRole("link", { name: "Summary" })).toBeVisible();
   await expect(page.getByText("Your Records")).toHaveCount(0);
 
+  await page.getByRole("link", { name: "Library" }).click();
+  await expect(page).toHaveURL(/\/library\?date=2026-03-19$/);
+  const libraryHub = page.getByRole("navigation", { name: "Food library sections" });
+  await expect(libraryHub.getByRole("link", { name: /Food Library/ })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(libraryHub.getByRole("link", { name: /Recipes/ })).toHaveAttribute(
+    "href",
+    "/recipes?date=2026-03-19",
+  );
+  await expect(libraryHub.getByRole("link", { name: /Planner/ })).toHaveAttribute(
+    "href",
+    "/planner?date=2026-03-19",
+  );
+
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByText("Theme", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Food Library", exact: true })).toHaveAttribute(
+    "href",
+    "/library?date=2026-03-19",
+  );
+  await expect(page.getByRole("link", { name: "Meal Planner", exact: true })).toHaveAttribute(
+    "href",
+    "/planner?date=2026-03-19",
+  );
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
-  await page.getByRole("switch", { name: /Legacy UI/i }).click();
-
-  await expect(page.getByRole("button", { name: "Open menu" })).toBeVisible();
+  await expect(page.getByRole("switch", { name: /Legacy UI/i })).toHaveCount(0);
 });
 
 test("experimental mode supports the bottom add flow and merged progress routes", async ({
@@ -64,7 +90,30 @@ test("experimental mode supports the bottom add flow and merged progress routes"
   await expect(page).toHaveURL(/\/summary\?date=2026-03-19/);
 });
 
-test("legacy photo estimate modal stays open while analyzing", async ({ page }) => {
+test("goals page includes the macro calculator and applies calculated targets", async ({
+  page,
+}) => {
+  await page.goto("/api/test/session?email=user@example.com");
+  await page.goto("/progress?date=2026-03-19&tab=goals");
+
+  await expect(page.getByRole("heading", { name: "Macro calculator" })).toBeVisible();
+  await page.getByRole("spinbutton", { name: "Age yrs" }).fill("30");
+  await page.getByRole("spinbutton", { name: "Height cm" }).fill("180");
+  await page.getByRole("spinbutton", { name: "Weight kg" }).fill("80");
+  await page.getByRole("button", { name: /Moderate cut/ }).click();
+
+  await expect(page.getByText("2259 kcal").first()).toBeVisible();
+  await expect(page.getByText("144 g")).toBeVisible();
+
+  await page.getByRole("button", { name: "Apply to targets" }).click();
+
+  await expect(page.getByRole("spinbutton", { name: "Calories kcal" })).toHaveValue("2259");
+  await expect(page.getByRole("spinbutton", { name: "Protein g" })).toHaveValue("144");
+  await expect(page.getByRole("spinbutton", { name: "Carbs g" })).toHaveValue("210.4");
+  await expect(page.getByRole("spinbutton", { name: "Fat g" })).toHaveValue("93.5");
+});
+
+test("photo estimate modal stays open while analyzing", async ({ page }) => {
   await page.route("/api/ai/food-photo", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     await route.fulfill({
@@ -88,9 +137,6 @@ test("legacy photo estimate modal stays open while analyzing", async ({ page }) 
   });
 
   await page.goto("/api/test/session?email=user@example.com");
-  await page.getByRole("button", { name: "Open settings" }).click();
-  await page.getByRole("switch", { name: /Legacy UI/i }).click();
-  await expect(page.getByRole("button", { name: "Open menu" })).toBeVisible();
 
   await page.getByRole("button", { name: "Add food" }).click();
   await page.getByRole("button", { name: "Photo" }).click();

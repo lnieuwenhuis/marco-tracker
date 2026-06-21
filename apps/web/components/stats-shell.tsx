@@ -3,16 +3,7 @@
 import type { MacroGoals, StatsPageData } from "@macro-tracker/db";
 import { useState } from "react";
 
-import { AppShell } from "./app-shell";
 import { formatShortDate } from "@/lib/formatting";
-
-type StatsShellProps = {
-  userEmail: string;
-  canAccessAdmin: boolean;
-  selectedDate: string;
-  statsData: StatsPageData;
-  goals: MacroGoals;
-};
 
 type MacroField = "caloriesKcal" | "proteinG" | "carbsG" | "fatG";
 
@@ -206,26 +197,6 @@ function formatNumber(n: number): string {
   return String(n);
 }
 
-export function StatsShell({
-  userEmail,
-  canAccessAdmin,
-  selectedDate,
-  statsData,
-  goals,
-}: StatsShellProps) {
-  return (
-    <AppShell
-      userEmail={userEmail}
-      canAccessAdmin={canAccessAdmin}
-      selectedDate={selectedDate}
-      activeTab="stats"
-      showDateNavigation={false}
-    >
-      <StatsPanels statsData={statsData} goals={goals} />
-    </AppShell>
-  );
-}
-
 export function StatsPanels({
   statsData,
   goals,
@@ -300,6 +271,77 @@ export function StatsPanels({
               value={`${avgProtein}g`}
               sub="per day"
             />
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
+          <div className="mb-4">
+            <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
+              Goal Adherence
+            </h2>
+            <p className="mt-1 text-[11px] text-[var(--color-muted)]">Eaten entries only</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard
+              label="Calorie Hit Rate"
+              value={
+                statsData.goalHitRates.days30.caloriesKcal != null
+                  ? `${statsData.goalHitRates.days30.caloriesKcal}%`
+                  : "—"
+              }
+              sub="last 30 logged days"
+            />
+            <StatCard
+              label="Consistency"
+              value={
+                statsData.macroConsistency.score != null
+                  ? `${statsData.macroConsistency.score}%`
+                  : "—"
+              }
+              sub={
+                statsData.macroConsistency.calorieAvgAbsoluteDeviation != null
+                  ? `${statsData.macroConsistency.calorieAvgAbsoluteDeviation} kcal avg dev`
+                  : "set a calorie goal"
+              }
+            />
+            <StatCard
+              label="Protein / kg"
+              value={
+                statsData.proteinPerKg != null
+                  ? `${statsData.proteinPerKg}g`
+                  : "—"
+              }
+              sub="uses latest weight"
+            />
+            <StatCard
+              label="Energy Balance"
+              value={
+                statsData.estimatedEnergyBalance.averageDailyDeltaKcal != null
+                  ? `${statsData.estimatedEnergyBalance.averageDailyDeltaKcal > 0 ? "+" : ""}${statsData.estimatedEnergyBalance.averageDailyDeltaKcal}`
+                  : "—"
+              }
+              sub="kcal/day vs goal"
+            />
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
+          <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
+            Planning
+          </h2>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-xl bg-[var(--color-card-muted)] px-2 py-3">
+              <p className="text-lg font-bold text-[var(--color-ink)]">{statsData.plannedAdherence.plannedCount}</p>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-muted)]">Planned</p>
+            </div>
+            <div className="rounded-xl bg-[var(--color-card-muted)] px-2 py-3">
+              <p className="text-lg font-bold text-[var(--color-ink)]">{statsData.plannedAdherence.eatenCount}</p>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-muted)]">Eaten</p>
+            </div>
+            <div className="rounded-xl bg-[var(--color-card-muted)] px-2 py-3">
+              <p className="text-lg font-bold text-[var(--color-ink)]">{statsData.plannedAdherence.skippedCount}</p>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--color-muted)]">Skipped</p>
+            </div>
           </div>
         </section>
 

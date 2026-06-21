@@ -5,6 +5,57 @@ export type MacroNumbers = {
   caloriesKcal: number;
 };
 
+export const QUANTITY_UNIT_VALUES = ["g", "ml", "serving", "count"] as const;
+export type QuantityUnit = (typeof QUANTITY_UNIT_VALUES)[number];
+
+export function isQuantityUnit(value: string): value is QuantityUnit {
+  return QUANTITY_UNIT_VALUES.includes(value as QuantityUnit);
+}
+
+export const MEAL_ENTRY_STATUS_VALUES = ["planned", "eaten", "skipped"] as const;
+export type MealEntryStatus = (typeof MEAL_ENTRY_STATUS_VALUES)[number];
+
+export function isMealEntryStatus(value: string): value is MealEntryStatus {
+  return MEAL_ENTRY_STATUS_VALUES.includes(value as MealEntryStatus);
+}
+
+export const FOOD_PRODUCT_SCOPE_VALUES = ["global", "personal", "legacy"] as const;
+export type FoodProductScope = (typeof FOOD_PRODUCT_SCOPE_VALUES)[number];
+
+export const FOOD_PRODUCT_SOURCE_VALUES = [
+  "manual",
+  "barcode",
+  "ai_photo",
+  "legacy",
+  "recipe",
+] as const;
+export type FoodProductSource = (typeof FOOD_PRODUCT_SOURCE_VALUES)[number];
+
+export const WEIGHT_UNIT_VALUES = ["kg", "lb"] as const;
+export type WeightUnit = (typeof WEIGHT_UNIT_VALUES)[number];
+
+export function isWeightUnit(value: string): value is WeightUnit {
+  return WEIGHT_UNIT_VALUES.includes(value as WeightUnit);
+}
+
+export const MEAL_TEMPLATE_TYPE_VALUES = ["meal", "day"] as const;
+export type MealTemplateType = (typeof MEAL_TEMPLATE_TYPE_VALUES)[number];
+
+export function isMealTemplateType(value: string): value is MealTemplateType {
+  return MEAL_TEMPLATE_TYPE_VALUES.includes(value as MealTemplateType);
+}
+
+export const FOOD_PRODUCT_REVISION_ACTION_VALUES = [
+  "created",
+  "updated",
+  "corrected",
+  "deleted",
+  "restored",
+  "imported",
+] as const;
+export type FoodProductRevisionAction =
+  (typeof FOOD_PRODUCT_REVISION_ACTION_VALUES)[number];
+
 export type MacroGoals = {
   proteinG: number | null;
   carbsG: number | null;
@@ -12,25 +63,113 @@ export type MacroGoals = {
   caloriesKcal: number | null;
 };
 
-export type MealEntryInput = {
-  date: string;
+export type FoodProductInput = {
+  scope?: FoodProductScope;
+  source?: FoodProductSource;
+  barcode?: string | null;
+  name: string;
+  brand?: string | null;
+  defaultServingQuantity?: number;
+  defaultServingUnit?: QuantityUnit;
+  proteinPer100: number;
+  carbsPer100: number;
+  fatPer100: number;
+  caloriesPer100: number;
+  servingWeightG?: number | null;
+  servingVolumeMl?: number | null;
+  submittedByUserId?: string | null;
+  deletedByUserId?: string | null;
+  sourceProvider?: string | null;
+  sourceConfidence?: number | null;
+  sourceMetadata?: Record<string, unknown> | null;
+  correctedFromProductId?: string | null;
+};
+
+export type FoodProduct = Required<
+  Pick<
+    FoodProductInput,
+    | "name"
+    | "proteinPer100"
+    | "carbsPer100"
+    | "fatPer100"
+    | "caloriesPer100"
+  >
+> & {
+  id: string;
+  ownerUserId: string | null;
+  scope: FoodProductScope;
+  source: FoodProductSource;
+  barcode: string | null;
+  brand: string;
+  defaultServingQuantity: number;
+  defaultServingUnit: QuantityUnit;
+  servingWeightG: number | null;
+  servingVolumeMl: number | null;
+  submittedByUserId: string | null;
+  deletedByUserId: string | null;
+  sourceProvider: string | null;
+  sourceConfidence: number | null;
+  sourceMetadata: Record<string, unknown>;
+  correctedFromProductId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+};
+
+export type FoodProductRevision = {
+  id: string;
+  productId: string;
+  actorUserId: string | null;
+  action: FoodProductRevisionAction;
+  snapshot: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type MealGroup = {
+  id: string;
+  userId: string;
   label: string;
   sortOrder: number;
+  isDefault: boolean;
+};
+
+export type MealEntryInput = {
+  date: string;
+  mealGroupId?: string | null;
+  status?: MealEntryStatus;
+  productId?: string | null;
+  label: string;
+  sortOrder: number;
+  quantity?: number;
+  unit?: QuantityUnit;
+  servingMultiplier?: number;
   proteinG: number;
   carbsG: number;
   fatG: number;
   caloriesKcal: number;
+  clientMutationId?: string | null;
 };
 
 export type MealEntryRecord = MealEntryInput & {
   id: string;
   userId: string;
+  mealGroupId: string | null;
+  status: MealEntryStatus;
+  productId: string | null;
+  quantity: number;
+  unit: QuantityUnit;
+  servingMultiplier: number;
+  clientMutationId: string | null;
+  sourceLabel: string | null;
 };
 
 export type DailySummary = {
   date: string;
   totals: MacroNumbers;
+  plannedTotals: MacroNumbers;
+  skippedTotals: MacroNumbers;
   meals: MealEntryRecord[];
+  mealGroups: MealGroup[];
 };
 
 export type DailyOverview = {
@@ -91,16 +230,17 @@ export type AppUser = {
   goalCarbsG: number | null;
   goalFatG: number | null;
   goalWeightKg: number | null;
+  onboardingCompletedAt: string | null;
+  preferredWeightUnit: WeightUnit;
 };
 
-export type FoodPreset = {
-  id: string;
-  userId: string;
-  label: string;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
+export type UserPreferences = {
+  onboardingCompletedAt: string | null;
+  preferredWeightUnit: WeightUnit;
+};
+
+export type CompleteOnboardingInput = {
+  preferredWeightUnit: WeightUnit;
 };
 
 export type WeightEntryInput = {
@@ -127,7 +267,11 @@ export type WeightPageData = {
 };
 
 export type RecipeIngredientInput = {
+  productId?: string | null;
   label: string;
+  quantity?: number;
+  unit?: QuantityUnit;
+  servingMultiplier?: number;
   proteinG: number;
   carbsG: number;
   fatG: number;
@@ -143,6 +287,7 @@ export type RecipeIngredientRecord = RecipeIngredientInput & {
 export type RecipeInput = {
   label: string;
   portions: number;
+  totalCookedWeightG?: number | null;
   ingredients: RecipeIngredientInput[];
 };
 
@@ -151,25 +296,63 @@ export type RecipeRecord = {
   userId: string;
   label: string;
   portions: number;
+  totalCookedWeightG: number | null;
   ingredients: RecipeIngredientRecord[];
   totalMacros: MacroNumbers;
   perPortionMacros: MacroNumbers;
 };
 
-export type CustomBarcodeProductInput = {
+export type MealTemplateItemInput = {
+  productId?: string | null;
+  mealGroupLabel?: string | null;
+  label: string;
+  quantity?: number;
+  unit?: QuantityUnit;
+  servingMultiplier?: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  caloriesKcal: number;
+};
+
+export type MealTemplateInput = {
+  type: MealTemplateType;
+  label: string;
+  notes?: string | null;
+  items: MealTemplateItemInput[];
+};
+
+export type MealTemplateItem = MealTemplateItemInput & {
+  id: string;
+  templateId: string;
+  productId: string | null;
+  mealGroupLabel: string | null;
+  quantity: number;
+  unit: QuantityUnit;
+  servingMultiplier: number;
+  sortOrder: number;
+};
+
+export type MealTemplate = {
+  id: string;
+  userId: string;
+  type: MealTemplateType;
+  label: string;
+  notes: string | null;
+  items: MealTemplateItem[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BarcodeFoodProductInput = {
   barcode: string;
   name: string;
-  brands: string;
+  brands?: string | null;
   proteinG: number;
   carbsG: number;
   fatG: number;
   caloriesKcal: number;
   servingSizeG: number | null;
-};
-
-export type CustomBarcodeProduct = CustomBarcodeProductInput & {
-  id: string;
-  addedByUserId: string | null;
 };
 
 export type AdminAuditEvent = {
@@ -229,14 +412,14 @@ export type AdminUserDetail = {
     mealEntries: number;
     weightEntries: number;
     recipes: number;
-    presets: number;
+    templates: number;
     barcodeSubmissions: number;
   };
   recentMeals: MealEntryRecord[];
   recentWeights: WeightEntryRecord[];
   recentRecipes: AdminRecipeSummary[];
-  recentPresets: FoodPreset[];
-  recentBarcodeSubmissions: AdminBarcodeRecord[];
+  recentTemplates: MealTemplate[];
+  recentBarcodeSubmissions: FoodProduct[];
 };
 
 export type AdminPagination = {
@@ -252,7 +435,7 @@ export type AdminUserListPage = {
 };
 
 export type AdminBarcodeListPage = {
-  items: AdminBarcodeRecord[];
+  items: FoodProduct[];
   pagination: AdminPagination;
 };
 
@@ -269,7 +452,7 @@ export type AdminDashboardData = {
   activeUsersLast7Days: number;
   activeBarcodeCount: number;
   deletedBarcodeCount: number;
-  recentBarcodeAdditions: AdminBarcodeRecord[];
+  recentBarcodeAdditions: FoodProduct[];
   recentAuditEvents: AdminAuditEvent[];
 };
 
@@ -290,6 +473,35 @@ export type StatsPageData = {
   totalCaloriesKcal: number;
   bestCalorieDay: { date: string; caloriesKcal: number } | null;
   topLabels: Array<{ label: string; count: number }>;
+  goalHitRates: {
+    days7: Record<keyof MacroNumbers, number | null>;
+    days30: Record<keyof MacroNumbers, number | null>;
+    days90: Record<keyof MacroNumbers, number | null>;
+  };
+  macroConsistency: {
+    calorieAvgAbsoluteDeviation: number | null;
+    score: number | null;
+  };
+  rollingAverages: {
+    days7: MacroNumbers;
+    days30: MacroNumbers;
+  };
+  estimatedEnergyBalance: {
+    averageDailyDeltaKcal: number | null;
+    estimatedWeeklyWeightChangeKg: number | null;
+  };
+  proteinPerKg: number | null;
+  smoothedWeightTrend: Array<{
+    date: string;
+    weightKg: number;
+    smoothedWeightKg: number;
+  }>;
+  plannedAdherence: {
+    plannedCount: number;
+    eatenCount: number;
+    skippedCount: number;
+    adherencePct: number | null;
+  };
 };
 
 export type QuickAddSource = "preset" | "recent";

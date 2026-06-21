@@ -1,4 +1,4 @@
-import { getDb, upsertUserFromShooProfile } from "@macro-tracker/db";
+import { completeUserOnboarding, getDb, upsertUserFromShooProfile } from "@macro-tracker/db";
 import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
@@ -10,6 +10,7 @@ const TEST_LOGIN_ALLOWLIST = new Set([
   "owner@example.com",
   "admin@example.com",
   "user@example.com",
+  "setup@example.com",
 ]);
 
 async function ensureTestSchema() {
@@ -76,6 +77,7 @@ async function createTestSessionResponse(
   request: Request,
   options: {
     redirectOnSuccess: boolean;
+    onboarded: boolean;
   },
 ) {
   if (!email) {
@@ -102,6 +104,15 @@ async function createTestSessionResponse(
     },
     db,
   );
+  if (options.onboarded) {
+    await completeUserOnboarding(user.id, { preferredWeightUnit: "kg" }, db);
+  } else {
+    await db.execute(sql`
+      UPDATE "users"
+      SET "onboarding_completed_at" = NULL
+      WHERE "id" = ${user.id}
+    `);
+  }
   const response = options.redirectOnSuccess
     ? NextResponse.redirect(new URL("/", request.url))
     : NextResponse.json({
@@ -129,9 +140,11 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const email = url.searchParams.get("email")?.trim().toLowerCase();
+  const onboarded = url.searchParams.get("onboarded") !== "false";
 
   return createTestSessionResponse(email, request, {
     redirectOnSuccess: true,
+    onboarded,
   });
 }
 
@@ -140,10 +153,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
-  const body = (await request.json()) as { email?: string };
+  const body = (await request.json()) as { email?: string; onboarded?: boolean };
   const email = body.email?.trim().toLowerCase();
 
   return createTestSessionResponse(email, request, {
     redirectOnSuccess: false,
+    onboarded: body.onboarded !== false,
   });
 }

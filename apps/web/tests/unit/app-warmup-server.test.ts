@@ -21,16 +21,21 @@ const zeroGoals: MacroGoals = {
   fatG: null,
 };
 
+const zeroMacros = {
+  caloriesKcal: 0,
+  proteinG: 0,
+  carbsG: 0,
+  fatG: 0,
+};
+
 function buildSummary(date: string): DailySummary {
   return {
     date,
-    totals: {
-      caloriesKcal: 0,
-      proteinG: 0,
-      carbsG: 0,
-      fatG: 0,
-    },
+    totals: zeroMacros,
+    plannedTotals: zeroMacros,
+    skippedTotals: zeroMacros,
     meals: [],
+    mealGroups: [],
   };
 }
 
@@ -49,6 +54,8 @@ function buildUser(overrides?: Partial<AppUser>): AppUser {
     goalCarbsG: null,
     goalFatG: null,
     goalWeightKg: null,
+    onboardingCompletedAt: "2026-03-01T00:00:00.000Z",
+    preferredWeightUnit: "kg",
     ...overrides,
   };
 }
@@ -79,6 +86,31 @@ const statsData: StatsPageData = {
   totalCaloriesKcal: 0,
   bestCalorieDay: null,
   topLabels: [],
+  goalHitRates: {
+    days7: zeroGoals,
+    days30: zeroGoals,
+    days90: zeroGoals,
+  },
+  macroConsistency: {
+    calorieAvgAbsoluteDeviation: null,
+    score: null,
+  },
+  rollingAverages: {
+    days7: zeroMacros,
+    days30: zeroMacros,
+  },
+  estimatedEnergyBalance: {
+    averageDailyDeltaKcal: null,
+    estimatedWeeklyWeightChangeKg: null,
+  },
+  proteinPerKg: null,
+  smoothedWeightTrend: [],
+  plannedAdherence: {
+    plannedCount: 0,
+    eatenCount: 0,
+    skippedCount: 0,
+    adherencePct: null,
+  },
 };
 
 const weight: WeightPageData = {
@@ -96,7 +128,7 @@ function buildDeps(overrides?: Partial<AppWarmupBuilderDeps>): AppWarmupBuilderD
   return {
     getUserById: vi.fn().mockResolvedValue(buildUser({ role: "admin" })),
     getUserGoals: vi.fn().mockResolvedValue(zeroGoals),
-    getPresets: vi.fn().mockResolvedValue([]),
+    getTemplates: vi.fn().mockResolvedValue([]),
     getRecipes: vi.fn().mockResolvedValue([]),
     getRecentQuickAddCandidates: vi.fn().mockResolvedValue([]),
     getDailySummary: vi.fn(async (_userId: string, date: string) => buildSummary(date)),

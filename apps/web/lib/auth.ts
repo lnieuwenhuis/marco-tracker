@@ -58,6 +58,23 @@ export async function requireSessionUser() {
   return user;
 }
 
+export async function requireOnboardedSessionUser() {
+  const user = await getCurrentAppUser();
+
+  if (!user) {
+    redirect("/api/auth/logout?expired=1");
+  }
+
+  if (!user.onboardingCompletedAt) {
+    redirect("/onboarding");
+  }
+
+  return {
+    userId: user.id,
+    email: user.email,
+  };
+}
+
 export async function requireAdminUser() {
   const user = await getCurrentAppUser();
 

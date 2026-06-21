@@ -1,26 +1,24 @@
 "use client";
 
-import type { FoodPreset, RecipeRecord } from "@macro-tracker/db";
+import type { MealTemplate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 
 import {
-  deletePresetAction,
-  savePresetAction,
+  deleteTemplateAction,
+  saveTemplateAction,
   saveRecipeAction,
-  updatePresetAction,
+  updateTemplateAction,
 } from "@/lib/actions";
 import {
-  getPresetMutationCacheKeys,
+  getTemplateMutationCacheKeys,
   getRecipeMutationCacheKeys,
 } from "@/lib/app-warmup";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
 import type { OpenFoodFactsProduct } from "@/lib/openfoodfacts";
-import type { UiMode } from "@/lib/ui-mode";
 
 import { AddFoodButton } from "./add-food-button";
 import { invalidateAppDataCache } from "./app-data-cache";
-import { AppShell } from "./app-shell";
 import { BarcodeResult } from "./barcode-result";
 import { BarcodeScanner } from "./barcode-scanner";
 import { ExperimentalAppShell } from "./experimental-app-shell";
@@ -36,10 +34,9 @@ type RecipeBuilderShellProps = {
   userEmail: string;
   canAccessAdmin: boolean;
   selectedDate: string;
-  presets: FoodPreset[];
+  templates: MealTemplate[];
   mode: "create" | "edit";
   recipe?: RecipeRecord;
-  uiMode?: UiMode;
 };
 
 function toNumber(value: string) {
@@ -51,10 +48,9 @@ export function RecipeBuilderShell({
   userEmail,
   canAccessAdmin,
   selectedDate,
-  presets: initialPresets,
+  templates: initialTemplates,
   mode,
   recipe,
-  uiMode = "experimental",
 }: RecipeBuilderShellProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -62,13 +58,20 @@ export function RecipeBuilderShell({
   // Recipe fields
   const [label, setLabel] = useState(recipe?.label ?? "");
   const [portions, setPortions] = useState(String(recipe?.portions ?? 1));
+  const [totalCookedWeightG, setTotalCookedWeightG] = useState(
+    recipe?.totalCookedWeightG != null ? String(recipe.totalCookedWeightG) : "",
+  );
 
   // Ingredients
   const [ingredients, setIngredients] = useState<IngredientDraft[]>(() => {
     if (!recipe) return [];
     return recipe.ingredients.map((ing) => ({
       clientId: `ing-${ing.id}`,
+      productId: ing.productId ?? null,
       label: ing.label,
+      quantity: String(ing.quantity ?? 1),
+      unit: ing.unit ?? "serving",
+      servingMultiplier: String(ing.servingMultiplier ?? 1),
       proteinG: String(ing.proteinG),
       carbsG: String(ing.carbsG),
       fatG: String(ing.fatG),
@@ -81,7 +84,7 @@ export function RecipeBuilderShell({
 
   // Presets state
   const [showPresetsModal, setShowPresetsModal] = useState(false);
-  const [localPresets, setLocalPresets] = useState<FoodPreset[]>(initialPresets);
+  const [localTemplates, setLocalTemplates] = useState<MealTemplate[]>(initialTemplates);
   const [presetMutation, setPresetMutation] = useState<PresetMutationState | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
 
@@ -91,10 +94,19 @@ export function RecipeBuilderShell({
   const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null);
 
   // Computed totals
-  const totalProteinG = ingredients.reduce((sum, ing) => sum + toNumber(ing.proteinG), 0);
-  const totalCarbsG = ingredients.reduce((sum, ing) => sum + toNumber(ing.carbsG), 0);
-  const totalFatG = ingredients.reduce((sum, ing) => sum + toNumber(ing.fatG), 0);
-  const totalCaloriesKcal = ingredients.reduce((sum, ing) => sum + toNumber(ing.caloriesKcal), 0);
+  const recipeTotals = useMemo(
+    () =>
+      ingredients.reduce(
+        (totals, ing) => ({
+          proteinG: totals.proteinG + toNumber(ing.proteinG),
+          carbsG: totals.carbsG + toNumber(ing.carbsG),
+          fatG: totals.fatG + toNumber(ing.fatG),
+          caloriesKcal: totals.caloriesKcal + toNumber(ing.caloriesKcal),
+        }),
+        { proteinG: 0, carbsG: 0, fatG: 0, caloriesKcal: 0 },
+      ),
+    [ingredients],
+  );
   const parsedPortions = Math.max(Math.round(toNumber(portions)), 1);
 
   function addEmptyIngredient() {
@@ -103,6 +115,9 @@ export function RecipeBuilderShell({
       {
         clientId: `ing-${crypto.randomUUID()}`,
         label: "",
+        quantity: "1",
+        unit: "serving",
+        servingMultiplier: "1",
         proteinG: "",
         carbsG: "",
         fatG: "",
@@ -111,17 +126,21 @@ export function RecipeBuilderShell({
     ]);
   }
 
-  function addIngredientFromPreset(preset: FoodPreset) {
+  function addIngredientFromPreset(template: MealTemplate) {
     setIngredients((prev) => [
       ...prev,
-      {
+      ...template.items.map((item) => ({
         clientId: `ing-${crypto.randomUUID()}`,
-        label: preset.label,
-        proteinG: String(preset.proteinG),
-        carbsG: String(preset.carbsG),
-        fatG: String(preset.fatG),
-        caloriesKcal: String(preset.caloriesKcal),
-      },
+        productId: item.productId ?? null,
+        label: item.label,
+        quantity: String(item.quantity),
+        unit: item.unit,
+        servingMultiplier: String(item.servingMultiplier),
+        proteinG: String(item.proteinG),
+        carbsG: String(item.carbsG),
+        fatG: String(item.fatG),
+        caloriesKcal: String(item.caloriesKcal),
+      })),
     ]);
     setShowPresetsModal(false);
   }
@@ -159,8 +178,15 @@ export function RecipeBuilderShell({
         id: recipe?.id,
         label,
         portions: parsedPortions,
+        totalCookedWeightG: totalCookedWeightG.trim()
+          ? Math.max(toNumber(totalCookedWeightG), 0)
+          : null,
         ingredients: ingredients.map((ing) => ({
+          productId: ing.productId ?? null,
           label: ing.label,
+          quantity: toNumber(ing.quantity || "1"),
+          unit: ing.unit ?? "serving",
+          servingMultiplier: toNumber(ing.servingMultiplier || "1"),
           proteinG: toNumber(ing.proteinG),
           carbsG: toNumber(ing.carbsG),
           fatG: toNumber(ing.fatG),
@@ -182,20 +208,26 @@ export function RecipeBuilderShell({
   }
 
   // Preset handlers
-  async function handleSavePreset(input: Omit<FoodPreset, "id" | "userId">) {
+  async function handleSavePreset(input: {
+    label: string;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+    caloriesKcal: number;
+  }) {
     setPresetError(null);
     setPresetMutation({ type: "save" });
     try {
-      const result = await savePresetAction(input);
-      const savedPreset = result.preset;
-      if (!result.ok || !savedPreset) {
-        setPresetError(result.error ?? "Unable to save preset.");
+      const result = await saveTemplateAction(input);
+      const savedTemplate = result.template;
+      if (!result.ok || !savedTemplate) {
+        setPresetError(result.error ?? "Unable to save template.");
         return false;
       }
-      setLocalPresets((prev) =>
-        [...prev, savedPreset].sort((a, b) => a.label.localeCompare(b.label)),
+      setLocalTemplates((prev) =>
+        [...prev, savedTemplate].sort((a, b) => a.label.localeCompare(b.label)),
       );
-      invalidateAppDataCache(getPresetMutationCacheKeys());
+      invalidateAppDataCache(getTemplateMutationCacheKeys());
       return true;
     } finally {
       setPresetMutation(null);
@@ -203,40 +235,46 @@ export function RecipeBuilderShell({
   }
 
   async function handleDeletePreset(presetId: string) {
-    const previousPresets = localPresets;
+    const previousTemplates = localTemplates;
     setPresetError(null);
     setPresetMutation({ type: "delete", presetId });
-    setLocalPresets((prev) => prev.filter((p) => p.id !== presetId));
+    setLocalTemplates((prev) => prev.filter((p) => p.id !== presetId));
     try {
-      const result = await deletePresetAction({ id: presetId });
+      const result = await deleteTemplateAction({ id: presetId });
       if (!result.ok) {
-        setLocalPresets(previousPresets);
-        setPresetError(result.error ?? "Unable to delete preset.");
+        setLocalTemplates(previousTemplates);
+        setPresetError(result.error ?? "Unable to delete template.");
         return false;
       }
-      invalidateAppDataCache(getPresetMutationCacheKeys());
+      invalidateAppDataCache(getTemplateMutationCacheKeys());
       return true;
     } finally {
       setPresetMutation(null);
     }
   }
 
-  async function handleUpdatePreset(id: string, input: Omit<FoodPreset, "id" | "userId">) {
+  async function handleUpdatePreset(id: string, input: {
+    label: string;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+    caloriesKcal: number;
+  }) {
     setPresetError(null);
     setPresetMutation({ type: "update", presetId: id });
     try {
-      const result = await updatePresetAction({ id, ...input });
-      const updatedPreset = result.preset;
-      if (!result.ok || !updatedPreset) {
-        setPresetError(result.error ?? "Unable to update preset.");
+      const result = await updateTemplateAction({ id, ...input });
+      const updatedTemplate = result.template;
+      if (!result.ok || !updatedTemplate) {
+        setPresetError(result.error ?? "Unable to update template.");
         return false;
       }
-      setLocalPresets((prev) =>
+      setLocalTemplates((prev) =>
         prev
-          .map((preset) => (preset.id === id ? updatedPreset : preset))
+          .map((preset) => (preset.id === id ? updatedTemplate : preset))
           .sort((a, b) => a.label.localeCompare(b.label)),
       );
-      invalidateAppDataCache(getPresetMutationCacheKeys());
+      invalidateAppDataCache(getTemplateMutationCacheKeys());
       return true;
     } finally {
       setPresetMutation(null);
@@ -278,6 +316,25 @@ export function RecipeBuilderShell({
               className="w-28 rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
             />
           </label>
+          <label className="mt-3 block">
+            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
+              Cooked weight
+            </span>
+            <div className="relative w-36">
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="1"
+                value={totalCookedWeightG}
+                disabled={isPending}
+                onChange={(e) => { setTotalCookedWeightG(e.target.value); setError(null); }}
+                placeholder="Optional"
+                className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-9 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--color-muted)]">g</span>
+            </div>
+          </label>
         </section>
 
         {/* Ingredients */}
@@ -314,7 +371,7 @@ export function RecipeBuilderShell({
                   }}
                   className="rounded-full border border-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-[var(--color-accent)] transition hover:-translate-y-0.5"
                 >
-                  From preset
+                  From template
                 </button>
                 <button
                   type="button"
@@ -344,10 +401,10 @@ export function RecipeBuilderShell({
         {/* Totals */}
         {ingredients.length > 0 && (
           <RecipeTotalsBar
-            totalProteinG={totalProteinG}
-            totalCarbsG={totalCarbsG}
-            totalFatG={totalFatG}
-            totalCaloriesKcal={totalCaloriesKcal}
+            totalProteinG={recipeTotals.proteinG}
+            totalCarbsG={recipeTotals.carbsG}
+            totalFatG={recipeTotals.fatG}
+            totalCaloriesKcal={recipeTotals.caloriesKcal}
             portions={parsedPortions}
           />
         )}
@@ -387,7 +444,7 @@ export function RecipeBuilderShell({
       {/* Presets modal */}
       {showPresetsModal && (
         <PresetModal
-          presets={localPresets}
+          presets={localTemplates}
           mutation={presetMutation}
           errorMessage={presetError}
           onClose={() => {
@@ -429,6 +486,9 @@ export function RecipeBuilderShell({
               {
                 clientId: `ing-${crypto.randomUUID()}`,
                 label: macros.label,
+                quantity: "1",
+                unit: "serving",
+                servingMultiplier: "1",
                 proteinG: String(macros.proteinG),
                 carbsG: String(macros.carbsG),
                 fatG: String(macros.fatG),
@@ -455,7 +515,7 @@ export function RecipeBuilderShell({
     </>
   );
 
-  return uiMode === "experimental" ? (
+  return (
     <ExperimentalAppShell
       userEmail={userEmail}
       canAccessAdmin={canAccessAdmin}
@@ -465,14 +525,5 @@ export function RecipeBuilderShell({
     >
       {content}
     </ExperimentalAppShell>
-  ) : (
-    <AppShell
-      userEmail={userEmail}
-      canAccessAdmin={canAccessAdmin}
-      selectedDate={selectedDate}
-      activeTab="recipes"
-    >
-      {content}
-    </AppShell>
   );
 }

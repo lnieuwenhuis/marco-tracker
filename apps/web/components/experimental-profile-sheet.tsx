@@ -5,12 +5,12 @@ import { useEffect, useRef } from "react";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 import { ThemePicker } from "./theme-toggle";
 import { TransitionLink } from "./transition-link";
-import { UiModeToggle } from "./ui-mode-toggle";
 
 type ExperimentalProfileSheetProps = {
   open: boolean;
   userEmail: string;
   canAccessAdmin: boolean;
+  selectedDate: string;
   onClose: () => void;
 };
 
@@ -18,6 +18,7 @@ export function ExperimentalProfileSheet({
   open,
   userEmail,
   canAccessAdmin,
+  selectedDate,
   onClose,
 }: ExperimentalProfileSheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -74,7 +75,7 @@ export function ExperimentalProfileSheet({
                   Settings
                 </p>
                 <p className="mt-1 text-sm text-[var(--color-muted)]">
-                  Themes, account, and UI mode.
+                  Themes and account.
                 </p>
               </div>
               <button
@@ -92,11 +93,29 @@ export function ExperimentalProfileSheet({
 
             <div className="flex-1 space-y-5 overflow-y-auto py-5">
               <ThemePicker />
+
               <div className="space-y-2.5">
                 <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-muted-strong)]">
-                  Interface
+                  Library
                 </span>
-                <UiModeToggle onModeChange={onClose} />
+                <TransitionLink
+                  href={`/library?date=${selectedDate}`}
+                  motion="screen"
+                  onClick={onClose}
+                  className="flex items-center justify-between rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-sm font-semibold text-[var(--color-ink)] transition hover:bg-[var(--color-card-muted)]"
+                >
+                  Food Library
+                  <span aria-hidden="true">+</span>
+                </TransitionLink>
+                <TransitionLink
+                  href={`/planner?date=${selectedDate}`}
+                  motion="screen"
+                  onClick={onClose}
+                  className="flex items-center justify-between rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-sm font-semibold text-[var(--color-ink)] transition hover:bg-[var(--color-card-muted)]"
+                >
+                  Meal Planner
+                  <span aria-hidden="true">+</span>
+                </TransitionLink>
               </div>
 
               {canAccessAdmin ? (

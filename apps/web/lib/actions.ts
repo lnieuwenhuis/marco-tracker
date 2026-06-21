@@ -2,30 +2,42 @@
 
 import {
   createMealEntry,
-  createPreset,
+  createMealGroup,
+  createPersonalFoodProduct,
   createRecipe,
+  createTemplate,
+  createTemplateFromDate,
+  completeOnboardingSetup,
+  deleteMealGroup,
   createWeightEntry,
   deleteMealEntry,
-  deletePreset,
   deleteRecipe,
+  deleteTemplate,
   deleteWeightEntry,
   getLeaderboardStats,
   getRecipeById,
-  saveCustomBarcodeProduct,
+  getTemplateById,
+  markMealEntryStatus,
+  applyTemplateToDate,
+  reorderMealGroups,
+  saveBarcodeFoodProduct,
   saveUserGoals,
   saveWeightGoal,
+  searchFoodProducts,
   searchMealEntries,
-  touchPresetLastUsed,
+  updateMealGroup,
   updateMealEntry,
-  updatePreset,
+  updatePersonalFoodProduct,
   updateRecipe,
+  updateTemplate,
   updateWeightEntry,
   isValidDateString,
 } from "@macro-tracker/db";
-import type { CustomBarcodeProduct, FoodPreset, LeaderboardStats, MealEntryRecord, RecipeRecord } from "@macro-tracker/db";
+import type { BarcodeFoodProductInput, FoodProduct, FoodProductInput, LeaderboardStats, MealEntryRecord, MealEntryStatus, MealGroup, MealTemplate, QuantityUnit, RecipeRecord, WeightUnit } from "@macro-tracker/db";
 import { revalidatePath } from "next/cache";
 
 import { requireSessionUser } from "./auth";
+import { getLocalDateString } from "./startup-date";
 
 type ActionResult = {
   ok: boolean;
@@ -35,12 +47,19 @@ type ActionResult = {
 type SaveMealEntryInput = {
   id?: string;
   date: string;
+  mealGroupId?: string | null;
+  status?: MealEntryStatus;
+  productId?: string | null;
   label: string;
   sortOrder?: number;
+  quantity?: number;
+  unit?: QuantityUnit;
+  servingMultiplier?: number;
   proteinG: number;
   carbsG: number;
   fatG: number;
   caloriesKcal: number;
+  clientMutationId?: string | null;
 };
 
 function toActionError(error: unknown) {
@@ -66,21 +85,35 @@ export async function saveMealEntryAction(
     const entry = input.id
       ? await updateMealEntry(sessionUser.userId, input.id, {
           date: input.date,
+          mealGroupId: input.mealGroupId,
+          status: input.status,
+          productId: input.productId,
           label: input.label,
           sortOrder: input.sortOrder ?? 0,
+          quantity: input.quantity,
+          unit: input.unit,
+          servingMultiplier: input.servingMultiplier,
           proteinG: input.proteinG,
           carbsG: input.carbsG,
           fatG: input.fatG,
           caloriesKcal: input.caloriesKcal,
+          clientMutationId: input.clientMutationId,
         })
       : await createMealEntry(sessionUser.userId, {
           date: input.date,
+          mealGroupId: input.mealGroupId,
+          status: input.status,
+          productId: input.productId,
           label: input.label,
           sortOrder: input.sortOrder,
+          quantity: input.quantity,
+          unit: input.unit,
+          servingMultiplier: input.servingMultiplier,
           proteinG: input.proteinG,
           carbsG: input.carbsG,
           fatG: input.fatG,
           caloriesKcal: input.caloriesKcal,
+          clientMutationId: input.clientMutationId,
         });
 
     revalidatePath("/", "page");
@@ -90,6 +123,24 @@ export async function saveMealEntryAction(
       ok: false,
       error: toActionError(error),
     };
+  }
+}
+
+export async function markMealEntryStatusAction(
+  input: { id: string; status: MealEntryStatus },
+): Promise<SaveMealEntryResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const entry = await markMealEntryStatus(
+      sessionUser.userId,
+      input.id,
+      input.status,
+    );
+    revalidatePath("/", "page");
+    return { ok: true, entry };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
   }
 }
 
@@ -111,6 +162,65 @@ export async function deleteMealEntryAction(
       ok: false,
       error: toActionError(error),
     };
+  }
+}
+
+type MealGroupResult = ActionResult & { group?: MealGroup; groups?: MealGroup[] };
+
+export async function createMealGroupAction(
+  input: { label: string },
+): Promise<MealGroupResult> {
+  const sessionUser = await requireSessionUser();
+  try {
+    const group = await createMealGroup(sessionUser.userId, input);
+    revalidatePath("/", "page");
+    return { ok: true, group };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function updateMealGroupAction(
+  input: { id: string; label: string },
+): Promise<MealGroupResult> {
+  const sessionUser = await requireSessionUser();
+  try {
+    const group = await updateMealGroup(sessionUser.userId, input.id, {
+      label: input.label,
+    });
+    revalidatePath("/", "page");
+    return { ok: true, group };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function deleteMealGroupAction(
+  input: { id: string },
+): Promise<ActionResult> {
+  const sessionUser = await requireSessionUser();
+  try {
+    const deleted = await deleteMealGroup(sessionUser.userId, input.id);
+    if (!deleted) {
+      return { ok: false, error: "Meal group not found." };
+    }
+    revalidatePath("/", "page");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function reorderMealGroupsAction(
+  input: { orderedIds: string[] },
+): Promise<MealGroupResult> {
+  const sessionUser = await requireSessionUser();
+  try {
+    const groups = await reorderMealGroups(sessionUser.userId, input.orderedIds);
+    revalidatePath("/", "page");
+    return { ok: true, groups };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
   }
 }
 
@@ -136,27 +246,113 @@ export async function saveGoalsAction(input: SaveGoalsInput): Promise<ActionResu
   }
 }
 
-type SavePresetInput = Omit<FoodPreset, "id" | "userId">;
-type SavePresetResult = ActionResult & { preset?: FoodPreset };
+type CompleteOnboardingActionInput = {
+  preferredWeightUnit: WeightUnit;
+  goals: SaveGoalsInput;
+  goalWeightKg: number | null;
+  currentWeightKg: number | null;
+  currentWeightDate: string;
+  starterTemplate:
+    | {
+        label: string;
+        proteinG: number;
+        carbsG: number;
+        fatG: number;
+        caloriesKcal: number;
+      }
+    | null;
+};
 
-export async function savePresetAction(input: SavePresetInput): Promise<SavePresetResult> {
+export async function completeOnboardingAction(
+  input: CompleteOnboardingActionInput,
+): Promise<ActionResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    const preset = await createPreset(sessionUser.userId, input);
-    return { ok: true, preset };
+    const currentWeight =
+      input.currentWeightKg != null &&
+      Number.isFinite(input.currentWeightKg) &&
+      input.currentWeightKg > 0
+        ? {
+            date: input.currentWeightDate,
+            weightKg: input.currentWeightKg,
+            bodyFatPct: null,
+            notes: "Onboarding",
+          }
+        : null;
+    const starterTemplate = input.starterTemplate?.label.trim()
+      ? singleFoodTemplateInput(input.starterTemplate)
+      : null;
+
+    await completeOnboardingSetup(sessionUser.userId, {
+      preferredWeightUnit: input.preferredWeightUnit,
+      goals: input.goals,
+      goalWeightKg: input.goalWeightKg,
+      currentWeight,
+      starterTemplate,
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true };
   } catch (error) {
     return { ok: false, error: toActionError(error) };
   }
 }
 
-export async function deletePresetAction(input: { id: string }): Promise<ActionResult> {
+type SaveTemplateInput = {
+  label: string;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  caloriesKcal: number;
+};
+type SaveTemplateResult = ActionResult & { template?: MealTemplate };
+
+function singleFoodTemplateInput(
+  input: SaveTemplateInput,
+  existingItem?: MealTemplate["items"][number],
+) {
+  return {
+    type: "meal" as const,
+    label: input.label,
+    items: [
+      {
+        productId: existingItem?.productId ?? null,
+        mealGroupLabel: existingItem?.mealGroupLabel ?? null,
+        label: input.label,
+        quantity: existingItem?.quantity ?? 1,
+        unit: existingItem?.unit ?? "serving" as const,
+        servingMultiplier: existingItem?.servingMultiplier ?? 1,
+        proteinG: input.proteinG,
+        carbsG: input.carbsG,
+        fatG: input.fatG,
+        caloriesKcal: input.caloriesKcal,
+      },
+    ],
+  };
+}
+
+export async function saveTemplateAction(input: SaveTemplateInput): Promise<SaveTemplateResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    const deleted = await deletePreset(sessionUser.userId, input.id);
+    const template = await createTemplate(
+      sessionUser.userId,
+      singleFoodTemplateInput(input),
+    );
+    return { ok: true, template };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function deleteTemplateAction(input: { id: string }): Promise<ActionResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const deleted = await deleteTemplate(sessionUser.userId, input.id);
     if (!deleted) {
-      return { ok: false, error: "Preset not found." };
+      return { ok: false, error: "Template not found." };
     }
 
     return { ok: true };
@@ -165,34 +361,64 @@ export async function deletePresetAction(input: { id: string }): Promise<ActionR
   }
 }
 
-type UpdatePresetInput = { id: string } & Omit<FoodPreset, "id" | "userId">;
-type UpdatePresetResult = ActionResult & { preset?: FoodPreset };
+type UpdateTemplateInput = { id: string } & SaveTemplateInput;
+type UpdateTemplateResult = ActionResult & { template?: MealTemplate };
 
-export async function updatePresetAction(input: UpdatePresetInput): Promise<UpdatePresetResult> {
+export async function updateTemplateAction(input: UpdateTemplateInput): Promise<UpdateTemplateResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    const preset = await updatePreset(sessionUser.userId, input.id, {
-      label: input.label,
-      proteinG: input.proteinG,
-      carbsG: input.carbsG,
-      fatG: input.fatG,
-      caloriesKcal: input.caloriesKcal,
-    });
-    return { ok: true, preset };
+    const existingTemplate = await getTemplateById(sessionUser.userId, input.id);
+    if (!existingTemplate) {
+      return { ok: false, error: "Template not found." };
+    }
+    if (existingTemplate.type !== "meal" || existingTemplate.items.length !== 1) {
+      return {
+        ok: false,
+        error: "This template cannot be edited from the single-food template form.",
+      };
+    }
+
+    const template = await updateTemplate(
+      sessionUser.userId,
+      input.id,
+      singleFoodTemplateInput(input, existingTemplate.items[0]),
+    );
+    return { ok: true, template };
   } catch (error) {
     return { ok: false, error: toActionError(error) };
   }
 }
 
-export async function touchPresetAction(
-  input: { id: string },
-): Promise<ActionResult> {
+type ApplyTemplateResult = ActionResult & { entries?: MealEntryRecord[] };
+
+export async function applyTemplateAction(input: {
+  templateId: string;
+  date: string;
+  status?: MealEntryStatus;
+}): Promise<ApplyTemplateResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    await touchPresetLastUsed(sessionUser.userId, input.id);
-    return { ok: true };
+    const entries = await applyTemplateToDate(sessionUser.userId, input);
+    revalidatePath("/", "layout");
+    return { ok: true, entries };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function createTemplateFromDateAction(input: {
+  date: string;
+  type: "meal" | "day";
+  label: string;
+}): Promise<SaveTemplateResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const template = await createTemplateFromDate(sessionUser.userId, input);
+    revalidatePath("/planner", "page");
+    return { ok: true, template };
   } catch (error) {
     return { ok: false, error: toActionError(error) };
   }
@@ -295,8 +521,13 @@ type SaveRecipeInput = {
   id?: string;
   label: string;
   portions: number;
+  totalCookedWeightG?: number | null;
   ingredients: Array<{
+    productId?: string | null;
     label: string;
+    quantity?: number;
+    unit?: QuantityUnit;
+    servingMultiplier?: number;
     proteinG: number;
     carbsG: number;
     fatG: number;
@@ -355,9 +586,111 @@ export async function searchMealEntriesAction(
   }
 }
 
+type SearchFoodProductsResult = ActionResult & { products?: FoodProduct[] };
+
+export async function searchFoodProductsAction(
+  input: { query: string },
+): Promise<SearchFoodProductsResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const products = await searchFoodProducts(sessionUser.userId, input.query);
+    return { ok: true, products };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+type SearchFoodsResult = ActionResult & {
+  results?: MealEntryRecord[];
+  products?: FoodProduct[];
+};
+
+export async function searchFoodsAction(
+  input: { query: string },
+): Promise<SearchFoodsResult> {
+  const sessionUser = await requireSessionUser();
+  const query = input.query.trim();
+
+  if (!query) {
+    return { ok: true, results: [], products: [] };
+  }
+
+  const [historyResult, productsResult] = await Promise.allSettled([
+    searchMealEntries(sessionUser.userId, query),
+    searchFoodProducts(sessionUser.userId, query),
+  ]);
+
+  const results =
+    historyResult.status === "fulfilled" ? historyResult.value : [];
+  const products =
+    productsResult.status === "fulfilled" ? productsResult.value : [];
+
+  if (historyResult.status === "rejected" && productsResult.status === "rejected") {
+    return { ok: false, error: toActionError(historyResult.reason) };
+  }
+
+  if (historyResult.status === "rejected") {
+    return {
+      ok: true,
+      results,
+      products,
+      error: "Food history search failed, but product results are still available.",
+    };
+  }
+
+  if (productsResult.status === "rejected") {
+    return {
+      ok: true,
+      results,
+      products,
+      error: "Product search failed, but history results are still available.",
+    };
+  }
+
+  return { ok: true, results, products };
+}
+
+type SaveFoodProductResult = ActionResult & { product?: FoodProduct };
+
+export async function createFoodProductAction(
+  input: FoodProductInput,
+): Promise<SaveFoodProductResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const product = await createPersonalFoodProduct(sessionUser.userId, input);
+    revalidatePath("/", "layout");
+    return { ok: true, product };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
+export async function updateFoodProductAction(
+  input: { id: string; product: FoodProductInput },
+): Promise<SaveFoodProductResult> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const product = await updatePersonalFoodProduct(
+      sessionUser.userId,
+      input.id,
+      input.product,
+    );
+    revalidatePath("/", "layout");
+    return { ok: true, product };
+  } catch (error) {
+    return { ok: false, error: toActionError(error) };
+  }
+}
+
 type LogRecipePortionInput = {
   recipeId: string;
   date: string;
+  status?: MealEntryStatus;
+  portionCount?: number;
+  gramsConsumed?: number | null;
 };
 
 export async function logRecipePortionAction(
@@ -371,13 +704,45 @@ export async function logRecipePortionAction(
       throw new Error("Recipe not found.");
     }
 
+    const portionCount =
+      Number.isFinite(input.portionCount) && (input.portionCount ?? 0) > 0
+        ? input.portionCount!
+        : 1;
+    const gramsConsumed = input.gramsConsumed ?? null;
+    if (
+      gramsConsumed != null &&
+      (!Number.isFinite(gramsConsumed) || gramsConsumed <= 0)
+    ) {
+      throw new Error("Grams consumed must be greater than 0.");
+    }
+    if (
+      gramsConsumed != null &&
+      (recipe.totalCookedWeightG == null || recipe.totalCookedWeightG <= 0)
+    ) {
+      throw new Error("Recipe cooked weight is required to log grams.");
+    }
+
+    const hasGramsConsumed = gramsConsumed != null;
+    const factor =
+      hasGramsConsumed
+        ? (gramsConsumed / recipe.totalCookedWeightG!) * recipe.portions
+        : portionCount;
+
     await createMealEntry(sessionUser.userId, {
       date: input.date,
-      label: `${recipe.label} (1 portion)`,
-      proteinG: recipe.perPortionMacros.proteinG,
-      carbsG: recipe.perPortionMacros.carbsG,
-      fatG: recipe.perPortionMacros.fatG,
-      caloriesKcal: recipe.perPortionMacros.caloriesKcal,
+      status:
+        input.status ??
+        (input.date > getLocalDateString() ? "planned" : "eaten"),
+      label:
+        hasGramsConsumed
+          ? `${recipe.label} (${gramsConsumed}g)`
+          : `${recipe.label} (${portionCount} portion${portionCount === 1 ? "" : "s"})`,
+      quantity: gramsConsumed ?? portionCount,
+      unit: hasGramsConsumed ? "g" : "serving",
+      proteinG: Math.round(recipe.perPortionMacros.proteinG * factor * 10) / 10,
+      carbsG: Math.round(recipe.perPortionMacros.carbsG * factor * 10) / 10,
+      fatG: Math.round(recipe.perPortionMacros.fatG * factor * 10) / 10,
+      caloriesKcal: Math.round(recipe.perPortionMacros.caloriesKcal * factor),
     });
 
     revalidatePath("/", "page");
@@ -391,28 +756,17 @@ export async function logRecipePortionAction(
 // Community barcode catalogue
 // ---------------------------------------------------------------------------
 
-type SaveCustomBarcodeProductInput = {
-  barcode: string;
-  name: string;
-  brands: string;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
-  servingSizeG: number | null;
+type SaveBarcodeFoodProductResult = ActionResult & {
+  product?: FoodProduct;
 };
 
-type SaveCustomBarcodeProductResult = ActionResult & {
-  product?: CustomBarcodeProduct;
-};
-
-export async function saveCustomBarcodeProductAction(
-  input: SaveCustomBarcodeProductInput,
-): Promise<SaveCustomBarcodeProductResult> {
+export async function saveBarcodeFoodProductAction(
+  input: BarcodeFoodProductInput,
+): Promise<SaveBarcodeFoodProductResult> {
   const sessionUser = await requireSessionUser();
 
   try {
-    const product = await saveCustomBarcodeProduct(sessionUser.userId, input);
+    const product = await saveBarcodeFoodProduct(sessionUser.userId, input);
     return { ok: true, product };
   } catch (error) {
     return { ok: false, error: toActionError(error) };

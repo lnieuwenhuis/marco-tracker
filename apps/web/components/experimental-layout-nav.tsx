@@ -8,13 +8,22 @@ import { getLocalDateString } from "@/lib/startup-date";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
 import { getWarmupRoutes } from "@/lib/app-warmup";
 import { prefetchFullRoute } from "@/lib/full-prefetch";
-import { useUiMode } from "@/lib/ui-mode-client";
 
 import { useWarmAppData } from "./app-data-cache";
 import { ExperimentalAddSheet } from "./experimental-add-sheet";
 import { ExperimentalBottomNav } from "./experimental-bottom-nav";
 
-const APP_PATHNAMES = ["/", "/progress", "/recipes", "/summary", "/goals", "/weight", "/stats"];
+const APP_PATHNAMES = [
+  "/",
+  "/progress",
+  "/recipes",
+  "/summary",
+  "/planner",
+  "/library",
+  "/goals",
+  "/weight",
+  "/stats",
+];
 
 function isAppPathname(pathname: string) {
   return APP_PATHNAMES.some(
@@ -26,20 +35,23 @@ function pathnameToActiveTab(
   pathname: string,
 ): "log" | "progress" | "recipes" | "summary" {
   if (pathname.startsWith("/progress")) return "progress";
-  if (pathname.startsWith("/recipes")) return "recipes";
+  if (
+    pathname.startsWith("/recipes") ||
+    pathname.startsWith("/planner") ||
+    pathname.startsWith("/library")
+  ) return "recipes";
   if (pathname.startsWith("/summary")) return "summary";
   return "log";
 }
 
 export function ExperimentalLayoutNav() {
-  const uiMode = useUiMode();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [, startNavigation] = useTransition();
   const [addSheetOpen, setAddSheetOpen] = useState(false);
   const selectedDate = searchParams.get("date") ?? getLocalDateString();
-  const warmupEnabled = uiMode === "experimental" && isAppPathname(pathname);
+  const warmupEnabled = isAppPathname(pathname);
   useWarmAppData(selectedDate, warmupEnabled);
 
   useEffect(() => {

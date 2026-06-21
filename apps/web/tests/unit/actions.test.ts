@@ -2,24 +2,36 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocked = vi.hoisted(() => ({
   createMealEntry: vi.fn(),
-  createPreset: vi.fn(),
+  createMealGroup: vi.fn(),
+  createPersonalFoodProduct: vi.fn(),
   createRecipe: vi.fn(),
+  createTemplate: vi.fn(),
+  createTemplateFromDate: vi.fn(),
   createWeightEntry: vi.fn(),
+  completeOnboardingSetup: vi.fn(),
+  completeUserOnboarding: vi.fn(),
+  deleteMealGroup: vi.fn(),
   deleteMealEntry: vi.fn(),
-  deletePreset: vi.fn(),
   deleteRecipe: vi.fn(),
+  deleteTemplate: vi.fn(),
   deleteWeightEntry: vi.fn(),
   getLeaderboardStats: vi.fn(),
   getRecipeById: vi.fn(),
+  getTemplateById: vi.fn(),
   isValidDateString: vi.fn((value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)),
-  saveCustomBarcodeProduct: vi.fn(),
+  markMealEntryStatus: vi.fn(),
+  applyTemplateToDate: vi.fn(),
+  reorderMealGroups: vi.fn(),
+  saveBarcodeFoodProduct: vi.fn(),
   saveUserGoals: vi.fn(),
   saveWeightGoal: vi.fn(),
+  searchFoodProducts: vi.fn(),
   searchMealEntries: vi.fn(),
-  touchPresetLastUsed: vi.fn(),
+  updateMealGroup: vi.fn(),
   updateMealEntry: vi.fn(),
-  updatePreset: vi.fn(),
+  updatePersonalFoodProduct: vi.fn(),
   updateRecipe: vi.fn(),
+  updateTemplate: vi.fn(),
   updateWeightEntry: vi.fn(),
   requireSessionUser: vi.fn(),
   revalidatePath: vi.fn(),
@@ -27,24 +39,36 @@ const mocked = vi.hoisted(() => ({
 
 vi.mock("@macro-tracker/db", () => ({
   createMealEntry: mocked.createMealEntry,
-  createPreset: mocked.createPreset,
+  createMealGroup: mocked.createMealGroup,
+  createPersonalFoodProduct: mocked.createPersonalFoodProduct,
   createRecipe: mocked.createRecipe,
+  createTemplate: mocked.createTemplate,
+  createTemplateFromDate: mocked.createTemplateFromDate,
   createWeightEntry: mocked.createWeightEntry,
+  completeOnboardingSetup: mocked.completeOnboardingSetup,
+  completeUserOnboarding: mocked.completeUserOnboarding,
+  deleteMealGroup: mocked.deleteMealGroup,
   deleteMealEntry: mocked.deleteMealEntry,
-  deletePreset: mocked.deletePreset,
   deleteRecipe: mocked.deleteRecipe,
+  deleteTemplate: mocked.deleteTemplate,
   deleteWeightEntry: mocked.deleteWeightEntry,
   getLeaderboardStats: mocked.getLeaderboardStats,
   getRecipeById: mocked.getRecipeById,
+  getTemplateById: mocked.getTemplateById,
   isValidDateString: mocked.isValidDateString,
-  saveCustomBarcodeProduct: mocked.saveCustomBarcodeProduct,
+  markMealEntryStatus: mocked.markMealEntryStatus,
+  applyTemplateToDate: mocked.applyTemplateToDate,
+  reorderMealGroups: mocked.reorderMealGroups,
+  saveBarcodeFoodProduct: mocked.saveBarcodeFoodProduct,
   saveUserGoals: mocked.saveUserGoals,
   saveWeightGoal: mocked.saveWeightGoal,
+  searchFoodProducts: mocked.searchFoodProducts,
   searchMealEntries: mocked.searchMealEntries,
-  touchPresetLastUsed: mocked.touchPresetLastUsed,
+  updateMealGroup: mocked.updateMealGroup,
   updateMealEntry: mocked.updateMealEntry,
-  updatePreset: mocked.updatePreset,
+  updatePersonalFoodProduct: mocked.updatePersonalFoodProduct,
   updateRecipe: mocked.updateRecipe,
+  updateTemplate: mocked.updateTemplate,
   updateWeightEntry: mocked.updateWeightEntry,
 }));
 
@@ -58,10 +82,14 @@ vi.mock("next/cache", () => ({
 
 import {
   deleteMealEntryAction,
-  deletePresetAction,
   deleteRecipeAction,
+  deleteTemplateAction,
   deleteWeightEntryAction,
+  completeOnboardingAction,
   fetchLeaderboardStatsAction,
+  logRecipePortionAction,
+  searchFoodsAction,
+  updateTemplateAction,
 } from "@/lib/actions";
 
 describe("server actions", () => {
@@ -99,6 +127,111 @@ describe("server actions", () => {
     );
   });
 
+  it("searches history and products through one authenticated action", async () => {
+    mocked.searchMealEntries.mockResolvedValue([
+      {
+        id: "entry-1",
+        userId: "user-1",
+        date: "2026-06-20",
+        mealGroupId: null,
+        status: "eaten",
+        productId: null,
+        label: "Greek yogurt",
+        sortOrder: 0,
+        quantity: 1,
+        unit: "serving",
+        servingMultiplier: 1,
+        proteinG: 20,
+        carbsG: 8,
+        fatG: 0,
+        caloriesKcal: 112,
+      },
+    ]);
+    mocked.searchFoodProducts.mockResolvedValue([
+      {
+        id: "product-1",
+        ownerUserId: "user-1",
+        scope: "personal",
+        source: "custom",
+        name: "Greek yogurt",
+        brand: null,
+        barcode: null,
+        defaultServingQuantity: 1,
+        defaultServingUnit: "serving",
+        servingWeightG: 170,
+        servingVolumeMl: null,
+        proteinPer100: 11.8,
+        carbsPer100: 4.7,
+        fatPer100: 0,
+        caloriesPer100: 66,
+        isActive: true,
+        createdAt: "2026-06-20T00:00:00.000Z",
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      },
+    ]);
+
+    const result = await searchFoodsAction({ query: "  greek  " });
+
+    expect(result).toMatchObject({
+      ok: true,
+      results: [{ id: "entry-1" }],
+      products: [{ id: "product-1" }],
+    });
+    expect(mocked.requireSessionUser).toHaveBeenCalledTimes(1);
+    expect(mocked.searchMealEntries).toHaveBeenCalledWith("user-1", "greek");
+    expect(mocked.searchFoodProducts).toHaveBeenCalledWith("user-1", "greek");
+  });
+
+  it("keeps history results available when product search fails", async () => {
+    mocked.searchMealEntries.mockResolvedValue([
+      {
+        id: "entry-1",
+        userId: "user-1",
+        date: "2026-06-20",
+        mealGroupId: null,
+        status: "eaten",
+        productId: null,
+        label: "Greek yogurt",
+        sortOrder: 0,
+        quantity: 1,
+        unit: "serving",
+        servingMultiplier: 1,
+        proteinG: 20,
+        carbsG: 8,
+        fatG: 0,
+        caloriesKcal: 112,
+      },
+    ]);
+    mocked.searchFoodProducts.mockRejectedValue(new Error("catalog down"));
+
+    const result = await searchFoodsAction({ query: "greek" });
+
+    expect(result).toEqual({
+      ok: true,
+      results: [
+        {
+          id: "entry-1",
+          userId: "user-1",
+          date: "2026-06-20",
+          mealGroupId: null,
+          status: "eaten",
+          productId: null,
+          label: "Greek yogurt",
+          sortOrder: 0,
+          quantity: 1,
+          unit: "serving",
+          servingMultiplier: 1,
+          proteinG: 20,
+          carbsG: 8,
+          fatG: 0,
+          caloriesKcal: 112,
+        },
+      ],
+      products: [],
+      error: "Product search failed, but history results are still available.",
+    });
+  });
+
   it("rejects invalid leaderboard reference dates before hitting auth or the db", async () => {
     mocked.isValidDateString.mockReturnValue(false);
 
@@ -123,11 +256,11 @@ describe("server actions", () => {
       error: "Meal entry not found.",
     },
     {
-      name: "presets",
-      action: deletePresetAction,
-      deleter: mocked.deletePreset,
-      input: { id: "preset-1" },
-      error: "Preset not found.",
+      name: "templates",
+      action: deleteTemplateAction,
+      deleter: mocked.deleteTemplate,
+      input: { id: "template-1" },
+      error: "Template not found.",
     },
     {
       name: "weight entries",
@@ -155,5 +288,170 @@ describe("server actions", () => {
 
     expect(result).toEqual({ ok: false, error });
     expect(mocked.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it.each([0, -10, Number.NaN])(
+    "rejects invalid recipe grams before creating a meal",
+    async (gramsConsumed) => {
+      mocked.getRecipeById.mockResolvedValue({
+        id: "recipe-1",
+        userId: "user-1",
+        label: "Rice bowl",
+        portions: 4,
+        totalCookedWeightG: 800,
+        perPortionMacros: {
+          proteinG: 20,
+          carbsG: 60,
+          fatG: 10,
+          caloriesKcal: 420,
+        },
+        totalMacros: {
+          proteinG: 80,
+          carbsG: 240,
+          fatG: 40,
+          caloriesKcal: 1680,
+        },
+        ingredients: [],
+      });
+
+      const result = await logRecipePortionAction({
+        recipeId: "recipe-1",
+        date: "2026-05-10",
+        gramsConsumed,
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        error: "Grams consumed must be greater than 0.",
+      });
+      expect(mocked.createMealEntry).not.toHaveBeenCalled();
+      expect(mocked.revalidatePath).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses to rewrite day templates through the single-food template update action", async () => {
+    mocked.getTemplateById.mockResolvedValue({
+      id: "template-1",
+      userId: "user-1",
+      type: "day",
+      label: "Full day",
+      notes: null,
+      createdAt: "2026-06-20T00:00:00.000Z",
+      updatedAt: "2026-06-20T00:00:00.000Z",
+      items: [
+        {
+          id: "item-1",
+          templateId: "template-1",
+          productId: null,
+          mealGroupLabel: "Breakfast",
+          sortOrder: 0,
+          label: "Oats",
+          quantity: 1,
+          unit: "serving",
+          servingMultiplier: 1,
+          proteinG: 20,
+          carbsG: 40,
+          fatG: 8,
+          caloriesKcal: 312,
+        },
+      ],
+    });
+
+    const result = await updateTemplateAction({
+      id: "template-1",
+      label: "Changed",
+      proteinG: 1,
+      carbsG: 1,
+      fatG: 1,
+      caloriesKcal: 20,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "This template cannot be edited from the single-food template form.",
+    });
+    expect(mocked.updateTemplate).not.toHaveBeenCalled();
+  });
+
+  it("completes onboarding through the atomic setup helper", async () => {
+    mocked.completeOnboardingSetup.mockResolvedValue({
+      id: "user-1",
+      email: "coach@example.com",
+      shooPairwiseSub: "shoo-1",
+      displayName: null,
+      pictureUrl: null,
+      role: "user",
+      createdAt: "2026-06-20T00:00:00.000Z",
+      lastLoginAt: "2026-06-20T00:00:00.000Z",
+      goalCaloriesKcal: 2200,
+      goalProteinG: 170,
+      goalCarbsG: 240,
+      goalFatG: 70,
+      goalWeightKg: 78,
+      onboardingCompletedAt: "2026-06-20T00:00:00.000Z",
+      preferredWeightUnit: "kg",
+    });
+
+    const result = await completeOnboardingAction({
+      preferredWeightUnit: "kg",
+      goals: {
+        caloriesKcal: 2200,
+        proteinG: 170,
+        carbsG: 240,
+        fatG: 70,
+      },
+      goalWeightKg: 78,
+      currentWeightKg: 82.5,
+      currentWeightDate: "2026-06-20",
+      starterTemplate: {
+        label: "Greek yogurt",
+        proteinG: 30,
+        carbsG: 12,
+        fatG: 2,
+        caloriesKcal: 186,
+      },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(mocked.completeOnboardingSetup).toHaveBeenCalledWith("user-1", {
+      preferredWeightUnit: "kg",
+      goals: {
+        caloriesKcal: 2200,
+        proteinG: 170,
+        carbsG: 240,
+        fatG: 70,
+      },
+      goalWeightKg: 78,
+      currentWeight: {
+        date: "2026-06-20",
+        weightKg: 82.5,
+        bodyFatPct: null,
+        notes: "Onboarding",
+      },
+      starterTemplate: {
+        type: "meal",
+        label: "Greek yogurt",
+        items: [
+          {
+            productId: null,
+            mealGroupLabel: null,
+            label: "Greek yogurt",
+            quantity: 1,
+            unit: "serving",
+            servingMultiplier: 1,
+            proteinG: 30,
+            carbsG: 12,
+            fatG: 2,
+            caloriesKcal: 186,
+          },
+        ],
+      },
+    });
+    expect(mocked.saveUserGoals).not.toHaveBeenCalled();
+    expect(mocked.saveWeightGoal).not.toHaveBeenCalled();
+    expect(mocked.createWeightEntry).not.toHaveBeenCalled();
+    expect(mocked.createTemplate).not.toHaveBeenCalled();
+    expect(mocked.completeUserOnboarding).not.toHaveBeenCalled();
+    expect(mocked.revalidatePath).toHaveBeenCalledWith("/", "layout");
   });
 });

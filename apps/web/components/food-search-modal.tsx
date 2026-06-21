@@ -1,11 +1,16 @@
 "use client";
 
-import type { MealEntryRecord } from "@macro-tracker/db";
+import type { FoodProduct, MealEntryRecord } from "@macro-tracker/db";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { saveMealEntryAction, searchMealEntriesAction } from "@/lib/actions";
+import { saveMealEntryAction, searchFoodsAction } from "@/lib/actions";
 import { getDailyMutationCacheKeys } from "@/lib/app-warmup";
+import {
+  hasCurrentFoodSearchResults,
+  normalizeFoodSearchQuery,
+} from "@/lib/food-search-state";
 import { formatSelectedDate } from "@/lib/formatting";
+import { buildMealEntryCopyInput } from "@/lib/meal-entry-copy";
 import { getLocalDateString } from "@/lib/startup-date";
 import { invalidateAppDataCache } from "./app-data-cache";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
@@ -13,11 +18,14 @@ import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 type FoodSearchModalProps = {
   onClose: () => void;
   onViewDate: (date: string) => void;
+  onEntrySaved?: (entry: MealEntryRecord) => void;
 };
 
-export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
+export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearchModalProps) {
   const [query, setQuery] = useState("");
+  const [resultQuery, setResultQuery] = useState("");
   const [results, setResults] = useState<MealEntryRecord[]>([]);
+  const [products, setProducts] = useState<FoodProduct[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyingId, setCopyingId] = useState<string | null>(null);
@@ -26,6 +34,18 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
   useBodyScrollLock();
 
   const todayStr = useMemo(() => getLocalDateString(), []);
+  const trimmedQuery = normalizeFoodSearchQuery(query);
+  const hasCurrentResults = hasCurrentFoodSearchResults(resultQuery, trimmedQuery);
+  const visibleResults = hasCurrentResults ? results : [];
+  const visibleProducts = hasCurrentResults ? products : [];
+  const visibleError = hasCurrentResults ? error : null;
+  const shouldShowNoResults =
+    Boolean(trimmedQuery) &&
+    hasCurrentResults &&
+    !isSearching &&
+    visibleResults.length === 0 &&
+    visibleProducts.length === 0 &&
+    !visibleError;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -42,8 +62,10 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
   }, [onClose]);
 
   useEffect(() => {
-    if (!query.trim()) {
+    if (!trimmedQuery) {
       setResults([]);
+      setProducts([]);
+      setResultQuery("");
       setError(null);
       setIsSearching(false);
       return;
@@ -51,46 +73,51 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
 
     let cancelled = false;
     setIsSearching(true);
+    setError(null);
+    setResults([]);
+    setProducts([]);
+    setResultQuery(trimmedQuery);
 
     const timer = setTimeout(async () => {
       try {
-        const result = await searchMealEntriesAction({ query: query.trim() });
+        const result = await searchFoodsAction({ query: trimmedQuery });
         // Guard against the component having unmounted or the query having
         // changed while the network request was in flight.
         if (cancelled) return;
-        if (result.ok && result.results) {
-          setResults(result.results);
-          setError(null);
+        setResultQuery(trimmedQuery);
+        if (result.ok) {
+          setResults(result.results ?? []);
+          setProducts(result.products ?? []);
+          setError(result.error ?? null);
         } else {
           setError(result.error ?? "Search failed.");
           setResults([]);
+          setProducts([]);
         }
       } finally {
         if (!cancelled) setIsSearching(false);
       }
-    }, 350);
+    }, 250);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query]);
+  }, [trimmedQuery]);
 
   async function handleCopyToToday(entry: MealEntryRecord) {
     setCopyingId(entry.id);
     setError(null);
     try {
-      const result = await saveMealEntryAction({
-        date: todayStr,
-        label: entry.label,
-        proteinG: entry.proteinG,
-        carbsG: entry.carbsG,
-        fatG: entry.fatG,
-        caloriesKcal: entry.caloriesKcal,
-      });
+      const result = await saveMealEntryAction(
+        buildMealEntryCopyInput(entry, todayStr),
+      );
 
       if (result.ok) {
         invalidateAppDataCache(getDailyMutationCacheKeys(todayStr));
+        if (result.entry) {
+          onEntrySaved?.(result.entry);
+        }
         setCopiedIds((prev) => new Set([...prev, entry.id]));
         setTimeout(() => {
           setCopiedIds((prev) => {
@@ -99,6 +126,43 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
             return next;
           });
         }, 2500);
+        return;
+      }
+
+      setError(result.error ?? "Unable to add this food to today.");
+    } finally {
+      setCopyingId(null);
+    }
+  }
+
+  async function handleAddProduct(product: FoodProduct) {
+    setCopyingId(product.id);
+    setError(null);
+    try {
+      const quantity = product.defaultServingQuantity || 1;
+      const base =
+        product.defaultServingUnit === "g" || product.defaultServingUnit === "ml"
+          ? quantity / 100
+          : ((product.servingWeightG ?? product.servingVolumeMl ?? 100) * quantity) / 100;
+      const result = await saveMealEntryAction({
+        date: todayStr,
+        status: "eaten",
+        productId: product.id,
+        label: product.brand ? `${product.name} (${product.brand})` : product.name,
+        quantity,
+        unit: product.defaultServingUnit,
+        proteinG: Math.round(product.proteinPer100 * base * 10) / 10,
+        carbsG: Math.round(product.carbsPer100 * base * 10) / 10,
+        fatG: Math.round(product.fatPer100 * base * 10) / 10,
+        caloriesKcal: Math.round(product.caloriesPer100 * base),
+      });
+
+      if (result.ok) {
+        invalidateAppDataCache(getDailyMutationCacheKeys(todayStr));
+        if (result.entry) {
+          onEntrySaved?.(result.entry);
+        }
+        setCopiedIds((prev) => new Set([...prev, product.id]));
         return;
       }
 
@@ -164,30 +228,61 @@ export function FoodSearchModal({ onClose, onViewDate }: FoodSearchModalProps) {
         </div>
 
         {/* Error */}
-        {error && (
+        {visibleError && (
           <p className="mb-3 rounded-xl border border-[var(--color-danger)]/20 bg-[var(--color-danger)]/8 px-3 py-2 text-sm text-[var(--color-danger)]">
-            {error}
+            {visibleError}
           </p>
         )}
 
         {/* Prompt state */}
-        {!query.trim() && (
+        {!trimmedQuery && (
           <p className="py-4 text-center text-sm text-[var(--color-muted)]">
             Type to search across all your logged days.
           </p>
         )}
 
         {/* No results */}
-        {query.trim() && !isSearching && results.length === 0 && !error && (
+        {shouldShowNoResults && (
           <p className="py-4 text-center text-sm text-[var(--color-muted)]">
             No food items found for &ldquo;{query}&rdquo;.
           </p>
         )}
 
+        {visibleProducts.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
+              Products
+            </p>
+            {visibleProducts.map((product) => (
+              <div
+                key={product.id}
+                className="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-card-subtle)] px-3 py-2.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-[var(--color-ink)]">
+                    {product.name}
+                  </p>
+                  <p className="text-[10px] text-[var(--color-muted)]">
+                    {product.brand || product.scope} · {product.caloriesPer100} kcal / 100
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAddProduct(product)}
+                  disabled={copyingId === product.id || copiedIds.has(product.id)}
+                  className="rounded-lg bg-[var(--color-accent)] px-3 py-1 text-xs font-semibold text-white transition hover:-translate-y-0.5 disabled:opacity-70"
+                >
+                  {copiedIds.has(product.id) ? "Added" : "Add"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Results */}
-        {results.length > 0 && (
+        {visibleResults.length > 0 && (
           <div className="space-y-2">
-            {results.map((entry) => {
+            {visibleResults.map((entry) => {
               const isCopying = copyingId === entry.id;
               const isCopied = copiedIds.has(entry.id);
 

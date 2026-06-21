@@ -12,6 +12,7 @@ import {
 } from "@/components/admin-ui";
 import { changeUserRoleAction } from "@/lib/admin-actions";
 import { requireAdminUser } from "@/lib/auth";
+import { getTemplateMacroTotals } from "@/lib/template-macros";
 
 type AdminUserDetailPageProps = {
   params: Promise<{ userId: string }>;
@@ -98,7 +99,7 @@ export default async function AdminUserDetailPage({
               <AdminStatCard label="Meals" value={String(detail.counts.mealEntries)} />
               <AdminStatCard label="Weights" value={String(detail.counts.weightEntries)} />
               <AdminStatCard label="Recipes" value={String(detail.counts.recipes)} />
-              <AdminStatCard label="Presets" value={String(detail.counts.presets)} />
+              <AdminStatCard label="Templates" value={String(detail.counts.templates)} />
               <AdminStatCard
                 label="Barcodes"
                 value={String(detail.counts.barcodeSubmissions)}
@@ -215,19 +216,22 @@ export default async function AdminUserDetailPage({
           </div>
         </AdminSection>
 
-        <AdminSection title="Recent Presets">
+        <AdminSection title="Recent Templates">
           <div className="space-y-3">
-            {detail.recentPresets.map((preset) => (
+            {detail.recentTemplates.map((preset) => {
+              const totals = getTemplateMacroTotals(preset.items);
+              return (
               <div
                 key={preset.id}
                 className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3"
               >
                 <p className="font-semibold text-[var(--color-ink)]">{preset.label}</p>
                 <p className="mt-1 text-sm text-[var(--color-muted)]">
-                  {preset.proteinG}P / {preset.carbsG}C / {preset.fatG}F / {preset.caloriesKcal} kcal
+                  {totals.proteinG}P / {totals.carbsG}C / {totals.fatG}F / {totals.caloriesKcal} kcal
                 </p>
               </div>
-            ))}
+              );
+            })}
           </div>
         </AdminSection>
       </div>
@@ -247,7 +251,7 @@ export default async function AdminUserDetailPage({
                   {item.name}
                 </Link>
                 <span className="rounded-full bg-[var(--color-card-muted)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
-                  {item.status}
+                  {item.deletedAt ? "deleted" : "active"}
                 </span>
               </div>
               <p className="mt-1 font-mono text-xs text-[var(--color-muted)]">{item.barcode}</p>
