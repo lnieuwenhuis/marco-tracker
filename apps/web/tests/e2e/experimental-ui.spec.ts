@@ -50,6 +50,45 @@ test("canonical app navigation and settings are visible", async ({ page }) => {
   await expect(page.getByRole("switch", { name: /Legacy UI/i })).toHaveCount(0);
 });
 
+test("keeps the bottom nav anchored when visual viewport is shortened on launch", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+    const fakeVisualViewport = {
+      height: 516,
+      offsetTop: 0,
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+        const typeListeners = listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>();
+        typeListeners.add(listener);
+        listeners.set(type, typeListeners);
+      },
+      removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+        listeners.get(type)?.delete(listener);
+      },
+    };
+
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: fakeVisualViewport,
+    });
+  });
+
+  await page.goto("/api/test/session?email=user@example.com");
+  await page.goto("/?date=2026-03-19");
+
+  const primaryNav = page.getByRole("navigation", { name: "Primary" });
+  await expect(primaryNav).toBeVisible();
+
+  const navBox = await primaryNav.boundingBox();
+  const viewport = page.viewportSize();
+  expect(navBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+
+  const bottomGap = viewport!.height - (navBox!.y + navBox!.height);
+  expect(bottomGap).toBeLessThanOrEqual(24);
+});
+
 test("experimental mode supports the bottom add flow and merged progress routes", async ({
   page,
 }) => {
