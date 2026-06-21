@@ -2018,7 +2018,7 @@ export async function getStatsPageData(
 ): Promise<StatsPageData> {
   const database = await resolveDb(db);
 
-  const [dailyRows, trendRows, labelRows, goals, weights, statusRows] = await Promise.all([
+  const [dailyRows, plannedTrendRows, labelRows, goals, weights, statusRows] = await Promise.all([
     database
       .select({
         entryDate: mealEntries.entryDate,
@@ -2034,7 +2034,6 @@ export async function getStatsPageData(
     database
       .select({
         entryDate: mealEntries.entryDate,
-        status: mealEntries.status,
         proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
         carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
         fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
@@ -2045,10 +2044,10 @@ export async function getStatsPageData(
         and(
           eq(mealEntries.userId, userId),
           lte(mealEntries.entryDate, today),
-          inArray(mealEntries.status, ["eaten", "planned"]),
+          eq(mealEntries.status, "planned"),
         ),
       )
-      .groupBy(mealEntries.entryDate, mealEntries.status)
+      .groupBy(mealEntries.entryDate)
       .orderBy(asc(mealEntries.entryDate)),
     database
       .select({
@@ -2101,6 +2100,13 @@ export async function getStatsPageData(
   }));
 
   const trendDaysByDate = new Map<string, StatsPageData["allDailyTotals"][number]>();
+  for (const row of eatenDailyTotals) {
+    trendDaysByDate.set(row.date, {
+      ...row,
+      plannedTotals: zeroMacros(),
+    });
+  }
+
   const getTrendDay = (date: string) => {
     let day = trendDaysByDate.get(date);
     if (!day) {
@@ -2114,26 +2120,19 @@ export async function getStatsPageData(
     return day;
   };
 
-  for (const row of trendRows) {
+  for (const row of plannedTrendRows) {
     const day = getTrendDay(row.entryDate);
-    const totals = {
+    day.plannedTotals = {
       proteinG: roundToSingleDecimal(toNumber(row.proteinG)),
       carbsG: roundToSingleDecimal(toNumber(row.carbsG)),
       fatG: roundToSingleDecimal(toNumber(row.fatG)),
       caloriesKcal: Math.round(toNumber(row.caloriesKcal)),
     };
-
-    if (row.status === "planned") {
-      day.plannedTotals = totals;
-    } else {
-      day.proteinG = totals.proteinG;
-      day.carbsG = totals.carbsG;
-      day.fatG = totals.fatG;
-      day.caloriesKcal = totals.caloriesKcal;
-    }
   }
 
-  const allDailyTotals = Array.from(trendDaysByDate.values());
+  const allDailyTotals = Array.from(trendDaysByDate.values()).sort((a, b) =>
+    a.date.localeCompare(b.date),
+  );
   const averageForDays = (days: number) => {
     const windowRows = eatenDailyTotals.slice(-days);
     if (windowRows.length === 0) return zeroMacros();
