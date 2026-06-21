@@ -412,6 +412,49 @@ describe("database queries", () => {
     ]);
   });
 
+  it("excludes future planned entries from earlier stats trend data", async () => {
+    await createMealEntry(
+      userId,
+      {
+        date: "2026-03-20",
+        status: "planned",
+        label: "Tomorrow oats",
+        sortOrder: 0,
+        proteinG: 10,
+        carbsG: 35,
+        fatG: 5,
+        caloriesKcal: 225,
+      },
+      runtime.db,
+    );
+
+    const earlierStats = await getStatsPageData(userId, "2026-03-19", runtime.db);
+
+    expect(earlierStats.totalDaysTracked).toBe(0);
+    expect(earlierStats.totalCaloriesKcal).toBe(0);
+    expect(earlierStats.allDailyTotals).toEqual([]);
+
+    const plannedDateStats = await getStatsPageData(userId, "2026-03-20", runtime.db);
+
+    expect(plannedDateStats.totalDaysTracked).toBe(0);
+    expect(plannedDateStats.totalCaloriesKcal).toBe(0);
+    expect(plannedDateStats.allDailyTotals).toEqual([
+      {
+        date: "2026-03-20",
+        proteinG: 0,
+        carbsG: 0,
+        fatG: 0,
+        caloriesKcal: 0,
+        plannedTotals: {
+          proteinG: 10,
+          carbsG: 35,
+          fatG: 5,
+          caloriesKcal: 225,
+        },
+      },
+    ]);
+  });
+
   it("creates, updates, and deletes meal entries while keeping totals in sync", async () => {
     const breakfast = await createMealEntry(
       userId,

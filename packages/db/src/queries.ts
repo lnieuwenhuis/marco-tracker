@@ -2044,6 +2044,7 @@ export async function getStatsPageData(
       .where(
         and(
           eq(mealEntries.userId, userId),
+          lte(mealEntries.entryDate, today),
           inArray(mealEntries.status, ["eaten", "planned"]),
         ),
       )
