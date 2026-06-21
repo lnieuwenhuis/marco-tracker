@@ -240,7 +240,10 @@ test("applies a saved day template as collapsed planned entries", async ({
   const modal = page.getByRole("dialog", { name: "Meal Templates" });
   await expect(modal).toBeVisible();
   await expect(modal.getByText(templateLabel)).toBeVisible();
-  await modal.getByRole("button", { name: "Add" }).click();
+  const templateRow = modal
+    .getByText(templateLabel)
+    .locator("xpath=ancestor::div[contains(@class,'flex items-center gap-2')][1]");
+  await templateRow.getByRole("button", { name: "Add" }).click();
 
   await expect(modal).toBeHidden();
   const firstCard = page.locator("article").filter({
@@ -256,6 +259,16 @@ test("applies a saved day template as collapsed planned entries", async ({
   await expect(secondCard).toContainText("planned");
   await expect(firstCard.getByRole("button", { name: "Save" })).toHaveCount(0);
   await expect(secondCard.getByRole("button", { name: "Save" })).toHaveCount(0);
+
+  const dailyReport = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "Daily Report" }),
+  }).first();
+  await expect(dailyReport).toContainText("Projected 478 kcal");
+  await expect(dailyReport).toContainText(/Planned\s*478 kcal/);
+  await expect(dailyReport.getByTestId("macro-bar-calories-planned-fill")).toHaveCSS("opacity", "0.28");
+  await expect(dailyReport.getByTestId("macro-bar-protein-planned-fill")).toHaveCSS("opacity", "0.28");
+  await expect(dailyReport.getByTestId("macro-bar-carbs-planned-fill")).toHaveCSS("opacity", "0.28");
+  await expect(dailyReport.getByTestId("macro-bar-fat-planned-fill")).toHaveCSS("opacity", "0.28");
 });
 
 test("stats and weight pages load without day navigation chrome", async ({

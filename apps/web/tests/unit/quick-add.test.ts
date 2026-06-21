@@ -128,6 +128,41 @@ describe("computeLiveTotals", () => {
       caloriesKcal: 290,
     });
   });
+
+  it("can sum planned drafts separately from eaten intake", () => {
+    const drafts: MealDraft[] = [
+      buildDraft({
+        clientId: "eaten",
+        proteinG: "20",
+        carbsG: "30",
+        fatG: "10",
+        caloriesKcal: "290",
+      }),
+      buildDraft({
+        clientId: "planned",
+        status: "planned",
+        proteinG: "40",
+        carbsG: "50",
+        fatG: "20",
+        caloriesKcal: "540",
+      }),
+      buildDraft({
+        clientId: "skipped",
+        status: "skipped",
+        proteinG: "10",
+        carbsG: "20",
+        fatG: "5",
+        caloriesKcal: "165",
+      }),
+    ];
+
+    expect(computeLiveTotals(drafts, "planned")).toEqual({
+      proteinG: 40,
+      carbsG: 50,
+      fatG: 20,
+      caloriesKcal: 540,
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,10 +1,11 @@
-import type { MacroGoals } from "@macro-tracker/db";
+import type { MacroGoals, MacroNumbers } from "@macro-tracker/db";
 
 import { formatMacroValue } from "@/lib/formatting";
 
 type MacroBarProps = {
   label: string;
   value: number;
+  plannedValue?: number;
   unit: string;
   color: string;
   goal: number | null;
@@ -12,31 +13,66 @@ type MacroBarProps = {
   fallbackMax: number;
 };
 
-export function MacroBar({ label, value, unit, color, goal, fallbackMax }: MacroBarProps) {
+export function MacroBar({
+  label,
+  value,
+  plannedValue = 0,
+  unit,
+  color,
+  goal,
+  fallbackMax,
+}: MacroBarProps) {
   const max = goal ?? fallbackMax;
   const percentage = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  const projectedValue = value + plannedValue;
+  const projectedPercentage =
+    max > 0 ? Math.min((projectedValue / max) * 100, 100) : 0;
   const hasGoal = goal !== null && goal > 0;
+  const hasPlannedValue = plannedValue > 0;
+  const testIdPrefix = label.toLowerCase().replace(/\s+/g, "-");
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-sm font-semibold text-[var(--color-ink)]">{label}</span>
-        <span className="text-sm tabular-nums text-[var(--color-muted-strong)]">
-          {formatMacroValue(value)}
-          {hasGoal ? (
-            <span className="text-[var(--color-muted)]">
-              {" / "}
-              {formatMacroValue(goal!)}
+        <span className="flex flex-col items-end tabular-nums">
+          <span className="text-sm text-[var(--color-muted-strong)]">
+            {formatMacroValue(value)}
+            {hasGoal ? (
+              <span className="text-[var(--color-muted)]">
+                {" / "}
+                {formatMacroValue(goal!)}
+              </span>
+            ) : null}
+            {unit}
+          </span>
+          {hasPlannedValue ? (
+            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
+              Projected {formatMacroValue(projectedValue)}
+              {unit}
             </span>
           ) : null}
-          {unit}
         </span>
       </div>
-      <div className="h-2.5 w-full overflow-hidden rounded-full bg-[var(--color-card-muted)]">
-        <div
-          className="h-full rounded-full transition-all duration-500 ease-out"
-          style={{ width: `${percentage}%`, backgroundColor: color }}
-        />
+      <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-[var(--color-card-muted)]">
+        {hasPlannedValue ? (
+          <div
+            data-testid={`macro-bar-${testIdPrefix}-planned-fill`}
+            className="absolute inset-y-0 left-0 rounded-full transition-all duration-500 ease-out"
+            style={{
+              width: `${projectedPercentage}%`,
+              backgroundColor: color,
+              opacity: 0.28,
+            }}
+          />
+        ) : null}
+        {value > 0 ? (
+          <div
+            data-testid={`macro-bar-${testIdPrefix}-eaten-fill`}
+            className="absolute inset-y-0 left-0 rounded-full transition-all duration-500 ease-out"
+            style={{ width: `${percentage}%`, backgroundColor: color }}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -62,6 +98,7 @@ type MacroBarGroupProps = {
   carbsG: number;
   fatG: number;
   caloriesKcal: number;
+  plannedTotals?: MacroNumbers | null;
   goals?: MacroGoals | null;
 };
 
@@ -70,6 +107,7 @@ export function MacroBarGroup({
   carbsG,
   fatG,
   caloriesKcal,
+  plannedTotals,
   goals,
 }: MacroBarGroupProps) {
   return (
@@ -77,6 +115,7 @@ export function MacroBarGroup({
       <MacroBar
         label="Calories"
         value={caloriesKcal}
+        plannedValue={plannedTotals?.caloriesKcal ?? 0}
         unit=" kcal"
         color={MACRO_COLORS.calories}
         goal={goals?.caloriesKcal ?? null}
@@ -85,6 +124,7 @@ export function MacroBarGroup({
       <MacroBar
         label="Protein"
         value={proteinG}
+        plannedValue={plannedTotals?.proteinG ?? 0}
         unit="g"
         color={MACRO_COLORS.protein}
         goal={goals?.proteinG ?? null}
@@ -93,6 +133,7 @@ export function MacroBarGroup({
       <MacroBar
         label="Carbs"
         value={carbsG}
+        plannedValue={plannedTotals?.carbsG ?? 0}
         unit="g"
         color={MACRO_COLORS.carbs}
         goal={goals?.carbsG ?? null}
@@ -101,6 +142,7 @@ export function MacroBarGroup({
       <MacroBar
         label="Fat"
         value={fatG}
+        plannedValue={plannedTotals?.fatG ?? 0}
         unit="g"
         color={MACRO_COLORS.fat}
         goal={goals?.fatG ?? null}
