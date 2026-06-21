@@ -89,6 +89,76 @@ test("keeps the bottom nav anchored when visual viewport is shortened on launch"
   expect(bottomGap).toBeLessThanOrEqual(24);
 });
 
+test("keeps low meal action menus above the bottom controls", async ({ page }) => {
+  const suffix = Date.now();
+  const targetLabel = `Low menu item ${suffix}`;
+  const templateLabel = `Low menu day ${suffix}`;
+  const items = Array.from({ length: 8 }, (_, index) => ({
+    label: index === 7 ? targetLabel : `Menu spacer ${index + 1} ${suffix}`,
+    proteinG: 20 + index,
+    carbsG: 30 + index,
+    fatG: 5 + index,
+    caloriesKcal: 250 + index,
+  }));
+
+  await page.goto("/api/test/session?email=user@example.com");
+  await enableExperimentalUi(page);
+  const seedResult = await page.evaluate(
+    async ({ items, templateLabel }) => {
+      const response = await fetch("/api/test/templates", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "day",
+          label: templateLabel,
+          items,
+        }),
+      });
+      return { ok: response.ok, status: response.status };
+    },
+    { items, templateLabel },
+  );
+  expect(seedResult).toEqual({ ok: true, status: 200 });
+
+  await page.goto("/?date=2035-06-22");
+  await page.getByRole("button", { name: "From template" }).click();
+  const modal = page.getByRole("dialog", { name: "Meal Templates" });
+  await expect(modal).toBeVisible();
+  const templateRow = modal
+    .getByText(templateLabel)
+    .locator("xpath=ancestor::div[contains(@class,'flex items-center gap-2')][1]");
+  await templateRow.getByRole("button", { name: "Add" }).click();
+  await expect(modal).toBeHidden();
+
+  const targetCard = page.locator("article").filter({
+    has: page.getByRole("heading", { name: targetLabel }),
+  });
+  await expect(targetCard).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+  const trigger = targetCard.getByRole("button", {
+    name: `More actions for ${targetLabel}`,
+  });
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+
+  const menu = page.getByRole("menu");
+  await expect(menu.getByRole("menuitem", { name: "Copy to today" })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Delete" })).toBeVisible();
+
+  const [triggerBox, menuBox] = await Promise.all([
+    trigger.boundingBox(),
+    menu.boundingBox(),
+  ]);
+
+  expect(triggerBox).not.toBeNull();
+  expect(menuBox).not.toBeNull();
+  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(triggerBox!.y);
+
+  await menu.getByRole("menuitem", { name: "Copy to today" }).click();
+  await expect(menu).toBeHidden();
+});
+
 test("experimental mode supports the bottom add flow and merged progress routes", async ({
   page,
 }) => {

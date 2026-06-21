@@ -1,7 +1,12 @@
 "use client";
 
 import type { MealEntryStatus, MealGroup, QuantityUnit } from "@macro-tracker/db";
-import { useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+
+import {
+  getFloatingMenuLayout,
+  type FloatingMenuLayout,
+} from "@/lib/floating-menu";
 
 type MealDraft = {
   clientId: string;
@@ -80,11 +85,17 @@ function NumericInput({
   );
 }
 
+const MENU_BOTTOM_INSET_PX = 112;
+const MENU_VIEWPORT_MARGIN_PX = 8;
+
 export function MealCard({ draft, busy, error, isCopied = false, mealGroups = [], onChange, onSave, onDelete, onDuplicate, onGroupChange, onStatusChange, onCopyToToday, onDiscardChanges }: MealCardProps) {
   const isSaved = Boolean(draft.id);
   const [isExpanded, setIsExpanded] = useState(!isSaved);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuLayout, setMenuLayout] = useState<FloatingMenuLayout | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const heading = draft.label.trim() || "New item";
   // A macro chip is only worth showing when the value is meaningfully positive.
@@ -96,6 +107,50 @@ export function MealCard({ draft, busy, error, isCopied = false, mealGroups = []
     isPositive(draft.fatG) ||
     isPositive(draft.caloriesKcal);
   const canCollapse = isExpanded && isSaved;
+
+  const updateMenuLayout = useCallback(() => {
+    const trigger = menuButtonRef.current;
+    const menu = menuRef.current;
+
+    if (!trigger || !menu) {
+      return;
+    }
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+
+    setMenuLayout(
+      getFloatingMenuLayout({
+        triggerTop: triggerRect.top,
+        triggerBottom: triggerRect.bottom,
+        menuHeight: menu.scrollHeight,
+        viewportHeight,
+        bottomInset: MENU_BOTTOM_INSET_PX,
+        topInset: MENU_VIEWPORT_MARGIN_PX,
+      }),
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    updateMenuLayout();
+
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener("resize", updateMenuLayout);
+    visualViewport?.addEventListener("scroll", updateMenuLayout);
+    window.addEventListener("resize", updateMenuLayout);
+    window.addEventListener("scroll", updateMenuLayout, true);
+
+    return () => {
+      visualViewport?.removeEventListener("resize", updateMenuLayout);
+      visualViewport?.removeEventListener("scroll", updateMenuLayout);
+      window.removeEventListener("resize", updateMenuLayout);
+      window.removeEventListener("scroll", updateMenuLayout, true);
+    };
+  }, [confirmingDelete, menuOpen, updateMenuLayout]);
 
   function toggleExpanded() {
     if (isExpanded) {
@@ -175,14 +230,19 @@ export function MealCard({ draft, busy, error, isCopied = false, mealGroups = []
 
           <div className="relative shrink-0">
             <button
+              ref={menuButtonRef}
               type="button"
               disabled={busy}
               onClick={(e) => {
                 e.stopPropagation();
-                setMenuOpen((open) => {
-                  if (open) setConfirmingDelete(false);
-                  return !open;
-                });
+                if (menuOpen) {
+                  setConfirmingDelete(false);
+                  setMenuLayout(null);
+                  setMenuOpen(false);
+                  return;
+                }
+
+                setMenuOpen(true);
               }}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-muted)] transition hover:bg-[var(--color-card-muted)] hover:text-[var(--color-ink)] disabled:opacity-50"
               aria-label={`More actions for ${heading}`}
@@ -197,8 +257,19 @@ export function MealCard({ draft, busy, error, isCopied = false, mealGroups = []
             </button>
             {menuOpen ? (
               <div
+                ref={menuRef}
                 role="menu"
-                className="absolute right-0 top-9 z-20 w-44 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] py-1 text-sm shadow-xl"
+                className={[
+                  "absolute right-0 z-50 w-44 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] py-1 text-sm shadow-xl",
+                  (menuLayout?.placement ?? "below") === "above"
+                    ? "bottom-9"
+                    : "top-9",
+                ].join(" ")}
+                style={
+                  menuLayout
+                    ? { maxHeight: `${menuLayout.maxHeight}px` }
+                    : undefined
+                }
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
