@@ -1,4 +1,4 @@
-import type { MacroGoals, MacroNumbers, QuickAddCandidate } from "@macro-tracker/db";
+import type { MacroGoals, MacroNumbers, MealEntryStatus, QuickAddCandidate } from "@macro-tracker/db";
 
 import type { MealDraft } from "@/components/meal-card";
 
@@ -13,15 +13,18 @@ function parseDraftValue(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** Compute eaten macro totals from the current draft array (unsaved edits included). */
-export function computeLiveTotals(drafts: MealDraft[]): MacroNumbers {
+/** Compute macro totals from the current draft array (unsaved edits included). */
+export function computeLiveTotals(
+  drafts: MealDraft[],
+  status: MealEntryStatus = "eaten",
+): MacroNumbers {
   let proteinG = 0;
   let carbsG = 0;
   let fatG = 0;
   let caloriesKcal = 0;
 
   for (const draft of drafts) {
-    if (draft.status !== "eaten") {
+    if (draft.status !== status) {
       continue;
     }
 

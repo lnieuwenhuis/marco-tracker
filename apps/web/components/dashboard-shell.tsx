@@ -224,6 +224,14 @@ export function DashboardShell({
   // ---------------------------------------------------------------------------
 
   const liveTotals = useMemo(() => computeLiveTotals(drafts), [drafts]);
+  const livePlannedTotals = useMemo(
+    () => computeLiveTotals(drafts, "planned"),
+    [drafts],
+  );
+  const liveSkippedTotals = useMemo(
+    () => computeLiveTotals(drafts, "skipped"),
+    [drafts],
+  );
   const todayStr = useMemo(() => getLocalDateString(), []);
   const defaultEntryStatus: MealEntryStatus =
     selectedDate > todayStr ? "planned" : "eaten";
@@ -986,17 +994,18 @@ export function DashboardShell({
             carbsG={liveTotals.carbsG}
             fatG={liveTotals.fatG}
             caloriesKcal={liveTotals.caloriesKcal}
+            plannedTotals={livePlannedTotals}
             goals={goals}
           />
-          {dailySummary.plannedTotals.caloriesKcal > 0 || dailySummary.skippedTotals.caloriesKcal > 0 ? (
+          {livePlannedTotals.caloriesKcal > 0 || liveSkippedTotals.caloriesKcal > 0 ? (
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-xl bg-[var(--color-card-muted)] px-3 py-2">
                 <span className="font-semibold text-[var(--color-muted-strong)]">Planned</span>
-                <span className="ml-2 tabular-nums text-[var(--color-ink)]">{dailySummary.plannedTotals.caloriesKcal} kcal</span>
+                <span className="ml-2 tabular-nums text-[var(--color-ink)]">{livePlannedTotals.caloriesKcal} kcal</span>
               </div>
               <div className="rounded-xl bg-[var(--color-card-muted)] px-3 py-2">
                 <span className="font-semibold text-[var(--color-muted-strong)]">Skipped</span>
-                <span className="ml-2 tabular-nums text-[var(--color-ink)]">{dailySummary.skippedTotals.caloriesKcal} kcal</span>
+                <span className="ml-2 tabular-nums text-[var(--color-ink)]">{liveSkippedTotals.caloriesKcal} kcal</span>
               </div>
             </div>
           ) : null}
