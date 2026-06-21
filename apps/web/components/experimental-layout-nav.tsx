@@ -8,6 +8,7 @@ import { getLocalDateString } from "@/lib/startup-date";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
 import { getWarmupRoutes } from "@/lib/app-warmup";
 import { prefetchFullRoute } from "@/lib/full-prefetch";
+import { getVisualViewportBottomOffset } from "@/lib/visual-viewport";
 
 import { useWarmAppData } from "./app-data-cache";
 import { ExperimentalAddSheet } from "./experimental-add-sheet";
@@ -44,12 +45,104 @@ function pathnameToActiveTab(
   return "log";
 }
 
+function useVisualViewportBottomOffset() {
+  const [bottomOffset, setBottomOffset] = useState(0);
+
+  useEffect(() => {
+    function updateBottomOffset() {
+      setBottomOffset((current) => {
+        const next = getVisualViewportBottomOffset({
+          layoutViewportHeight: window.innerHeight,
+          visualViewport: window.visualViewport,
+        });
+
+        return current === next ? current : next;
+      });
+    }
+
+    let animationFrame: number | null = null;
+    let settleTimer: number | null = null;
+    let finalTimer: number | null = null;
+
+    function clearScheduledUpdates() {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+
+      if (settleTimer !== null) {
+        window.clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+
+      if (finalTimer !== null) {
+        window.clearTimeout(finalTimer);
+        finalTimer = null;
+      }
+    }
+
+    function scheduleBottomOffsetUpdate() {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = null;
+        updateBottomOffset();
+      });
+
+      if (settleTimer !== null) {
+        window.clearTimeout(settleTimer);
+      }
+      settleTimer = window.setTimeout(() => {
+        settleTimer = null;
+        updateBottomOffset();
+      }, 180);
+
+      if (finalTimer !== null) {
+        window.clearTimeout(finalTimer);
+      }
+      finalTimer = window.setTimeout(() => {
+        finalTimer = null;
+        updateBottomOffset();
+      }, 700);
+    }
+
+    updateBottomOffset();
+
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener("resize", scheduleBottomOffsetUpdate);
+    visualViewport?.addEventListener("scroll", scheduleBottomOffsetUpdate);
+    window.addEventListener("resize", scheduleBottomOffsetUpdate);
+    window.addEventListener("orientationchange", scheduleBottomOffsetUpdate);
+    window.addEventListener("focusin", scheduleBottomOffsetUpdate, true);
+    window.addEventListener("focusout", scheduleBottomOffsetUpdate, true);
+    window.addEventListener("pageshow", scheduleBottomOffsetUpdate);
+    document.addEventListener("visibilitychange", scheduleBottomOffsetUpdate);
+
+    return () => {
+      clearScheduledUpdates();
+      visualViewport?.removeEventListener("resize", scheduleBottomOffsetUpdate);
+      visualViewport?.removeEventListener("scroll", scheduleBottomOffsetUpdate);
+      window.removeEventListener("resize", scheduleBottomOffsetUpdate);
+      window.removeEventListener("orientationchange", scheduleBottomOffsetUpdate);
+      window.removeEventListener("focusin", scheduleBottomOffsetUpdate, true);
+      window.removeEventListener("focusout", scheduleBottomOffsetUpdate, true);
+      window.removeEventListener("pageshow", scheduleBottomOffsetUpdate);
+      document.removeEventListener("visibilitychange", scheduleBottomOffsetUpdate);
+    };
+  }, []);
+
+  return bottomOffset;
+}
+
 export function ExperimentalLayoutNav() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [, startNavigation] = useTransition();
   const [addSheetOpen, setAddSheetOpen] = useState(false);
+  const bottomOffset = useVisualViewportBottomOffset();
   const selectedDate = searchParams.get("date") ?? getLocalDateString();
   const warmupEnabled = isAppPathname(pathname);
   useWarmAppData(selectedDate, warmupEnabled);
@@ -89,7 +182,10 @@ export function ExperimentalLayoutNav() {
 
   return (
     <>
-      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+      <div
+        className="pointer-events-none fixed inset-x-0 z-30 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))]"
+        style={{ bottom: bottomOffset }}
+      >
         <div className="mx-auto w-full max-w-3xl">
           <ExperimentalBottomNav
             activeTab={activeTab}
