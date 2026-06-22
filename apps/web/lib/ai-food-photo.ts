@@ -46,7 +46,18 @@ export type AnalyzeFoodPhotoResult =
 const OPENROUTER_CHAT_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
 export const DEFAULT_FOOD_PHOTO_MODEL =
-  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
+  "google/gemma-4-26b-a4b-it:free";
+export const DEFAULT_FOOD_PHOTO_FALLBACK_MODELS = [
+  "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-nano-12b-v2-vl:free",
+  "openrouter/free",
+] as const;
+const DEPRECATED_FOOD_PHOTO_MODELS = new Set([
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+]);
+const DEFAULT_FOOD_PHOTO_MODEL_TIMEOUT_MS = 10_000;
+const MIN_FOOD_PHOTO_MODEL_TIMEOUT_MS = 3_000;
+const MAX_FOOD_PHOTO_MODEL_TIMEOUT_MS = 30_000;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set([
   "image/png",
@@ -155,6 +166,80 @@ function roundConfidence(value: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function parseModelList(value: string | undefined) {
+  return (
+    value
+      ?.split(/[\n,]/)
+      .map((model) => model.trim())
+      .filter(Boolean) ?? []
+  );
+}
+
+export function isFreeOpenRouterModel(model: string) {
+  const trimmedModel = model.trim();
+  return trimmedModel === "openrouter/free" || trimmedModel.endsWith(":free");
+}
+
+function isDeprecatedFoodPhotoModel(model: string) {
+  return DEPRECATED_FOOD_PHOTO_MODELS.has(model.trim());
+}
+
+function uniqueFreeFoodPhotoModels(models: string[]) {
+  const seen = new Set<string>();
+  const freeModels: string[] = [];
+
+  for (const model of models) {
+    const trimmedModel = model.trim();
+    if (
+      !trimmedModel ||
+      !isFreeOpenRouterModel(trimmedModel) ||
+      isDeprecatedFoodPhotoModel(trimmedModel) ||
+      seen.has(trimmedModel)
+    ) {
+      continue;
+    }
+
+    seen.add(trimmedModel);
+    freeModels.push(trimmedModel);
+  }
+
+  return freeModels;
+}
+
+export function getConfiguredFoodPhotoModels() {
+  const configuredPrimary = process.env.OPENROUTER_MODEL?.trim();
+  const primary =
+    configuredPrimary &&
+    isFreeOpenRouterModel(configuredPrimary) &&
+    !isDeprecatedFoodPhotoModel(configuredPrimary)
+      ? configuredPrimary
+      : DEFAULT_FOOD_PHOTO_MODEL;
+  const configuredFallbacks = parseModelList(
+    process.env.OPENROUTER_FALLBACK_MODELS,
+  );
+  const fallbackModels =
+    configuredFallbacks.length > 0
+      ? configuredFallbacks
+      : [...DEFAULT_FOOD_PHOTO_FALLBACK_MODELS];
+  const models = uniqueFreeFoodPhotoModels([primary, ...fallbackModels]);
+
+  return models.length > 0 ? models : [DEFAULT_FOOD_PHOTO_MODEL];
+}
+
+export function getFoodPhotoModelTimeoutMs() {
+  const configuredTimeout = Number(process.env.OPENROUTER_MODEL_TIMEOUT_MS);
+
+  if (!Number.isFinite(configuredTimeout)) {
+    return DEFAULT_FOOD_PHOTO_MODEL_TIMEOUT_MS;
+  }
+
+  return clamp(
+    Math.round(configuredTimeout),
+    MIN_FOOD_PHOTO_MODEL_TIMEOUT_MS,
+    MAX_FOOD_PHOTO_MODEL_TIMEOUT_MS,
+  );
 }
 
 function numberFromAiValue(value: unknown) {
@@ -321,6 +406,113 @@ function buildPrompt(clarification: string, forceReady: boolean) {
   ].join("\n");
 }
 
+function buildOpenRouterRequestBody(params: {
+  clarification: string;
+  forceReady: boolean;
+  imageUrl: string;
+  model: string;
+  userId: string;
+}) {
+  const requestBody: Record<string, unknown> = {
+    model: params.model,
+    messages: [
+      {
+        role: "system",
+        content: FOOD_PHOTO_SYSTEM_PROMPT,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: buildPrompt(params.clarification, params.forceReady),
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: params.imageUrl,
+            },
+          },
+        ],
+      },
+    ],
+    user: params.userId,
+    provider: {
+      allow_fallbacks: true,
+    },
+    plugins: [
+      {
+        id: "response-healing",
+        enabled: true,
+      },
+    ],
+    response_format: {
+      type: "json_object",
+    },
+  };
+
+  if (supportsGenerationControls(params.model)) {
+    requestBody.temperature = 0;
+    requestBody.max_tokens = 300;
+    requestBody.include_reasoning = false;
+    requestBody.reasoning = { enabled: false };
+  }
+
+  if (supportsStructuredOutput(params.model)) {
+    requestBody.response_format = {
+      type: "json_schema",
+      json_schema: {
+        name: "food_photo_macro_estimate",
+        strict: true,
+        schema: foodPhotoResponseSchema,
+      },
+    };
+  }
+
+  return requestBody;
+}
+
+function createAttemptAbortSignal(
+  parentSignal: AbortSignal | undefined,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromParent = () => controller.abort();
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    get timedOut() {
+      return timedOut;
+    },
+    get parentAborted() {
+      return parentSignal?.aborted ?? false;
+    },
+    cleanup() {
+      clearTimeout(timeoutId);
+      parentSignal?.removeEventListener("abort", abortFromParent);
+    },
+  };
+}
+
+function retryDelay(attempt: number) {
+  return new Promise((resolve) => setTimeout(resolve, 700 * attempt));
+}
+
+function errorMessageFromUnknown(error: unknown) {
+  return error instanceof Error ? error.message : "OpenRouter request failed.";
+}
+
 function metadataDetail(metadata: unknown) {
   if (!metadata || typeof metadata !== "object") {
     return null;
@@ -419,6 +611,21 @@ function isRetryableOpenRouterError(error: string, statusCode?: number) {
   );
 }
 
+function shouldTryNextFoodPhotoModel(result: AnalyzeFoodPhotoResult) {
+  if (result.ok) {
+    return false;
+  }
+
+  return (
+    result.retryable === true ||
+    result.kind === "empty_response" ||
+    result.kind === "invalid_json" ||
+    result.kind === "provider_error" ||
+    result.kind === "provider_rate_limit" ||
+    result.kind === "unsupported_model"
+  );
+}
+
 async function readOpenRouterError(response: Response) {
   try {
     const payload = (await response.json()) as {
@@ -448,6 +655,7 @@ export async function analyzeFoodPhoto(params: {
   forceReady?: boolean;
   maxAttempts?: number;
   model?: string;
+  modelCallTimeoutMs?: number;
   signal?: AbortSignal;
   userId: string;
 }): Promise<AnalyzeFoodPhotoResult> {
@@ -513,202 +721,227 @@ export async function analyzeFoodPhoto(params: {
       params.image.type,
     );
   }
-  const model = params.model?.trim() || getConfiguredFoodPhotoModel();
-  const maxAttempts = Math.max(1, params.maxAttempts ?? 2);
-  const requestBody: Record<string, unknown> = {
-    model,
-    messages: [
-      {
-        role: "system",
-        content: FOOD_PHOTO_SYSTEM_PROMPT,
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: buildPrompt(
-              params.clarification ?? "",
-              params.forceReady ?? false,
-            ),
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: imageUrl,
-            },
-          },
-        ],
-      },
-    ],
-    user: params.userId,
-    provider: {
-      allow_fallbacks: true,
-    },
-    plugins: [
-      {
-        id: "response-healing",
-        enabled: true,
-      },
-    ],
-    response_format: {
-      type: "json_object",
-    },
-  };
+  const requestedModel = params.model?.trim();
+  const models = requestedModel
+    ? [requestedModel]
+    : getConfiguredFoodPhotoModels();
+  const nonFreeModel = models.find((model) => !isFreeOpenRouterModel(model));
 
-  if (supportsGenerationControls(model)) {
-    requestBody.temperature = 0;
-    requestBody.max_tokens = 300;
-    requestBody.include_reasoning = false;
-    requestBody.reasoning = { enabled: false };
-  }
-
-  if (supportsStructuredOutput(model)) {
-    requestBody.response_format = {
-      type: "json_schema",
-      json_schema: {
-        name: "food_photo_macro_estimate",
-        strict: true,
-        schema: foodPhotoResponseSchema,
-      },
+  if (nonFreeModel) {
+    return {
+      ok: false,
+      error: `Food photo AI only permits free OpenRouter models. "${nonFreeModel}" is not allowed.`,
+      kind: "unsupported_model",
+      retryable: false,
     };
   }
+
+  const modelCallTimeoutMs = Math.max(
+    1,
+    Math.round(params.modelCallTimeoutMs ?? getFoodPhotoModelTimeoutMs()),
+  );
+  const maxAttempts = Math.max(1, params.maxAttempts ?? 1);
 
   let lastFailure: AnalyzeFoodPhotoResult | null = null;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": process.env.APP_URL ?? "http://localhost:3000",
-        "X-OpenRouter-Title": "Macro Tracker",
-        "X-OpenRouter-Experimental-Metadata": "enabled",
-      },
-      body: JSON.stringify(requestBody),
-      signal: params.signal,
-    });
+  for (const [modelIndex, model] of models.entries()) {
+    const hasFallbackModel = modelIndex < models.length - 1;
 
-    if (!response.ok) {
-      const error = await readOpenRouterError(response);
-      const retryable = isRetryableOpenRouterError(error, response.status);
-      lastFailure = {
-        ok: false,
-        error,
-        kind: classifyFoodPhotoFailure(error, response.status),
-        statusCode: response.status,
-        retryable,
-      };
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const requestBody = buildOpenRouterRequestBody({
+        clarification: params.clarification ?? "",
+        forceReady: params.forceReady ?? false,
+        imageUrl,
+        model,
+        userId: params.userId,
+      });
+      const attemptAbort = createAttemptAbortSignal(
+        params.signal,
+        modelCallTimeoutMs,
+      );
+      let response: Response;
 
-      if (retryable && attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
-        continue;
+      try {
+        response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": process.env.APP_URL ?? "http://localhost:3000",
+            "X-OpenRouter-Title": "Macro Tracker",
+            "X-OpenRouter-Metadata": "enabled",
+          },
+          body: JSON.stringify(requestBody),
+          signal: attemptAbort.signal,
+        });
+      } catch (error) {
+        const retryable = !attemptAbort.parentAborted;
+        lastFailure = {
+          ok: false,
+          error: attemptAbort.parentAborted
+            ? "The AI request was canceled."
+            : attemptAbort.timedOut
+              ? `OpenRouter request timed out after ${modelCallTimeoutMs}ms.`
+              : errorMessageFromUnknown(error),
+          kind: "provider_error",
+          retryable,
+        };
+        attemptAbort.cleanup();
+
+        if (retryable && attempt < maxAttempts) {
+          await retryDelay(attempt);
+          continue;
+        }
+
+        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+          break;
+        }
+
+        return lastFailure;
       }
 
-      return lastFailure;
-    }
+      attemptAbort.cleanup();
 
-    const payload = (await response.json()) as {
-      error?: {
-        message?: string;
-      };
-      choices?: Array<{
-        finish_reason?: string | null;
+      if (!response.ok) {
+        const error = await readOpenRouterError(response);
+        const retryable = isRetryableOpenRouterError(error, response.status);
+        lastFailure = {
+          ok: false,
+          error,
+          kind: classifyFoodPhotoFailure(error, response.status),
+          statusCode: response.status,
+          retryable,
+        };
+
+        if (retryable && attempt < maxAttempts) {
+          await retryDelay(attempt);
+          continue;
+        }
+
+        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+          break;
+        }
+
+        return lastFailure;
+      }
+
+      const payload = (await response.json()) as {
         error?: {
           message?: string;
         };
-        message?: {
-          content?: unknown;
-          reasoning?: string | null;
+        choices?: Array<{
+          finish_reason?: string | null;
+          error?: {
+            message?: string;
+          };
+          message?: {
+            content?: unknown;
+            reasoning?: string | null;
+          };
+        }>;
+      };
+      const choice = payload.choices?.[0];
+
+      if (payload.error?.message) {
+        const retryable = isRetryableOpenRouterError(payload.error.message);
+        lastFailure = {
+          ok: false,
+          error: payload.error.message,
+          kind: classifyFoodPhotoFailure(payload.error.message),
+          retryable,
         };
-      }>;
-    };
-    const choice = payload.choices?.[0];
+        if (retryable && attempt < maxAttempts) {
+          await retryDelay(attempt);
+          continue;
+        }
 
-    if (payload.error?.message) {
-      const retryable = isRetryableOpenRouterError(payload.error.message);
-      lastFailure = {
-        ok: false,
-        error: payload.error.message,
-        kind: classifyFoodPhotoFailure(payload.error.message),
-        retryable,
-      };
-      if (retryable && attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
-        continue;
+        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+          break;
+        }
+
+        return lastFailure;
       }
 
-      return lastFailure;
-    }
+      if (choice?.finish_reason === "error") {
+        const error =
+          choice.error?.message ?? "The AI provider returned an error.";
+        const retryable = isRetryableOpenRouterError(error);
+        lastFailure = {
+          ok: false,
+          error,
+          kind: classifyFoodPhotoFailure(error),
+          retryable,
+        };
 
-    if (choice?.finish_reason === "error") {
-      const error =
-        choice.error?.message ?? "The AI provider returned an error.";
-      const retryable = isRetryableOpenRouterError(error);
-      lastFailure = {
-        ok: false,
-        error,
-        kind: classifyFoodPhotoFailure(error),
-        retryable,
-      };
+        if (retryable && attempt < maxAttempts) {
+          await retryDelay(attempt);
+          continue;
+        }
 
-      if (retryable && attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
-        continue;
+        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+          break;
+        }
+
+        return lastFailure;
       }
 
-      return lastFailure;
-    }
+      const content = extractMessageContent(choice?.message?.content);
+      const aiResponse =
+        content ?? choice?.message?.reasoning ?? safeJsonStringify(payload);
 
-    const content = extractMessageContent(choice?.message?.content);
-    const aiResponse =
-      content ?? choice?.message?.reasoning ?? safeJsonStringify(payload);
+      if (!content) {
+        console.error("Food photo AI returned no parseable content.", {
+          aiResponse,
+        });
+        lastFailure = {
+          ok: false,
+          error: "The AI did not return a response.",
+          kind: "empty_response",
+          aiResponse,
+          retryable: true,
+        };
 
-    if (!content) {
-      console.error("Food photo AI returned no parseable content.", {
-        aiResponse,
-      });
-      lastFailure = {
-        ok: false,
-        error: "The AI did not return a response.",
-        kind: "empty_response",
-        aiResponse,
-        retryable: true,
-      };
+        if (attempt < maxAttempts) {
+          await retryDelay(attempt);
+          continue;
+        }
 
-      if (attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
-        continue;
+        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+          break;
+        }
+
+        return lastFailure;
       }
 
-      return lastFailure;
-    }
+      try {
+        return { ok: true, analysis: parseFoodPhotoAnalysis(content) };
+      } catch (error) {
+        console.error("Food photo AI response could not be parsed.", {
+          error,
+          aiResponse: content,
+        });
+        lastFailure = {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to parse the AI response.",
+          kind: "invalid_json",
+          aiResponse: content,
+          retryable: true,
+        };
 
-    try {
-      return { ok: true, analysis: parseFoodPhotoAnalysis(content) };
-    } catch (error) {
-      console.error("Food photo AI response could not be parsed.", {
-        error,
-        aiResponse: content,
-      });
-      lastFailure = {
-        ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to parse the AI response.",
-        kind: "invalid_json",
-        aiResponse: content,
-        retryable: true,
-      };
+        if (attempt < maxAttempts) {
+          await retryDelay(attempt);
+          continue;
+        }
 
-      if (attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 700 * attempt));
-        continue;
+        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+          break;
+        }
+
+        return lastFailure;
       }
-
-      return lastFailure;
     }
   }
 
@@ -723,5 +956,5 @@ export async function analyzeFoodPhoto(params: {
 }
 
 export function getConfiguredFoodPhotoModel() {
-  return process.env.OPENROUTER_MODEL ?? DEFAULT_FOOD_PHOTO_MODEL;
+  return getConfiguredFoodPhotoModels()[0] ?? DEFAULT_FOOD_PHOTO_MODEL;
 }
