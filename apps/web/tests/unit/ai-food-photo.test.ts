@@ -36,6 +36,10 @@ function foodImage() {
   return new File(["fake image"], "food.jpg", { type: "image/jpeg" });
 }
 
+function foodImageUrl() {
+  return "data:image/jpeg;base64,ZmFrZSBpbWFnZQ==";
+}
+
 function readyResponse(label = "banana") {
   return new Response(
     JSON.stringify({
@@ -73,6 +77,7 @@ function modelFromFetchCall(
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   restoreOpenRouterEnv();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -286,6 +291,151 @@ describe("analyzeFoodPhoto", () => {
     expect(modelFromFetchCall(fetchMock, 1)).toBe(
       DEFAULT_FOOD_PHOTO_FALLBACK_MODELS[0],
     );
+  });
+
+  it("stops the fallback chain when the overall request budget is exhausted", async () => {
+    vi.useFakeTimers();
+    process.env.OPENROUTER_API_KEY = "test-key";
+    delete process.env.OPENROUTER_MODEL;
+    delete process.env.OPENROUTER_FALLBACK_MODELS;
+
+    const fetchMock = vi.fn((_: unknown, init?: RequestInit) => {
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const abortError = new Error("aborted");
+          abortError.name = "AbortError";
+          reject(abortError);
+        });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = analyzeFoodPhoto({
+      imageUrl: foodImageUrl(),
+      modelCallTimeoutMs: 10,
+      requestTimeoutMs: 25,
+      userId: "user-1",
+    });
+
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: "provider_error",
+      retryable: false,
+      error: "Food photo AI request timed out after 25ms.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(modelFromFetchCall(fetchMock, 0)).toBe(DEFAULT_FOOD_PHOTO_MODEL);
+    expect(modelFromFetchCall(fetchMock, 1)).toBe(
+      DEFAULT_FOOD_PHOTO_FALLBACK_MODELS[0],
+    );
+    expect(modelFromFetchCall(fetchMock, 2)).toBe(
+      DEFAULT_FOOD_PHOTO_FALLBACK_MODELS[1],
+    );
+  });
+
+  it("keeps the model timeout active while parsing the response body", async () => {
+    vi.useFakeTimers();
+    process.env.OPENROUTER_API_KEY = "test-key";
+
+    const fetchMock = vi.fn((_: unknown, init?: RequestInit) => {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          new Promise<unknown>((_, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              const abortError = new Error("aborted while reading body");
+              abortError.name = "AbortError";
+              reject(abortError);
+            });
+          }),
+      } as Response);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = analyzeFoodPhoto({
+      imageUrl: foodImageUrl(),
+      model: DEFAULT_FOOD_PHOTO_MODEL,
+      modelCallTimeoutMs: 10,
+      requestTimeoutMs: 50,
+      userId: "user-1",
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: "provider_error",
+      retryable: true,
+      error: "OpenRouter request timed out after 10ms.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not try fallback models after a parent abort", async () => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    delete process.env.OPENROUTER_MODEL;
+    delete process.env.OPENROUTER_FALLBACK_MODELS;
+
+    const parentAbort = new AbortController();
+    const fetchMock = vi.fn((_: unknown, init?: RequestInit) => {
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          const abortError = new Error("aborted");
+          abortError.name = "AbortError";
+          reject(abortError);
+        });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resultPromise = analyzeFoodPhoto({
+      imageUrl: foodImageUrl(),
+      signal: parentAbort.signal,
+      userId: "user-1",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    parentAbort.abort();
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: "provider_error",
+      retryable: false,
+      error: "The AI request was canceled.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not try fallback models after a non-retryable provider error status", async () => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    delete process.env.OPENROUTER_MODEL;
+    delete process.env.OPENROUTER_FALLBACK_MODELS;
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "Invalid API key." } }), {
+        status: 401,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeFoodPhoto({
+      image: foodImage(),
+      userId: "user-1",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: "provider_error",
+      statusCode: 401,
+      retryable: false,
+      error: "Invalid API key.",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects non-free model ids before calling OpenRouter", async () => {

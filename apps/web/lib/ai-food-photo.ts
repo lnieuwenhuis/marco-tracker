@@ -56,6 +56,7 @@ const DEPRECATED_FOOD_PHOTO_MODELS = new Set([
   "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
 ]);
 const DEFAULT_FOOD_PHOTO_MODEL_TIMEOUT_MS = 10_000;
+const DEFAULT_FOOD_PHOTO_REQUEST_TIMEOUT_MS = 25_000;
 const MIN_FOOD_PHOTO_MODEL_TIMEOUT_MS = 3_000;
 const MAX_FOOD_PHOTO_MODEL_TIMEOUT_MS = 30_000;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -616,11 +617,14 @@ function shouldTryNextFoodPhotoModel(result: AnalyzeFoodPhotoResult) {
     return false;
   }
 
+  if (result.kind === "provider_error") {
+    return result.retryable === true;
+  }
+
   return (
     result.retryable === true ||
     result.kind === "empty_response" ||
     result.kind === "invalid_json" ||
-    result.kind === "provider_error" ||
     result.kind === "provider_rate_limit" ||
     result.kind === "unsupported_model"
   );
@@ -656,6 +660,7 @@ export async function analyzeFoodPhoto(params: {
   maxAttempts?: number;
   model?: string;
   modelCallTimeoutMs?: number;
+  requestTimeoutMs?: number;
   signal?: AbortSignal;
   userId: string;
 }): Promise<AnalyzeFoodPhotoResult> {
@@ -740,6 +745,11 @@ export async function analyzeFoodPhoto(params: {
     1,
     Math.round(params.modelCallTimeoutMs ?? getFoodPhotoModelTimeoutMs()),
   );
+  const requestTimeoutMs = Math.max(
+    1,
+    Math.round(params.requestTimeoutMs ?? DEFAULT_FOOD_PHOTO_REQUEST_TIMEOUT_MS),
+  );
+  const requestDeadlineMs = performance.now() + requestTimeoutMs;
   const maxAttempts = Math.max(1, params.maxAttempts ?? 1);
 
   let lastFailure: AnalyzeFoodPhotoResult | null = null;
@@ -748,6 +758,34 @@ export async function analyzeFoodPhoto(params: {
     const hasFallbackModel = modelIndex < models.length - 1;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      if (params.signal?.aborted) {
+        return {
+          ok: false,
+          error: "The AI request was canceled.",
+          kind: "provider_error",
+          retryable: false,
+        };
+      }
+
+      const remainingRequestMs = Math.ceil(
+        requestDeadlineMs - performance.now(),
+      );
+      if (remainingRequestMs <= 0) {
+        return {
+          ok: false,
+          error: `Food photo AI request timed out after ${requestTimeoutMs}ms.`,
+          kind: "provider_error",
+          retryable: false,
+        };
+      }
+
+      const attemptTimeoutMs = Math.max(
+        1,
+        Math.min(modelCallTimeoutMs, remainingRequestMs),
+      );
+      const attemptUsesRemainingRequestBudget =
+        attemptTimeoutMs <= remainingRequestMs &&
+        remainingRequestMs <= modelCallTimeoutMs;
       const requestBody = buildOpenRouterRequestBody({
         clarification: params.clarification ?? "",
         forceReady: params.forceReady ?? false,
@@ -757,12 +795,11 @@ export async function analyzeFoodPhoto(params: {
       });
       const attemptAbort = createAttemptAbortSignal(
         params.signal,
-        modelCallTimeoutMs,
+        attemptTimeoutMs,
       );
-      let response: Response;
 
       try {
-        response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
+        const response = await fetch(OPENROUTER_CHAT_COMPLETIONS_URL, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${apiKey}`,
@@ -774,173 +811,177 @@ export async function analyzeFoodPhoto(params: {
           body: JSON.stringify(requestBody),
           signal: attemptAbort.signal,
         });
+
+        if (!response.ok) {
+          const error = await readOpenRouterError(response);
+          const retryable = isRetryableOpenRouterError(error, response.status);
+          lastFailure = {
+            ok: false,
+            error,
+            kind: classifyFoodPhotoFailure(error, response.status),
+            statusCode: response.status,
+            retryable,
+          };
+
+          if (retryable && attempt < maxAttempts) {
+            await retryDelay(attempt);
+            continue;
+          }
+
+          if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+            break;
+          }
+
+          return lastFailure;
+        }
+
+        const payload = (await response.json()) as {
+          error?: {
+            message?: string;
+          };
+          choices?: Array<{
+            finish_reason?: string | null;
+            error?: {
+              message?: string;
+            };
+            message?: {
+              content?: unknown;
+              reasoning?: string | null;
+            };
+          }>;
+        };
+        const choice = payload.choices?.[0];
+
+        if (payload.error?.message) {
+          const retryable = isRetryableOpenRouterError(payload.error.message);
+          lastFailure = {
+            ok: false,
+            error: payload.error.message,
+            kind: classifyFoodPhotoFailure(payload.error.message),
+            retryable,
+          };
+          if (retryable && attempt < maxAttempts) {
+            await retryDelay(attempt);
+            continue;
+          }
+
+          if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+            break;
+          }
+
+          return lastFailure;
+        }
+
+        if (choice?.finish_reason === "error") {
+          const error =
+            choice.error?.message ?? "The AI provider returned an error.";
+          const retryable = isRetryableOpenRouterError(error);
+          lastFailure = {
+            ok: false,
+            error,
+            kind: classifyFoodPhotoFailure(error),
+            retryable,
+          };
+
+          if (retryable && attempt < maxAttempts) {
+            await retryDelay(attempt);
+            continue;
+          }
+
+          if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+            break;
+          }
+
+          return lastFailure;
+        }
+
+        const content = extractMessageContent(choice?.message?.content);
+        const aiResponse =
+          content ?? choice?.message?.reasoning ?? safeJsonStringify(payload);
+
+        if (!content) {
+          console.error("Food photo AI returned no parseable content.", {
+            aiResponse,
+          });
+          lastFailure = {
+            ok: false,
+            error: "The AI did not return a response.",
+            kind: "empty_response",
+            aiResponse,
+            retryable: true,
+          };
+
+          if (attempt < maxAttempts) {
+            await retryDelay(attempt);
+            continue;
+          }
+
+          if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+            break;
+          }
+
+          return lastFailure;
+        }
+
+        try {
+          return { ok: true, analysis: parseFoodPhotoAnalysis(content) };
+        } catch (error) {
+          console.error("Food photo AI response could not be parsed.", {
+            error,
+            aiResponse: content,
+          });
+          lastFailure = {
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unable to parse the AI response.",
+            kind: "invalid_json",
+            aiResponse: content,
+            retryable: true,
+          };
+
+          if (attempt < maxAttempts) {
+            await retryDelay(attempt);
+            continue;
+          }
+
+          if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+            break;
+          }
+
+          return lastFailure;
+        }
       } catch (error) {
-        const retryable = !attemptAbort.parentAborted;
+        const requestBudgetTimedOut =
+          attemptAbort.timedOut && attemptUsesRemainingRequestBudget;
+        const retryable =
+          !attemptAbort.parentAborted && !requestBudgetTimedOut;
         lastFailure = {
           ok: false,
           error: attemptAbort.parentAborted
             ? "The AI request was canceled."
-            : attemptAbort.timedOut
-              ? `OpenRouter request timed out after ${modelCallTimeoutMs}ms.`
-              : errorMessageFromUnknown(error),
+            : requestBudgetTimedOut
+              ? `Food photo AI request timed out after ${requestTimeoutMs}ms.`
+              : attemptAbort.timedOut
+                ? `OpenRouter request timed out after ${modelCallTimeoutMs}ms.`
+                : errorMessageFromUnknown(error),
           kind: "provider_error",
           retryable,
         };
+
+        if (retryable && attempt < maxAttempts) {
+          await retryDelay(attempt);
+          continue;
+        }
+
+        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
+          break;
+        }
+
+        return lastFailure;
+      } finally {
         attemptAbort.cleanup();
-
-        if (retryable && attempt < maxAttempts) {
-          await retryDelay(attempt);
-          continue;
-        }
-
-        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
-          break;
-        }
-
-        return lastFailure;
-      }
-
-      attemptAbort.cleanup();
-
-      if (!response.ok) {
-        const error = await readOpenRouterError(response);
-        const retryable = isRetryableOpenRouterError(error, response.status);
-        lastFailure = {
-          ok: false,
-          error,
-          kind: classifyFoodPhotoFailure(error, response.status),
-          statusCode: response.status,
-          retryable,
-        };
-
-        if (retryable && attempt < maxAttempts) {
-          await retryDelay(attempt);
-          continue;
-        }
-
-        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
-          break;
-        }
-
-        return lastFailure;
-      }
-
-      const payload = (await response.json()) as {
-        error?: {
-          message?: string;
-        };
-        choices?: Array<{
-          finish_reason?: string | null;
-          error?: {
-            message?: string;
-          };
-          message?: {
-            content?: unknown;
-            reasoning?: string | null;
-          };
-        }>;
-      };
-      const choice = payload.choices?.[0];
-
-      if (payload.error?.message) {
-        const retryable = isRetryableOpenRouterError(payload.error.message);
-        lastFailure = {
-          ok: false,
-          error: payload.error.message,
-          kind: classifyFoodPhotoFailure(payload.error.message),
-          retryable,
-        };
-        if (retryable && attempt < maxAttempts) {
-          await retryDelay(attempt);
-          continue;
-        }
-
-        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
-          break;
-        }
-
-        return lastFailure;
-      }
-
-      if (choice?.finish_reason === "error") {
-        const error =
-          choice.error?.message ?? "The AI provider returned an error.";
-        const retryable = isRetryableOpenRouterError(error);
-        lastFailure = {
-          ok: false,
-          error,
-          kind: classifyFoodPhotoFailure(error),
-          retryable,
-        };
-
-        if (retryable && attempt < maxAttempts) {
-          await retryDelay(attempt);
-          continue;
-        }
-
-        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
-          break;
-        }
-
-        return lastFailure;
-      }
-
-      const content = extractMessageContent(choice?.message?.content);
-      const aiResponse =
-        content ?? choice?.message?.reasoning ?? safeJsonStringify(payload);
-
-      if (!content) {
-        console.error("Food photo AI returned no parseable content.", {
-          aiResponse,
-        });
-        lastFailure = {
-          ok: false,
-          error: "The AI did not return a response.",
-          kind: "empty_response",
-          aiResponse,
-          retryable: true,
-        };
-
-        if (attempt < maxAttempts) {
-          await retryDelay(attempt);
-          continue;
-        }
-
-        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
-          break;
-        }
-
-        return lastFailure;
-      }
-
-      try {
-        return { ok: true, analysis: parseFoodPhotoAnalysis(content) };
-      } catch (error) {
-        console.error("Food photo AI response could not be parsed.", {
-          error,
-          aiResponse: content,
-        });
-        lastFailure = {
-          ok: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : "Unable to parse the AI response.",
-          kind: "invalid_json",
-          aiResponse: content,
-          retryable: true,
-        };
-
-        if (attempt < maxAttempts) {
-          await retryDelay(attempt);
-          continue;
-        }
-
-        if (hasFallbackModel && shouldTryNextFoodPhotoModel(lastFailure)) {
-          break;
-        }
-
-        return lastFailure;
       }
     }
   }
