@@ -789,6 +789,7 @@ async function runFixtureForModel(params: {
       imageUrl: params.imageDataUrl,
       maxAttempts: 1,
       model: params.model,
+      modelCallTimeoutMs: params.modelCallTimeoutMs,
       signal: abortController.signal,
       userId: params.userId,
       clarification: `Benchmark fixture: ${params.fixture.servingDescription}`,
