@@ -23,8 +23,13 @@ to your local or deployment environment:
 
 ```bash
 OPENROUTER_API_KEY=...
-OPENROUTER_MODEL=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+OPENROUTER_MODEL=google/gemma-4-26b-a4b-it:free
+OPENROUTER_FALLBACK_MODELS=google/gemma-4-31b-it:free,nvidia/nemotron-nano-12b-v2-vl:free,openrouter/free
+OPENROUTER_MODEL_TIMEOUT_MS=10000
 ```
+
+Only free OpenRouter food-photo models are allowed. Model values must either
+end in `:free` or use the `openrouter/free` router.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
