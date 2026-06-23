@@ -1,6 +1,6 @@
 "use client";
 
-import type { MealTemplate, RecipeRecord } from "@macro-tracker/db";
+import type { MealTemplate, QuantityUnit, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
@@ -209,7 +209,11 @@ export function RecipeBuilderShell({
 
   // Preset handlers
   async function handleSavePreset(input: {
+    productId?: string | null;
     label: string;
+    quantity?: number;
+    unit?: QuantityUnit;
+    servingMultiplier?: number;
     proteinG: number;
     carbsG: number;
     fatG: number;
@@ -485,10 +489,11 @@ export function RecipeBuilderShell({
               ...prev,
               {
                 clientId: `ing-${crypto.randomUUID()}`,
+                productId: macros.productId ?? null,
                 label: macros.label,
-                quantity: "1",
-                unit: "serving",
-                servingMultiplier: "1",
+                quantity: String(macros.quantity),
+                unit: macros.unit,
+                servingMultiplier: String(macros.servingMultiplier),
                 proteinG: String(macros.proteinG),
                 carbsG: String(macros.carbsG),
                 fatG: String(macros.fatG),

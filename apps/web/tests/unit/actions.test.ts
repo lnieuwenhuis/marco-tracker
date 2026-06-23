@@ -88,6 +88,7 @@ import {
   completeOnboardingAction,
   fetchLeaderboardStatsAction,
   logRecipePortionAction,
+  saveTemplateAction,
   searchFoodsAction,
   updateTemplateAction,
 } from "@/lib/actions";
@@ -371,6 +372,67 @@ describe("server actions", () => {
       error: "This template cannot be edited from the single-food template form.",
     });
     expect(mocked.updateTemplate).not.toHaveBeenCalled();
+  });
+
+  it("preserves scanned gram quantity when saving a single-food template", async () => {
+    mocked.createTemplate.mockResolvedValue({
+      id: "template-1",
+      userId: "user-1",
+      type: "meal",
+      label: "Jonge Kaas",
+      notes: null,
+      createdAt: "2026-06-23T00:00:00.000Z",
+      updatedAt: "2026-06-23T00:00:00.000Z",
+      items: [
+        {
+          id: "item-1",
+          templateId: "template-1",
+          productId: "product-1",
+          mealGroupLabel: null,
+          sortOrder: 0,
+          label: "Jonge Kaas",
+          quantity: 76,
+          unit: "g",
+          servingMultiplier: 1,
+          proteinG: 17.5,
+          carbsG: 0,
+          fatG: 23.6,
+          caloriesKcal: 287,
+        },
+      ],
+    });
+
+    const result = await saveTemplateAction({
+      productId: "product-1",
+      label: "Jonge Kaas",
+      quantity: 76,
+      unit: "g",
+      servingMultiplier: 1,
+      proteinG: 17.5,
+      carbsG: 0,
+      fatG: 23.6,
+      caloriesKcal: 287,
+    });
+
+    expect(result).toMatchObject({ ok: true, template: { id: "template-1" } });
+    expect(mocked.createTemplate).toHaveBeenCalledWith("user-1", {
+      type: "meal",
+      label: "Jonge Kaas",
+      items: [
+        {
+          productId: "product-1",
+          mealGroupLabel: null,
+          label: "Jonge Kaas",
+          quantity: 76,
+          unit: "g",
+          servingMultiplier: 1,
+          proteinG: 17.5,
+          carbsG: 0,
+          fatG: 23.6,
+          caloriesKcal: 287,
+        },
+      ],
+    });
   });
 
   it("completes onboarding through the atomic setup helper", async () => {

@@ -26,6 +26,7 @@ export async function GET(
       return NextResponse.json({
         found: true,
         product: {
+          productId: product.id,
           name: product.name,
           brands: product.brand,
           barcode: product.barcode,

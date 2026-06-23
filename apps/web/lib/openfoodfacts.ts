@@ -1,4 +1,5 @@
 export type OpenFoodFactsProduct = {
+  productId?: string | null;
   name: string;
   brands: string;
   barcode: string;
@@ -56,6 +57,7 @@ export async function lookupBarcode(
     return {
       found: true,
       product: {
+        productId: data.product.productId ?? null,
         name: data.product.name ?? "Unknown product",
         brands: data.product.brands ?? "",
         barcode: data.product.barcode ?? barcode,
