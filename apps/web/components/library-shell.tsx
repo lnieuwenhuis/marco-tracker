@@ -4,7 +4,10 @@ import type { FoodProduct, MealTemplate, RecipeRecord } from "@macro-tracker/db"
 import { useRouter } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 
-import { filterLibraryItemsByQuery } from "@/lib/library-search";
+import {
+  filterLibraryItemsByQuery,
+  normalizeLibraryQuery,
+} from "@/lib/library-search";
 import {
   getTemplateMacroTotals,
   isDayTemplate,
@@ -72,6 +75,7 @@ export function LibraryShell({
     () => filterLibraryItemsByQuery(recipes, deferredSearch, (recipe) => recipe.label),
     [deferredSearch, recipes],
   );
+  const hasActiveTemplateSearch = normalizeLibraryQuery(deferredSearch).length > 0;
 
   return (
     <ExperimentalAppShell
@@ -171,7 +175,7 @@ export function LibraryShell({
             })}
             {visibleFoodItemTemplates.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-[var(--color-border-strong)] px-5 py-6 text-center text-sm text-[var(--color-muted)]">
-                {query ? "No food item templates found." : "No food item templates saved."}
+                {hasActiveTemplateSearch ? "No food item templates found." : "No food item templates saved."}
               </p>
             ) : null}
           </div>
@@ -207,7 +211,7 @@ export function LibraryShell({
             })}
             {visibleDayTemplates.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-[var(--color-border-strong)] px-5 py-6 text-center text-sm text-[var(--color-muted)]">
-                {query ? "No day templates found." : "No day templates saved."}
+                {hasActiveTemplateSearch ? "No day templates found." : "No day templates saved."}
               </p>
             ) : null}
           </div>

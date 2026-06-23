@@ -170,6 +170,53 @@ test("keeps low meal action menus above the bottom controls", async ({ page }) =
   await expect(menu).toBeHidden();
 });
 
+test("keeps the empty food template tab selectable when only day templates exist", async ({
+  page,
+}) => {
+  const suffix = Date.now();
+  const templateLabel = `Only day template ${suffix}`;
+
+  await page.goto("/api/test/session?email=owner@example.com");
+  await enableExperimentalUi(page);
+  const seedResult = await page.evaluate(async ({ templateLabel }) => {
+    const response = await fetch("/api/test/templates", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "day",
+        label: templateLabel,
+        items: [
+          {
+            label: `Template item ${templateLabel}`,
+            proteinG: 20,
+            carbsG: 40,
+            fatG: 8,
+            caloriesKcal: 312,
+          },
+        ],
+      }),
+    });
+    return { ok: response.ok, status: response.status };
+  }, { templateLabel });
+  expect(seedResult).toEqual({ ok: true, status: 200 });
+
+  await page.goto("/?date=2035-07-01");
+  await page.getByRole("button", { name: "From template" }).click();
+  const modal = page.getByRole("dialog", { name: "Meal Templates" });
+  await expect(modal).toBeVisible();
+  await expect(modal.getByText(templateLabel)).toBeVisible();
+
+  await modal.getByRole("button", { name: /Food items \(0\)/ }).click();
+
+  await expect(modal.getByText("No food item templates yet.")).toBeVisible();
+  await expect(modal.getByText(templateLabel)).toHaveCount(0);
+  await expect(modal.getByRole("button", { name: "Save new template" })).toBeVisible();
+
+  await modal.getByRole("button", { name: "Save new template" }).click();
+  await expect(modal.getByRole("textbox", { name: "Name" })).toBeVisible();
+  await expect(modal.getByRole("button", { name: "Save template" })).toBeVisible();
+});
+
 test("experimental mode supports the bottom add flow and merged progress routes", async ({
   page,
 }) => {

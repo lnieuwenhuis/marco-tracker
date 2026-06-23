@@ -9,6 +9,11 @@ import {
   isDayTemplate,
   isFoodItemTemplate,
 } from "@/lib/template-macros";
+import {
+  getInitialPresetTemplateKind,
+  resolvePresetModalActiveKind,
+  type PresetTemplateKind,
+} from "@/lib/preset-modal-state";
 
 import { ConfirmDeleteButton } from "./confirm-delete-button";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
@@ -44,8 +49,6 @@ type PresetDraft = {
   fatG: string;
   caloriesKcal: string;
 };
-
-type PresetTemplateKind = "food" | "day";
 
 function emptyDraft(): PresetDraft {
   return { label: "", proteinG: "", carbsG: "", fatG: "", caloriesKcal: "" };
@@ -125,14 +128,16 @@ export function PresetModal({
     [presets],
   );
   const [selectedKind, setSelectedKind] = useState<PresetTemplateKind>(() =>
-    foodItemPresets.length > 0 || dayPresets.length === 0 ? "food" : "day",
+    getInitialPresetTemplateKind({
+      foodItemCount: foodItemPresets.length,
+      dayCount: dayPresets.length,
+    }),
   );
-  const activeKind =
-    selectedKind === "food" && foodItemPresets.length === 0 && dayPresets.length > 0
-      ? "day"
-      : selectedKind === "day" && dayPresets.length === 0 && foodItemPresets.length > 0
-        ? "food"
-        : selectedKind;
+  const activeKind = resolvePresetModalActiveKind({
+    selectedKind,
+    foodItemCount: foodItemPresets.length,
+    dayCount: dayPresets.length,
+  });
   const visiblePresets = activeKind === "food" ? foodItemPresets : dayPresets;
   const activeLabel = activeKind === "food" ? "food item templates" : "day templates";
   useBodyScrollLock();
