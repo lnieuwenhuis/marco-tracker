@@ -1,4 +1,4 @@
-import { canAccessAdmin, ensureDateString, getDailySummary, getTemplates, getUserById } from "@macro-tracker/db";
+import { canAccessAdmin, ensureDateString, getDailySummary, getRecipeCount, getTemplates, getUserById } from "@macro-tracker/db";
 
 import { PlannerShell } from "@/components/planner-shell";
 import { requireOnboardedSessionUser } from "@/lib/auth";
@@ -11,8 +11,9 @@ export default async function PlannerPage({ searchParams }: PlannerPageProps) {
   const sessionUser = await requireOnboardedSessionUser();
   const params = await searchParams;
   const selectedDate = ensureDateString(params.date);
-  const [templates, dailySummary, user] = await Promise.all([
+  const [templates, recipeCount, dailySummary, user] = await Promise.all([
     getTemplates(sessionUser.userId),
+    getRecipeCount(sessionUser.userId),
     getDailySummary(sessionUser.userId, selectedDate),
     getUserById(sessionUser.userId),
   ]);
@@ -23,6 +24,7 @@ export default async function PlannerPage({ searchParams }: PlannerPageProps) {
       canAccessAdmin={user ? canAccessAdmin(user.role) : false}
       selectedDate={selectedDate}
       templates={templates}
+      recipeCount={recipeCount}
       dailySummary={dailySummary}
     />
   );

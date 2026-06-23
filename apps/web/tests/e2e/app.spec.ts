@@ -239,6 +239,7 @@ test("applies a saved day template as collapsed planned entries", async ({
   await page.getByRole("button", { name: "From template" }).click();
   const modal = page.getByRole("dialog", { name: "Meal Templates" });
   await expect(modal).toBeVisible();
+  await modal.getByRole("button", { name: /Days/ }).click();
   await expect(modal.getByText(templateLabel)).toBeVisible();
   const templateRow = modal
     .getByText(templateLabel)
@@ -344,6 +345,7 @@ test("macro trend chart shows planned intake as a translucent projection", async
   await page.getByRole("button", { name: "From template" }).click();
   const modal = page.getByRole("dialog", { name: "Meal Templates" });
   await expect(modal).toBeVisible();
+  await modal.getByRole("button", { name: /Days/ }).click();
   await expect(modal.getByText(templateLabel)).toBeVisible();
   const templateRow = modal
     .getByText(templateLabel)

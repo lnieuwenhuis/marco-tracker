@@ -13,6 +13,7 @@ import type { ComposeAction } from "@/lib/compose";
 import { computeLiveTotals, rankCandidates } from "@/lib/quick-add";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
 import type { OpenFoodFactsProduct } from "@/lib/openfoodfacts";
+import type { PresetTemplateKind } from "@/lib/preset-modal-state";
 import { getLocalDateString } from "@/lib/startup-date";
 import {
   canEditAsSingleFoodTemplate,
@@ -41,6 +42,7 @@ type DashboardShellProps = {
   recipes: RecipeRecord[];
   recentCandidates: QuickAddCandidate[];
   initialComposeAction?: ComposeAction | null;
+  initialPresetTemplateKind?: PresetTemplateKind | null;
 };
 
 type ErrorState = Record<string, string | null>;
@@ -162,6 +164,7 @@ export function DashboardShell({
   recipes,
   recentCandidates,
   initialComposeAction = null,
+  initialPresetTemplateKind = null,
 }: DashboardShellProps) {
   const router = useRouter();
   const composeHandledRef = useRef<string | null>(null);
@@ -178,6 +181,8 @@ export function DashboardShell({
   const [isPending, beginMutation] = useTransition();
 
   const [showPresetsModal, setShowPresetsModal] = useState(false);
+  const [presetInitialKind, setPresetInitialKind] =
+    useState<PresetTemplateKind | null>(null);
   const [localTemplates, setLocalTemplates] = useState<MealTemplate[]>(initialTemplates);
   const [presetMutation, setPresetMutation] = useState<PresetMutationState | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
@@ -922,14 +927,22 @@ export function DashboardShell({
     });
   }
 
-  function handleComposeAction(action: ComposeAction) {
+  function openPresetModal(initialKind: PresetTemplateKind | null = null) {
+    setPresetError(null);
+    setPresetInitialKind(initialKind);
+    setShowPresetsModal(true);
+  }
+
+  function handleComposeAction(
+    action: ComposeAction,
+    templateKind: PresetTemplateKind | null = null,
+  ) {
     switch (action) {
       case "custom":
         addCustomDraft();
         break;
       case "template":
-        setPresetError(null);
-        setShowPresetsModal(true);
+        openPresetModal(templateKind);
         break;
       case "scan":
         setScanResult(null);
@@ -945,28 +958,32 @@ export function DashboardShell({
     }
   }
 
-  const handleComposeActionEffect = useEffectEvent((action: ComposeAction) => {
-    handleComposeAction(action);
-  });
+  const handleComposeActionEffect = useEffectEvent(
+    (action: ComposeAction, templateKind: PresetTemplateKind | null) => {
+      handleComposeAction(action, templateKind);
+    },
+  );
 
   useEffect(() => {
     if (!initialComposeAction) {
+      composeHandledRef.current = null;
       return;
     }
 
-    const composeKey = `${selectedDate}:${initialComposeAction}`;
+    const composeKey = `${selectedDate}:${initialComposeAction}:${initialPresetTemplateKind ?? ""}`;
     if (composeHandledRef.current === composeKey) {
       return;
     }
 
     composeHandledRef.current = composeKey;
-    handleComposeActionEffect(initialComposeAction);
+    handleComposeActionEffect(initialComposeAction, initialPresetTemplateKind);
 
     const params = new URLSearchParams(window.location.search);
     params.delete("compose");
+    params.delete("templateKind");
     const href = params.toString() ? `/?${params.toString()}` : "/";
     router.replace(href, { scroll: false });
-  }, [initialComposeAction, router, selectedDate]);
+  }, [initialComposeAction, initialPresetTemplateKind, router, selectedDate]);
 
   const content = (
     <div className="space-y-6">
@@ -1075,10 +1092,7 @@ export function DashboardShell({
             <div className="mt-3 flex justify-center gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  setPresetError(null);
-                  setShowPresetsModal(true);
-                }}
+                onClick={() => openPresetModal()}
                 className="rounded-full border border-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-[var(--color-accent)] transition hover:-translate-y-0.5"
               >
                 From template
@@ -1240,6 +1254,7 @@ export function DashboardShell({
           presets={localTemplates}
           mutation={presetMutation}
           errorMessage={presetError}
+          initialKind={presetInitialKind}
           onClose={() => {
             setPresetError(null);
             setShowPresetsModal(false);

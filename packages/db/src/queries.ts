@@ -2642,6 +2642,19 @@ export async function getRecipes(
   );
 }
 
+export async function getRecipeCount(
+  userId: string,
+  db?: DatabaseClient,
+): Promise<number> {
+  const database = await resolveDb(db);
+  const [row] = await database
+    .select({ total: count() })
+    .from(recipes)
+    .where(eq(recipes.userId, userId));
+
+  return toNumber(row?.total);
+}
+
 export async function getRecipeById(
   userId: string,
   recipeId: string,
