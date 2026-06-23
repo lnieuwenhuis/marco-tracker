@@ -12,6 +12,11 @@ import {
   getDailyMutationCacheKeys,
   getTemplateMutationCacheKeys,
 } from "@/lib/app-warmup";
+import {
+  getTemplateMacroTotals,
+  isDayTemplate,
+  isFoodItemTemplate,
+} from "@/lib/template-macros";
 
 import { invalidateAppDataCache } from "./app-data-cache";
 import { ExperimentalAppShell, ExperimentalSettingsButton } from "./experimental-app-shell";
@@ -23,26 +28,16 @@ type PlannerShellProps = {
   canAccessAdmin: boolean;
   selectedDate: string;
   templates: MealTemplate[];
+  recipeCount: number;
   dailySummary: DailySummary;
 };
-
-function templateTotals(template: MealTemplate) {
-  return template.items.reduce(
-    (totals, item) => ({
-      proteinG: Math.round((totals.proteinG + item.proteinG) * 10) / 10,
-      carbsG: Math.round((totals.carbsG + item.carbsG) * 10) / 10,
-      fatG: Math.round((totals.fatG + item.fatG) * 10) / 10,
-      caloriesKcal: totals.caloriesKcal + item.caloriesKcal,
-    }),
-    { proteinG: 0, carbsG: 0, fatG: 0, caloriesKcal: 0 },
-  );
-}
 
 export function PlannerShell({
   userEmail,
   canAccessAdmin,
   selectedDate,
   templates,
+  recipeCount,
   dailySummary,
 }: PlannerShellProps) {
   const router = useRouter();
@@ -52,15 +47,44 @@ export function PlannerShell({
   const [templateSearch, setTemplateSearch] = useState("");
   const deferredTemplateSearch = useDeferredValue(templateSearch);
   const normalizedTemplateSearch = deferredTemplateSearch.trim().toLowerCase();
-  const visibleTemplates = useMemo(
+  const foodItemTemplates = useMemo(
+    () => templates.filter(isFoodItemTemplate),
+    [templates],
+  );
+  const dayTemplates = useMemo(
+    () => templates.filter(isDayTemplate),
+    [templates],
+  );
+  const visibleDayTemplates = useMemo(
     () =>
       normalizedTemplateSearch
-        ? templates.filter((template) =>
+        ? dayTemplates.filter((template) =>
             template.label.toLowerCase().includes(normalizedTemplateSearch),
           )
-        : templates,
-    [normalizedTemplateSearch, templates],
+        : dayTemplates,
+    [dayTemplates, normalizedTemplateSearch],
   );
+  const selectedDaySummary = `${dailySummary.meals.length} entries, ${dailySummary.plannedTotals.caloriesKcal} planned kcal`;
+  const templateTiles = [
+    {
+      label: "Food items",
+      count: foodItemTemplates.length,
+      href: `/?date=${selectedDate}&compose=template&templateKind=food`,
+      active: false,
+    },
+    {
+      label: "Recipes",
+      count: recipeCount,
+      href: `/recipes?date=${selectedDate}`,
+      active: false,
+    },
+    {
+      label: "Days",
+      count: dayTemplates.length,
+      href: `/planner?date=${selectedDate}`,
+      active: true,
+    },
+  ];
 
   function applyTemplate(templateId: string) {
     setError(null);
@@ -132,25 +156,8 @@ export function PlannerShell({
         <LibraryHubNav active="planner" selectedDate={selectedDate} />
 
         <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-bold text-[var(--color-ink)]">Selected day</h3>
-              <p className="mt-1 text-xs text-[var(--color-muted)]">
-                {dailySummary.meals.length} entries, {dailySummary.plannedTotals.caloriesKcal} planned kcal
-              </p>
-            </div>
-            <TransitionLink
-              href={`/?date=${selectedDate}`}
-              motion="screen-backward"
-              className="rounded-xl border border-[var(--color-border)] px-3 py-2 text-xs font-semibold text-[var(--color-ink)] transition hover:bg-[var(--color-card-muted)]"
-            >
-              Open log
-            </TransitionLink>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
-          <h3 className="text-sm font-bold text-[var(--color-ink)]">Save this day</h3>
+          <h3 className="text-sm font-bold text-[var(--color-ink)]">Save currently selected day</h3>
+          <p className="mt-1 text-xs text-[var(--color-muted)]">{selectedDaySummary}</p>
           <div className="mt-3 flex gap-2">
             <input
               type="text"
@@ -177,28 +184,57 @@ export function PlannerShell({
             <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
               Templates
             </h3>
-            {templates.length > 0 ? (
+            <div className="grid gap-2 sm:grid-cols-3">
+              {templateTiles.map((tile) => (
+                <TransitionLink
+                  key={tile.label}
+                  href={tile.href}
+                  motion="screen"
+                  aria-current={tile.active ? "page" : undefined}
+                  className={[
+                    "rounded-2xl border px-4 py-3 transition hover:-translate-y-0.5",
+                    tile.active
+                      ? "border-[var(--color-accent)] bg-[color-mix(in_srgb,var(--color-accent)_13%,var(--color-surface-strong))] text-[var(--color-accent)] shadow-sm"
+                      : "border-[var(--color-border)] bg-[var(--color-surface-strong)] text-[var(--color-ink)] hover:bg-[var(--color-card-muted)]",
+                  ].join(" ")}
+                >
+                  <span className="block text-sm font-bold">{tile.label}</span>
+                  <span
+                    className={[
+                      "mt-1 block text-xs",
+                      tile.active ? "text-[var(--color-accent)]" : "text-[var(--color-muted)]",
+                    ].join(" ")}
+                  >
+                    {tile.count} saved
+                  </span>
+                </TransitionLink>
+              ))}
+            </div>
+            <h4 className="pt-1 text-xs font-bold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
+              Day templates
+            </h4>
+            {dayTemplates.length > 0 ? (
               <input
                 type="search"
                 value={templateSearch}
                 onChange={(event) => setTemplateSearch(event.target.value)}
-                placeholder="Search templates"
+                placeholder="Search day templates"
                 className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
               />
             ) : null}
           </div>
-          {templates.length === 0 ? (
+          {dayTemplates.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-shell-panel)] px-5 py-8 text-center">
-              <p className="text-sm text-[var(--color-muted)]">No templates yet.</p>
+              <p className="text-sm text-[var(--color-muted)]">No day templates yet.</p>
             </div>
-          ) : visibleTemplates.length === 0 ? (
+          ) : visibleDayTemplates.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--color-border-strong)] bg-[var(--color-shell-panel)] px-5 py-8 text-center">
-              <p className="text-sm text-[var(--color-muted)]">No templates found.</p>
+              <p className="text-sm text-[var(--color-muted)]">No day templates found.</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {visibleTemplates.map((template) => {
-                const totals = templateTotals(template);
+              {visibleDayTemplates.map((template) => {
+                const totals = getTemplateMacroTotals(template.items);
                 return (
                   <article
                     key={template.id}
