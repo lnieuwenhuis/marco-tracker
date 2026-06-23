@@ -1,11 +1,13 @@
 "use client";
 
 import type { MealTemplate } from "@macro-tracker/db";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   canEditAsSingleFoodTemplate,
   getTemplateMacroTotals,
+  isDayTemplate,
+  isFoodItemTemplate,
 } from "@/lib/template-macros";
 
 import { ConfirmDeleteButton } from "./confirm-delete-button";
@@ -42,6 +44,8 @@ type PresetDraft = {
   fatG: string;
   caloriesKcal: string;
 };
+
+type PresetTemplateKind = "food" | "day";
 
 function emptyDraft(): PresetDraft {
   return { label: "", proteinG: "", carbsG: "", fatG: "", caloriesKcal: "" };
@@ -112,6 +116,25 @@ export function PresetModal({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<PresetDraft>(emptyDraft);
   const mutationsDisabled = mutation !== null;
+  const foodItemPresets = useMemo(
+    () => presets.filter(isFoodItemTemplate),
+    [presets],
+  );
+  const dayPresets = useMemo(
+    () => presets.filter(isDayTemplate),
+    [presets],
+  );
+  const [selectedKind, setSelectedKind] = useState<PresetTemplateKind>(() =>
+    foodItemPresets.length > 0 || dayPresets.length === 0 ? "food" : "day",
+  );
+  const activeKind =
+    selectedKind === "food" && foodItemPresets.length === 0 && dayPresets.length > 0
+      ? "day"
+      : selectedKind === "day" && dayPresets.length === 0 && foodItemPresets.length > 0
+        ? "food"
+        : selectedKind;
+  const visiblePresets = activeKind === "food" ? foodItemPresets : dayPresets;
+  const activeLabel = activeKind === "food" ? "food item templates" : "day templates";
   useBodyScrollLock();
 
   function dismissModal() {
@@ -126,6 +149,19 @@ export function PresetModal({
 
     onClose();
   }
+
+  function selectKind(kind: PresetTemplateKind) {
+    if (mutation) {
+      return;
+    }
+
+    setSelectedKind(kind);
+    setEditingId(null);
+    if (kind === "day") {
+      setShowCreateForm(false);
+    }
+  }
+
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (mutation) {
@@ -229,17 +265,43 @@ export function PresetModal({
           </p>
         ) : null}
 
+        <div className="mb-4 grid grid-cols-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-card-muted)] p-1">
+          {[
+            { kind: "food" as const, label: "Food items", count: foodItemPresets.length },
+            { kind: "day" as const, label: "Days", count: dayPresets.length },
+          ].map((option) => {
+            const isActive = activeKind === option.kind;
+            return (
+              <button
+                key={option.kind}
+                type="button"
+                onClick={() => selectKind(option.kind)}
+                disabled={mutationsDisabled}
+                aria-pressed={isActive}
+                className={[
+                  "rounded-lg px-3 py-2 text-xs font-bold transition",
+                  isActive
+                    ? "bg-[var(--color-surface-strong)] text-[var(--color-accent)] shadow-sm"
+                    : "text-[var(--color-muted)] hover:text-[var(--color-ink)]",
+                ].join(" ")}
+              >
+                {option.label} ({option.count})
+              </button>
+            );
+          })}
+        </div>
+
         {/* Empty state */}
-        {presets.length === 0 && (
+        {visiblePresets.length === 0 && (
           <p className="py-3 text-center text-sm text-[var(--color-muted)]">
-            No templates yet. Save one below.
+            No {activeLabel} yet.
           </p>
         )}
 
         {/* Preset list */}
-        {presets.length > 0 && (
+        {visiblePresets.length > 0 && (
           <div className="space-y-2">
-            {presets.map((preset) => {
+            {visiblePresets.map((preset) => {
               const totals = getTemplateMacroTotals(preset.items);
               const canEditPreset = canEditAsSingleFoodTemplate(preset);
               const itemCount = preset.items.length;
@@ -351,27 +413,29 @@ export function PresetModal({
         )}
 
         {/* Create form toggle */}
-        <button
-          type="button"
-          onClick={() => { setShowCreateForm(!showCreateForm); setEditingId(null); }}
-          disabled={mutationsDisabled}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--color-border-strong)] px-4 py-2.5 text-sm font-medium text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            {showCreateForm ? (
-              <line x1="3" y1="7" x2="11" y2="7" />
-            ) : (
-              <>
-                <line x1="7" y1="2" x2="7" y2="12" />
-                <line x1="2" y1="7" x2="12" y2="7" />
-              </>
-            )}
-          </svg>
-          {showCreateForm ? "Cancel" : "Save new template"}
-        </button>
+        {activeKind === "food" ? (
+          <button
+            type="button"
+            onClick={() => { setShowCreateForm(!showCreateForm); setEditingId(null); }}
+            disabled={mutationsDisabled}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--color-border-strong)] px-4 py-2.5 text-sm font-medium text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              {showCreateForm ? (
+                <line x1="3" y1="7" x2="11" y2="7" />
+              ) : (
+                <>
+                  <line x1="7" y1="2" x2="7" y2="12" />
+                  <line x1="2" y1="7" x2="12" y2="7" />
+                </>
+              )}
+            </svg>
+            {showCreateForm ? "Cancel" : "Save new template"}
+          </button>
+        ) : null}
 
         {/* Inline create form */}
-        {showCreateForm && (
+        {activeKind === "food" && showCreateForm && (
           <div className="mt-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-card-subtle)] p-3">
             <label className="block">
               <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">

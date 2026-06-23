@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 
 import { filterLibraryItemsByQuery } from "@/lib/library-search";
+import {
+  getTemplateMacroTotals,
+  isDayTemplate,
+  isFoodItemTemplate,
+} from "@/lib/template-macros";
 import { ExperimentalAppShell, ExperimentalSettingsButton } from "./experimental-app-shell";
 import { LibraryHubNav } from "./library-hub-nav";
 import { TransitionLink } from "./transition-link";
@@ -18,16 +23,6 @@ type LibraryShellProps = {
   templates: MealTemplate[];
   recipes: RecipeRecord[];
 };
-
-function templateTotals(template: MealTemplate) {
-  return template.items.reduce(
-    (totals, item) => ({
-      caloriesKcal: totals.caloriesKcal + item.caloriesKcal,
-      proteinG: Math.round((totals.proteinG + item.proteinG) * 10) / 10,
-    }),
-    { caloriesKcal: 0, proteinG: 0 },
-  );
-}
 
 export function LibraryShell({
   userEmail,
@@ -57,9 +52,21 @@ export function LibraryShell({
     });
   }
 
-  const visibleTemplates = useMemo(
-    () => filterLibraryItemsByQuery(templates, deferredSearch, (template) => template.label),
-    [deferredSearch, templates],
+  const foodItemTemplates = useMemo(
+    () => templates.filter(isFoodItemTemplate),
+    [templates],
+  );
+  const dayTemplates = useMemo(
+    () => templates.filter(isDayTemplate),
+    [templates],
+  );
+  const visibleFoodItemTemplates = useMemo(
+    () => filterLibraryItemsByQuery(foodItemTemplates, deferredSearch, (template) => template.label),
+    [deferredSearch, foodItemTemplates],
+  );
+  const visibleDayTemplates = useMemo(
+    () => filterLibraryItemsByQuery(dayTemplates, deferredSearch, (template) => template.label),
+    [dayTemplates, deferredSearch],
   );
   const visibleRecipes = useMemo(
     () => filterLibraryItemsByQuery(recipes, deferredSearch, (recipe) => recipe.label),
@@ -80,7 +87,7 @@ export function LibraryShell({
               Food Library
             </h2>
             <p className="mt-1 text-sm text-[var(--color-muted)]">
-              Search foods, templates, and recipes from one place.
+              Search foods, food item templates, day templates, and recipes.
             </p>
           </div>
           <ExperimentalSettingsButton onClick={openSettings} />
@@ -137,7 +144,43 @@ export function LibraryShell({
         <section>
           <div className="mb-3 flex items-center justify-between gap-3">
             <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
-              Templates
+              Food item templates
+            </h3>
+            <TransitionLink
+              href={`/?date=${selectedDate}&compose=template`}
+              motion="screen"
+              className="text-xs font-semibold text-[var(--color-accent)]"
+            >
+              Add
+            </TransitionLink>
+          </div>
+          <div className="space-y-2">
+            {visibleFoodItemTemplates.map((template) => {
+              const totals = getTemplateMacroTotals(template.items);
+              return (
+                <article
+                  key={template.id}
+                  className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4"
+                >
+                  <p className="font-semibold text-[var(--color-ink)]">{template.label}</p>
+                  <p className="mt-1 text-xs text-[var(--color-muted)]">
+                    {totals.caloriesKcal} kcal - P {totals.proteinG}g
+                  </p>
+                </article>
+              );
+            })}
+            {visibleFoodItemTemplates.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-[var(--color-border-strong)] px-5 py-6 text-center text-sm text-[var(--color-muted)]">
+                {query ? "No food item templates found." : "No food item templates saved."}
+              </p>
+            ) : null}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-muted-strong)]">
+              Day templates
             </h3>
             <TransitionLink
               href={`/planner?date=${selectedDate}`}
@@ -148,8 +191,8 @@ export function LibraryShell({
             </TransitionLink>
           </div>
           <div className="space-y-2">
-            {visibleTemplates.map((template) => {
-              const totals = templateTotals(template);
+            {visibleDayTemplates.map((template) => {
+              const totals = getTemplateMacroTotals(template.items);
               return (
                 <article
                   key={template.id}
@@ -157,14 +200,14 @@ export function LibraryShell({
                 >
                   <p className="font-semibold text-[var(--color-ink)]">{template.label}</p>
                   <p className="mt-1 text-xs text-[var(--color-muted)]">
-                    {template.items.length} item{template.items.length === 1 ? "" : "s"} · {totals.caloriesKcal} kcal · P {totals.proteinG}g
+                    {template.items.length} item{template.items.length === 1 ? "" : "s"} - {totals.caloriesKcal} kcal - P {totals.proteinG}g
                   </p>
                 </article>
               );
             })}
-            {visibleTemplates.length === 0 ? (
+            {visibleDayTemplates.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-[var(--color-border-strong)] px-5 py-6 text-center text-sm text-[var(--color-muted)]">
-                No templates found.
+                {query ? "No day templates found." : "No day templates saved."}
               </p>
             ) : null}
           </div>

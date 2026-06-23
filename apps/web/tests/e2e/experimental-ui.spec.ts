@@ -35,6 +35,16 @@ test("canonical app navigation and settings are visible", async ({ page }) => {
     "href",
     "/planner?date=2026-03-19",
   );
+  await expect(page.getByRole("heading", { name: "Food item templates" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Day templates" })).toBeVisible();
+
+  await libraryHub.getByRole("link", { name: /Planner/ }).click();
+  await expect(page).toHaveURL(/\/planner\?date=2026-03-19$/);
+  await expect(page.getByRole("heading", { name: "Save currently selected day" })).toBeVisible();
+  await expect(page.getByText("Selected day", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Open log", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Food items/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Days/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByText("Theme", { exact: true })).toBeVisible();
@@ -124,6 +134,7 @@ test("keeps low meal action menus above the bottom controls", async ({ page }) =
   await page.getByRole("button", { name: "From template" }).click();
   const modal = page.getByRole("dialog", { name: "Meal Templates" });
   await expect(modal).toBeVisible();
+  await modal.getByRole("button", { name: /Days/ }).click();
   const templateRow = modal
     .getByText(templateLabel)
     .locator("xpath=ancestor::div[contains(@class,'flex items-center gap-2')][1]");

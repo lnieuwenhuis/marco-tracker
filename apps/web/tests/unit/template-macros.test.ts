@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   canEditAsSingleFoodTemplate,
   getTemplateMacroTotals,
+  isDayTemplate,
+  isFoodItemTemplate,
 } from "@/lib/template-macros";
 
 function buildTemplate(
@@ -52,5 +54,12 @@ describe("template macro helpers", () => {
     expect(canEditAsSingleFoodTemplate(buildTemplate("meal", 1))).toBe(true);
     expect(canEditAsSingleFoodTemplate(buildTemplate("meal", 2))).toBe(false);
     expect(canEditAsSingleFoodTemplate(buildTemplate("day", 1))).toBe(false);
+  });
+
+  it("classifies food item and day templates separately", () => {
+    expect(isFoodItemTemplate(buildTemplate("meal", 1))).toBe(true);
+    expect(isFoodItemTemplate(buildTemplate("meal", 2))).toBe(false);
+    expect(isDayTemplate(buildTemplate("day", 2))).toBe(true);
+    expect(isDayTemplate(buildTemplate("meal", 1))).toBe(false);
   });
 });
