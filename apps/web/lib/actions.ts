@@ -300,7 +300,11 @@ export async function completeOnboardingAction(
 }
 
 type SaveTemplateInput = {
+  productId?: string | null;
   label: string;
+  quantity?: number;
+  unit?: QuantityUnit;
+  servingMultiplier?: number;
   proteinG: number;
   carbsG: number;
   fatG: number;
@@ -317,12 +321,16 @@ function singleFoodTemplateInput(
     label: input.label,
     items: [
       {
-        productId: existingItem?.productId ?? null,
+        productId:
+          input.productId !== undefined
+            ? input.productId
+            : existingItem?.productId ?? null,
         mealGroupLabel: existingItem?.mealGroupLabel ?? null,
         label: input.label,
-        quantity: existingItem?.quantity ?? 1,
-        unit: existingItem?.unit ?? "serving" as const,
-        servingMultiplier: existingItem?.servingMultiplier ?? 1,
+        quantity: input.quantity ?? existingItem?.quantity ?? 1,
+        unit: input.unit ?? existingItem?.unit ?? ("serving" as const),
+        servingMultiplier:
+          input.servingMultiplier ?? existingItem?.servingMultiplier ?? 1,
         proteinG: input.proteinG,
         carbsG: input.carbsG,
         fatG: input.fatG,

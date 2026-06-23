@@ -1,5 +1,6 @@
 "use client";
 
+import type { QuantityUnit } from "@macro-tracker/db";
 import { useState } from "react";
 
 import { saveBarcodeFoodProductAction } from "@/lib/actions";
@@ -9,22 +10,22 @@ import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 type BarcodeResultProps = {
   product: OpenFoodFactsProduct | null;
   notFoundBarcode: string | null;
-  onAddToLog: (macros: {
-    label: string;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }) => void;
-  onSaveAsPreset: (input: {
-    label: string;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }) => void;
+  onAddToLog: (input: BarcodeFoodSelection) => void;
+  onSaveAsPreset: (input: BarcodeFoodSelection) => void;
   onScanAnother: () => void;
   onClose: () => void;
+};
+
+type BarcodeFoodSelection = {
+  productId?: string | null;
+  label: string;
+  quantity: number;
+  unit: QuantityUnit;
+  servingMultiplier: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  caloriesKcal: number;
 };
 
 type ManualFormValues = {
@@ -46,8 +47,15 @@ function scaleCalories(per100: number, grams: number): number {
 }
 
 function parsePositiveNumber(value: string): number {
-  const n = parseFloat(value);
+  const n = parseFloat(value.replace(/,/g, "."));
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 10) / 10 : 0;
+}
+
+function parseServingGrams(value: string): number {
+  const grams = parseFloat(value.replace(/,/g, "."));
+  return Number.isFinite(grams) && grams > 0
+    ? Math.round(grams * 100) / 100
+    : 100;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +130,7 @@ function NotFoundForm({
 
     // Hand the saved product back up so the normal product view can render
     onProductSaved({
+      productId: result.product.id,
       name: result.product.name,
       brands: result.product.brand,
       barcode: result.product.barcode ?? barcode,
@@ -381,7 +390,7 @@ export function BarcodeResult({
   const [isEditing, setIsEditing] = useState(false);
   const [edited, setEdited] = useState<EditedValues>(emptyEdited);
 
-  const serving = Number(servingG) || 100;
+  const serving = parseServingGrams(servingG);
 
   // ── Not-found state: delegate to the form sub-component ─────────────────
   if (!displayProduct && notFoundBarcode) {
@@ -431,16 +440,29 @@ export function BarcodeResult({
   }
 
   function valuesToSubmit() {
+    const quantityMetadata = {
+      quantity: serving,
+      unit: "g" as const,
+      servingMultiplier: 1,
+    };
+
     if (isEditing) {
       return {
+        productId: null,
         label: edited.name.trim() || displayLabel,
+        ...quantityMetadata,
         proteinG: parsePositiveNumber(edited.proteinG),
         carbsG: parsePositiveNumber(edited.carbsG),
         fatG: parsePositiveNumber(edited.fatG),
         caloriesKcal: Math.round(parsePositiveNumber(edited.caloriesKcal)),
       };
     }
-    return { label: displayLabel, ...scaled };
+    return {
+      productId: displayProduct?.productId ?? null,
+      label: displayLabel,
+      ...quantityMetadata,
+      ...scaled,
+    };
   }
 
   function updateEdited(field: keyof EditedValues, value: string) {
