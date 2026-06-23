@@ -28,10 +28,18 @@ import {
   searchFoodProducts,
   updateRecipe,
   updateMealEntry,
+  updateTemplate,
   upsertUserFromShooProfile,
   type DatabaseRuntime,
 } from "../src";
-import { foodProducts, mealEntries, recipeIngredients, recipes } from "../src/schema";
+import {
+  foodProducts,
+  mealEntries,
+  mealTemplateItems,
+  mealTemplates,
+  recipeIngredients,
+  recipes,
+} from "../src/schema";
 import { createTestDatabase } from "../src/testing";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
@@ -817,6 +825,270 @@ describe("database queries", () => {
     expect(summary.meals[0]?.sourceLabel).toBeNull();
   });
 
+  it("rejects inaccessible template item products on create", async () => {
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's shake",
+        source: "manual",
+        proteinPer100: 24,
+        carbsPer100: 12,
+        fatPer100: 3,
+        caloriesPer100: 171,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      createTemplate(
+        userId,
+        {
+          type: "meal",
+          label: "Cross-user template",
+          items: [
+            {
+              productId: otherProduct.id,
+              label: "Cross-user shake",
+              quantity: 76,
+              unit: "g",
+              servingMultiplier: 0.5,
+              proteinG: 24,
+              carbsG: 12,
+              fatG: 3,
+              caloriesKcal: 171,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const deletedProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Deleted template product",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+    await runtime.db
+      .update(foodProducts)
+      .set({ deletedAt: new Date() })
+      .where(eq(foodProducts.id, deletedProduct.id));
+
+    await expect(
+      createTemplate(
+        userId,
+        {
+          type: "meal",
+          label: "Deleted product template",
+          items: [
+            {
+              productId: deletedProduct.id,
+              label: "Deleted product",
+              proteinG: 10,
+              carbsG: 4,
+              fatG: 2,
+              caloriesKcal: 74,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    expect(await getTemplates(userId, runtime.db)).toHaveLength(0);
+  });
+
+  it("rejects inaccessible template item products on update", async () => {
+    const original = await createTemplate(
+      userId,
+      {
+        type: "meal",
+        label: "Original template",
+        items: [
+          {
+            label: "Original oats",
+            proteinG: 20,
+            carbsG: 40,
+            fatG: 8,
+            caloriesKcal: 312,
+          },
+        ],
+      },
+      runtime.db,
+    );
+    const otherUserId = await createOtherUser();
+    const otherProduct = await createPersonalFoodProduct(
+      otherUserId,
+      {
+        name: "Other user's yogurt",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+
+    await expect(
+      updateTemplate(
+        userId,
+        original.id,
+        {
+          type: "meal",
+          label: "Cross-user update",
+          items: [
+            {
+              productId: otherProduct.id,
+              label: "Yogurt",
+              proteinG: 15,
+              carbsG: 6,
+              fatG: 3,
+              caloriesKcal: 111,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const deletedProduct = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Deleted template yogurt",
+        source: "manual",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 2,
+        caloriesPer100: 74,
+      },
+      runtime.db,
+    );
+    await runtime.db
+      .update(foodProducts)
+      .set({ deletedAt: new Date() })
+      .where(eq(foodProducts.id, deletedProduct.id));
+
+    await expect(
+      updateTemplate(
+        userId,
+        original.id,
+        {
+          type: "meal",
+          label: "Deleted product update",
+          items: [
+            {
+              productId: deletedProduct.id,
+              label: "Deleted yogurt",
+              proteinG: 15,
+              carbsG: 6,
+              fatG: 3,
+              caloriesKcal: 111,
+            },
+          ],
+        },
+        runtime.db,
+      ),
+    ).rejects.toThrow("Food product not found.");
+
+    const stored = (await getTemplates(userId, runtime.db)).find(
+      (template) => template.id === original.id,
+    );
+    expect(stored).toMatchObject({
+      label: "Original template",
+      type: "meal",
+    });
+    expect(stored?.items).toHaveLength(1);
+    expect(stored?.items[0]).toMatchObject({
+      productId: null,
+      label: "Original oats",
+      quantity: 1,
+      unit: "serving",
+      servingMultiplier: 1,
+    });
+  });
+
+  it("allows global barcode products in templates and preserves quantity details", async () => {
+    const product = await saveBarcodeFoodProduct(
+      userId,
+      {
+        barcode: "8712345000099",
+        name: "Scanned Protein Drink",
+        brands: "Macro Lab",
+        proteinG: 20,
+        carbsG: 8,
+        fatG: 2,
+        caloriesKcal: 130,
+        servingSizeG: 250,
+      },
+      runtime.db,
+    );
+
+    const created = await createTemplate(
+      userId,
+      {
+        type: "meal",
+        label: "Scanned protein drink",
+        items: [
+          {
+            productId: product.id,
+            label: "Scanned Protein Drink",
+            quantity: 76,
+            unit: "g",
+            servingMultiplier: 0.76,
+            proteinG: 6.1,
+            carbsG: 2.4,
+            fatG: 0.6,
+            caloriesKcal: 40,
+          },
+        ],
+      },
+      runtime.db,
+    );
+    expect(created.items[0]).toMatchObject({
+      productId: product.id,
+      quantity: 76,
+      unit: "g",
+      servingMultiplier: 0.76,
+    });
+
+    const updated = await updateTemplate(
+      userId,
+      created.id,
+      {
+        type: "meal",
+        label: "Scanned protein drink updated",
+        items: [
+          {
+            productId: product.id,
+            label: "Scanned Protein Drink",
+            quantity: 125,
+            unit: "g",
+            servingMultiplier: 1.25,
+            proteinG: 10,
+            carbsG: 4,
+            fatG: 1,
+            caloriesKcal: 65,
+          },
+        ],
+      },
+      runtime.db,
+    );
+    expect(updated.items[0]).toMatchObject({
+      productId: product.id,
+      quantity: 125,
+      unit: "g",
+      servingMultiplier: 1.25,
+    });
+  });
+
   it("prevalidates all template item product access before applying a template", async () => {
     const otherUserId = await createOtherUser();
     const otherProduct = await createPersonalFoodProduct(
@@ -831,37 +1103,52 @@ describe("database queries", () => {
       },
       runtime.db,
     );
-    const template = await createTemplate(
+    const templateId = randomUUID();
+    await runtime.db.insert(mealTemplates).values({
+      id: templateId,
       userId,
+      type: "day",
+      label: "Blocked template",
+      updatedAt: new Date(),
+    });
+    await runtime.db.insert(mealTemplateItems).values([
       {
-        type: "day",
-        label: "Blocked template",
-        items: [
-          {
-            label: "Accessible oats",
-            proteinG: 20,
-            carbsG: 40,
-            fatG: 8,
-            caloriesKcal: 312,
-          },
-          {
-            productId: otherProduct.id,
-            label: "Cross-user shake",
-            proteinG: 24,
-            carbsG: 12,
-            fatG: 3,
-            caloriesKcal: 171,
-          },
-        ],
+        id: randomUUID(),
+        templateId,
+        productId: null,
+        mealGroupLabel: null,
+        sortOrder: 0,
+        label: "Accessible oats",
+        quantity: "1.00",
+        unit: "serving",
+        servingMultiplier: "1.00",
+        proteinG: "20.0",
+        carbsG: "40.0",
+        fatG: "8.0",
+        caloriesKcal: 312,
       },
-      runtime.db,
-    );
+      {
+        id: randomUUID(),
+        templateId,
+        productId: otherProduct.id,
+        mealGroupLabel: null,
+        sortOrder: 1,
+        label: "Cross-user shake",
+        quantity: "1.00",
+        unit: "serving",
+        servingMultiplier: "1.00",
+        proteinG: "24.0",
+        carbsG: "12.0",
+        fatG: "3.0",
+        caloriesKcal: 171,
+      },
+    ]);
 
     await expect(
       applyTemplateToDate(
         userId,
         {
-          templateId: template.id,
+          templateId,
           date: "2026-05-03",
         },
         runtime.db,

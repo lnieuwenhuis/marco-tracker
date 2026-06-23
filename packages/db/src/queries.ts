@@ -1796,6 +1796,12 @@ export async function createTemplate(
   const normalized = normalizeTemplateInput(input);
 
   return (database as any).transaction(async (tx: any) => {
+    await assertFoodProductsAccessibleForUser(
+      userId,
+      normalized.items.map((item) => item.productId),
+      tx,
+    );
+
     const templateId = crypto.randomUUID();
     const now = new Date();
     await tx.insert(mealTemplates).values({
@@ -1863,6 +1869,12 @@ export async function updateTemplate(
     if (!updated) {
       throw new Error("Template not found.");
     }
+
+    await assertFoodProductsAccessibleForUser(
+      userId,
+      normalized.items.map((item) => item.productId),
+      tx,
+    );
 
     await tx
       .delete(mealTemplateItems)

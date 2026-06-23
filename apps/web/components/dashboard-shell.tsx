@@ -1,6 +1,6 @@
 "use client";
 
-import type { DailySummary, MacroGoals, MealEntryRecord, MealEntryStatus, MealGroup, MealTemplate, QuickAddCandidate, RecipeRecord } from "@macro-tracker/db";
+import type { DailySummary, MacroGoals, MealEntryRecord, MealEntryStatus, MealGroup, MealTemplate, QuantityUnit, QuickAddCandidate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useMemo, useRef, useState, useTransition } from "react";
 
@@ -654,7 +654,11 @@ export function DashboardShell({
   }
 
   async function handleSavePreset(input: {
+    productId?: string | null;
     label: string;
+    quantity?: number;
+    unit?: QuantityUnit;
+    servingMultiplier?: number;
     proteinG: number;
     carbsG: number;
     fatG: number;
@@ -665,7 +669,11 @@ export function DashboardShell({
 
     try {
       const result = await saveTemplateAction({
+        productId: input.productId,
         label: input.label,
+        quantity: input.quantity,
+        unit: input.unit,
+        servingMultiplier: input.servingMultiplier,
         proteinG: input.proteinG,
         carbsG: input.carbsG,
         fatG: input.fatG,
@@ -1329,10 +1337,11 @@ export function DashboardShell({
               {
                 clientId: `draft-${crypto.randomUUID()}`,
                 status: defaultEntryStatus,
+                productId: macros.productId ?? null,
                 label: macros.label,
-                quantity: "1",
-                unit: "serving",
-                servingMultiplier: "1",
+                quantity: String(macros.quantity),
+                unit: macros.unit,
+                servingMultiplier: String(macros.servingMultiplier),
                 proteinG: String(macros.proteinG),
                 carbsG: String(macros.carbsG),
                 fatG: String(macros.fatG),
