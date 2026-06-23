@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getInitialPresetTemplateKind,
+  normalizePresetTemplateKind,
   resolvePresetModalActiveKind,
 } from "@/lib/preset-modal-state";
 
@@ -23,5 +24,11 @@ describe("preset modal state", () => {
         dayCount: 1,
       }),
     ).toBe("food");
+  });
+
+  it("normalizes food-specific template route hints", () => {
+    expect(normalizePresetTemplateKind("food")).toBe("food");
+    expect(normalizePresetTemplateKind("day")).toBe("day");
+    expect(normalizePresetTemplateKind("recipe")).toBeNull();
   });
 });

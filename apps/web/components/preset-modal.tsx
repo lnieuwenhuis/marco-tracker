@@ -27,6 +27,7 @@ type PresetModalProps = {
   presets: MealTemplate[];
   mutation: PresetMutationState | null;
   errorMessage: string | null;
+  initialKind?: PresetTemplateKind | null;
   onClose: () => void;
   onSelect: (preset: MealTemplate) => void;
   onSave: (input: TemplateMacroInput) => Promise<boolean>;
@@ -108,6 +109,7 @@ export function PresetModal({
   presets,
   mutation,
   errorMessage,
+  initialKind = null,
   onClose,
   onSelect,
   onSave,
@@ -128,10 +130,11 @@ export function PresetModal({
     [presets],
   );
   const [selectedKind, setSelectedKind] = useState<PresetTemplateKind>(() =>
-    getInitialPresetTemplateKind({
-      foodItemCount: foodItemPresets.length,
-      dayCount: dayPresets.length,
-    }),
+    initialKind ??
+      getInitialPresetTemplateKind({
+        foodItemCount: foodItemPresets.length,
+        dayCount: dayPresets.length,
+      }),
   );
   const activeKind = resolvePresetModalActiveKind({
     selectedKind,

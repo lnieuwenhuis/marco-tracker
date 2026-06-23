@@ -3,11 +3,13 @@ import { canAccessAdmin, ensureDateString, getDailySummary, getRecentQuickAddCan
 import { DashboardShell } from "@/components/dashboard-shell";
 import { requireOnboardedSessionUser } from "@/lib/auth";
 import { normalizeComposeAction } from "@/lib/compose";
+import { normalizePresetTemplateKind } from "@/lib/preset-modal-state";
 
 type HomePageProps = {
   searchParams: Promise<{
     date?: string;
     compose?: string;
+    templateKind?: string;
   }>;
 };
 
@@ -16,6 +18,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const params = await searchParams;
   const selectedDate = ensureDateString(params.date);
   const initialComposeAction = normalizeComposeAction(params.compose);
+  const initialPresetTemplateKind = normalizePresetTemplateKind(params.templateKind);
 
   const [dailySummary, goals, user, templates, recipes, recentCandidates] = await Promise.all([
     getDailySummary(sessionUser.userId, selectedDate),
@@ -39,6 +42,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
       recipes={recipes}
       recentCandidates={recentCandidates}
       initialComposeAction={initialComposeAction}
+      initialPresetTemplateKind={initialPresetTemplateKind}
     />
   );
 }

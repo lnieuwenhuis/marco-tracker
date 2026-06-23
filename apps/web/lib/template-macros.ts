@@ -34,11 +34,11 @@ export function getTemplateMacroTotals(
 }
 
 export function canEditAsSingleFoodTemplate(template: MealTemplate) {
-  return isFoodItemTemplate(template);
+  return template.type === "meal" && template.items.length === 1;
 }
 
 export function isFoodItemTemplate(template: MealTemplate) {
-  return template.type === "meal" && template.items.length === 1;
+  return template.type === "meal";
 }
 
 export function isDayTemplate(template: MealTemplate) {

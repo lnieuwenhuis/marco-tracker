@@ -175,8 +175,9 @@ test("keeps the empty food template tab selectable when only day templates exist
 }) => {
   const suffix = Date.now();
   const templateLabel = `Only day template ${suffix}`;
+  const selectedDate = "2035-07-01";
 
-  await page.goto("/api/test/session?email=owner@example.com");
+  await page.goto("/api/test/session?email=setup@example.com");
   await enableExperimentalUi(page);
   const seedResult = await page.evaluate(async ({ templateLabel }) => {
     const response = await fetch("/api/test/templates", {
@@ -200,13 +201,29 @@ test("keeps the empty food template tab selectable when only day templates exist
   }, { templateLabel });
   expect(seedResult).toEqual({ ok: true, status: 200 });
 
-  await page.goto("/?date=2035-07-01");
+  await page.goto(`/?date=${selectedDate}`);
   await page.getByRole("button", { name: "From template" }).click();
-  const modal = page.getByRole("dialog", { name: "Meal Templates" });
+  let modal = page.getByRole("dialog", { name: "Meal Templates" });
   await expect(modal).toBeVisible();
   await expect(modal.getByText(templateLabel)).toBeVisible();
+  await expect(modal.getByRole("button", { name: /Days/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 
-  await modal.getByRole("button", { name: /Food items \(0\)/ }).click();
+  await modal.getByRole("button", { name: "Close" }).click();
+  await expect(modal).toBeHidden();
+
+  await page.goto(`/library?date=${selectedDate}`);
+  const foodTemplateSection = page.locator("section").filter({
+    has: page.getByRole("heading", { name: "Food item templates" }),
+  });
+  await foodTemplateSection.getByRole("link", { name: "Add" }).click();
+  modal = page.getByRole("dialog", { name: "Meal Templates" });
+  await expect(modal).toBeVisible();
+  await expect(
+    modal.getByRole("button", { name: /Food items \(0\)/ }),
+  ).toHaveAttribute("aria-pressed", "true");
 
   await expect(modal.getByText("No food item templates yet.")).toBeVisible();
   await expect(modal.getByText(templateLabel)).toHaveCount(0);
@@ -215,6 +232,17 @@ test("keeps the empty food template tab selectable when only day templates exist
   await modal.getByRole("button", { name: "Save new template" }).click();
   await expect(modal.getByRole("textbox", { name: "Name" })).toBeVisible();
   await expect(modal.getByRole("button", { name: "Save template" })).toBeVisible();
+  await modal.getByRole("button", { name: "Close" }).click();
+  await expect(modal).toBeHidden();
+
+  await page.goto(`/planner?date=${selectedDate}`);
+  await page.getByRole("link", { name: /Food items/ }).click();
+  modal = page.getByRole("dialog", { name: "Meal Templates" });
+  await expect(modal).toBeVisible();
+  await expect(
+    modal.getByRole("button", { name: /Food items \(0\)/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(modal.getByRole("button", { name: "Save new template" })).toBeVisible();
 });
 
 test("experimental mode supports the bottom add flow and merged progress routes", async ({

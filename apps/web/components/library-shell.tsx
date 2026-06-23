@@ -151,7 +151,7 @@ export function LibraryShell({
               Food item templates
             </h3>
             <TransitionLink
-              href={`/?date=${selectedDate}&compose=template`}
+              href={`/?date=${selectedDate}&compose=template&templateKind=food`}
               motion="screen"
               className="text-xs font-semibold text-[var(--color-accent)]"
             >

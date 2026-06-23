@@ -58,7 +58,7 @@ describe("template macro helpers", () => {
 
   it("classifies food item and day templates separately", () => {
     expect(isFoodItemTemplate(buildTemplate("meal", 1))).toBe(true);
-    expect(isFoodItemTemplate(buildTemplate("meal", 2))).toBe(false);
+    expect(isFoodItemTemplate(buildTemplate("meal", 2))).toBe(true);
     expect(isDayTemplate(buildTemplate("day", 2))).toBe(true);
     expect(isDayTemplate(buildTemplate("meal", 1))).toBe(false);
   });

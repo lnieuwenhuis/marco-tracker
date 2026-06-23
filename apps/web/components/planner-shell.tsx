@@ -1,6 +1,6 @@
 "use client";
 
-import type { DailySummary, MealTemplate, RecipeRecord } from "@macro-tracker/db";
+import type { DailySummary, MealTemplate } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useDeferredValue, useMemo, useState, useTransition } from "react";
 
@@ -28,7 +28,7 @@ type PlannerShellProps = {
   canAccessAdmin: boolean;
   selectedDate: string;
   templates: MealTemplate[];
-  recipes: RecipeRecord[];
+  recipeCount: number;
   dailySummary: DailySummary;
 };
 
@@ -37,7 +37,7 @@ export function PlannerShell({
   canAccessAdmin,
   selectedDate,
   templates,
-  recipes,
+  recipeCount,
   dailySummary,
 }: PlannerShellProps) {
   const router = useRouter();
@@ -69,12 +69,12 @@ export function PlannerShell({
     {
       label: "Food items",
       count: foodItemTemplates.length,
-      href: `/?date=${selectedDate}&compose=template`,
+      href: `/?date=${selectedDate}&compose=template&templateKind=food`,
       active: false,
     },
     {
       label: "Recipes",
-      count: recipes.length,
+      count: recipeCount,
       href: `/recipes?date=${selectedDate}`,
       active: false,
     },
