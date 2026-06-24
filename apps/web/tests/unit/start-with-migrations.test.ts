@@ -17,14 +17,14 @@ async function getStartupMigrationModule() {
 }
 
 describe("startup migration database SSL config", () => {
-  it("uses TLS without chain verification when remote sslmode is omitted", async () => {
+  it("uses TLS with chain verification when remote sslmode is omitted", async () => {
     const { getPostgresConnectionConfig } = await getStartupMigrationModule();
 
     expect(
       getPostgresConnectionConfig("postgres://user:pass@db.example.com:5432/macro"),
     ).toEqual({
       connectionString: "postgres://user:pass@db.example.com:5432/macro",
-      ssl: { rejectUnauthorized: false },
+      ssl: { rejectUnauthorized: true },
     });
   });
 
@@ -48,6 +48,17 @@ describe("startup migration database SSL config", () => {
     ).toEqual({
       connectionString: "postgres://user:pass@db.example.com:5432/macro",
       ssl: { rejectUnauthorized: false },
+    });
+  });
+
+  it("preserves localhost non-TLS behavior", async () => {
+    const { getPostgresConnectionConfig } = await getStartupMigrationModule();
+
+    expect(
+      getPostgresConnectionConfig("postgres://user:pass@localhost:5432/macro"),
+    ).toEqual({
+      connectionString: "postgres://user:pass@localhost:5432/macro",
+      ssl: false,
     });
   });
 

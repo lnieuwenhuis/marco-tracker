@@ -166,7 +166,7 @@ export function getSslConfig(connectionString: string) {
 
   const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
   const shouldVerifyRemoteCertificate =
-    sslMode !== undefined && VERIFY_REMOTE_SSL_MODES.has(sslMode);
+    sslMode === undefined || VERIFY_REMOTE_SSL_MODES.has(sslMode);
 
   return { rejectUnauthorized: shouldVerifyRemoteCertificate };
 }
