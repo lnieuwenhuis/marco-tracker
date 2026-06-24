@@ -4,6 +4,7 @@ type ServerEnv = {
   sessionSecret: string;
   shooBaseUrl: string;
   enableTestRoutes: boolean;
+  testRoutesSecret: string | undefined;
   adminOwnerEmails: string[];
 };
 
@@ -56,6 +57,7 @@ export function getServerEnv(): ServerEnv {
     enableTestRoutes:
       process.env.NODE_ENV === "test" ||
       process.env.ENABLE_TEST_ROUTES === "true",
+    testRoutesSecret: process.env.TEST_ROUTES_SECRET,
     adminOwnerEmails: parseCsvList(process.env.ADMIN_OWNER_EMAILS),
   };
 

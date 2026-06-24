@@ -1,6 +1,6 @@
 import { expect, test, type Page, type APIRequestContext, type TestInfo } from "@playwright/test";
 
-import { createTestSession, uniqueTestEmail } from "./test-users";
+import { createTestSession, testRouteHeaders, uniqueTestEmail } from "./test-users";
 
 async function openAdminUserDetail(page: Page, email: string) {
   await page.goto(`/admin/users?q=${encodeURIComponent(email)}`);
@@ -18,6 +18,7 @@ async function ensureAdminUser(
   const adminEmail = uniqueTestEmail("admin", testInfo);
   const ownerEmail = uniqueTestEmail("owner", testInfo);
   const createUserResponse = await request.post("/api/test/session", {
+    headers: testRouteHeaders(),
     data: { email: adminEmail },
   });
   expect(createUserResponse.status()).toBe(200);

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { createTestSession, uniqueTestEmail } from "./test-users";
+import { createTestSession, testRouteHeaders, uniqueTestEmail } from "./test-users";
 
 async function startCustomFoodDraft(page: Page) {
   const addCustomButton = page.getByRole("button", { name: "Add custom" });
@@ -110,6 +110,7 @@ test("allows an allowlisted user to track food items across days", async ({
 
 test("blocks non-allowlisted test logins", async ({ request }) => {
   const response = await request.post("/api/test/session", {
+    headers: testRouteHeaders(),
     data: { email: "stranger@example.com" },
   });
 
