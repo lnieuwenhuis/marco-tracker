@@ -122,15 +122,19 @@ function getPglitePath(connectionString: string) {
   );
 }
 
-function getSslConfig(connectionString: string) {
-  if (
-    /sslmode=disable/i.test(connectionString) ||
-    /localhost|127\.0\.0\.1/i.test(connectionString)
-  ) {
+function isLocalDatabaseHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+export function getSslConfig(connectionString: string) {
+  const url = new URL(connectionString);
+  const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+
+  if (sslMode === "disable" || isLocalDatabaseHost(url.hostname.toLowerCase())) {
     return false;
   }
 
-  return { rejectUnauthorized: false };
+  return { rejectUnauthorized: true };
 }
 
 async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {

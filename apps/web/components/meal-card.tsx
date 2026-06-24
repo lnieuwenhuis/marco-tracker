@@ -168,22 +168,7 @@ export function MealCard({ draft, busy, error, isCopied = false, mealGroups = []
   return (
     <article className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-card-subtle)] shadow-[0_4px_16px_rgba(74,45,28,0.05)]">
       {/* Header — always visible */}
-      <div
-        className={`px-4 py-3 ${!isExpanded || canCollapse ? "cursor-pointer" : ""}`}
-        onClick={toggleExpanded}
-        role={!isExpanded || canCollapse ? "button" : undefined}
-        tabIndex={!isExpanded || canCollapse ? 0 : undefined}
-        onKeyDown={
-          !isExpanded || canCollapse
-            ? (e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  toggleExpanded();
-                }
-              }
-            : undefined
-        }
-      >
+      <div className="px-4 py-3">
         {/* Row 1: name + contextual primary action + overflow */}
         <div className="flex items-center gap-2">
           <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-ink)]">
@@ -225,6 +210,31 @@ export function MealCard({ draft, busy, error, isCopied = false, mealGroups = []
               className="shrink-0 rounded-lg border border-[var(--color-border-strong)] px-2.5 py-1 text-xs font-semibold text-[var(--color-muted)] disabled:opacity-50"
             >
               Restore
+            </button>
+          ) : null}
+
+          {!isExpanded || canCollapse ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={toggleExpanded}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-muted)] transition hover:bg-[var(--color-card-muted)] hover:text-[var(--color-ink)] disabled:opacity-50"
+              aria-label={`${isExpanded ? "Collapse" : "Edit details for"} ${heading}`}
+              aria-expanded={isExpanded}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {isExpanded ? <path d="M4 10l4-4 4 4" /> : <path d="M4 6l4 4 4-4" />}
+              </svg>
             </button>
           ) : null}
 

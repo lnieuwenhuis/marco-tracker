@@ -1,5 +1,6 @@
 type ServerEnv = {
   appUrl: string;
+  trustedOrigins: string[];
   sessionSecret: string;
   shooBaseUrl: string;
   enableTestRoutes: boolean;
@@ -13,6 +14,14 @@ function parseCsvList(value: string | undefined) {
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
+}
+
+function parseOriginList(value: string | undefined) {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => new URL(item).origin);
 }
 
 function readRequiredEnv(name: string, fallback?: string) {
@@ -32,12 +41,16 @@ export function getServerEnv(): ServerEnv {
 
   const isProduction = process.env.NODE_ENV === "production";
   const appUrl = readRequiredEnv("APP_URL", "http://localhost:3000");
+  const appOrigin = new URL(appUrl).origin;
   const sessionSecret = isProduction
     ? readRequiredEnv("SESSION_SECRET")
     : readRequiredEnv("SESSION_SECRET", "macro-tracker-dev-session-secret");
 
   cachedEnv = {
     appUrl,
+    trustedOrigins: Array.from(
+      new Set([appOrigin, ...parseOriginList(process.env.APP_TRUSTED_ORIGINS)]),
+    ),
     sessionSecret,
     shooBaseUrl: process.env.SHOO_BASE_URL ?? "https://shoo.dev",
     enableTestRoutes:

@@ -1,17 +1,23 @@
-import { completeUserOnboarding, getDb, upsertUserFromShooProfile } from "@macro-tracker/db";
+import {
+  completeUserOnboarding,
+  ensureUserRole,
+  getDb,
+  upsertUserFromShooProfile,
+} from "@macro-tracker/db";
 import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getServerEnv } from "@/lib/env";
-import { applySessionCookie, isSecureRequest } from "@/lib/session";
+import { applySessionCookie } from "@/lib/session";
 
-const TEST_LOGIN_ALLOWLIST = new Set([
-  "coach@example.com",
-  "owner@example.com",
-  "admin@example.com",
-  "user@example.com",
-  "setup@example.com",
-]);
+const TEST_LOGIN_BASES = new Set(["coach", "owner", "admin", "user", "setup"]);
+
+function getTestLoginBase(email: string) {
+  const match = /^([a-z]+)(?:\+[a-z0-9-]+)?@example\.com$/i.exec(email);
+  const base = match?.[1]?.toLowerCase();
+
+  return base && TEST_LOGIN_BASES.has(base) ? base : null;
+}
 
 async function ensureTestSchema() {
   const db = await getDb();
@@ -87,7 +93,9 @@ async function createTestSessionResponse(
     );
   }
 
-  if (!TEST_LOGIN_ALLOWLIST.has(email)) {
+  const testLoginBase = getTestLoginBase(email);
+
+  if (!testLoginBase) {
     return NextResponse.json(
       { error: "This test login is not allowlisted." },
       { status: 403 },
@@ -104,6 +112,9 @@ async function createTestSessionResponse(
     },
     db,
   );
+  if (testLoginBase === "owner") {
+    await ensureUserRole(user.id, "owner", db);
+  }
   if (options.onboarded) {
     await completeUserOnboarding(user.id, { preferredWeightUnit: "kg" }, db);
   } else {
@@ -126,8 +137,6 @@ async function createTestSessionResponse(
   await applySessionCookie(response, {
     userId: user.id,
     email: user.email,
-  }, {
-    secure: isSecureRequest(request),
   });
 
   return response;

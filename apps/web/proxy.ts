@@ -4,7 +4,6 @@ import { NextResponse } from "next/server";
 import {
   applySessionCookie,
   SESSION_COOKIE_NAME,
-  isSecureRequest,
   verifySessionToken,
 } from "@/lib/session";
 
@@ -41,9 +40,7 @@ export async function proxy(request: NextRequest) {
   }
 
   const response = NextResponse.next();
-  await applySessionCookie(response, sessionUser, {
-    secure: isSecureRequest(request),
-  });
+  await applySessionCookie(response, sessionUser);
   return response;
 }
 

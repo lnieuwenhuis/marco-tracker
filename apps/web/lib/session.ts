@@ -13,9 +13,13 @@ function getSessionKey() {
   return new TextEncoder().encode(getServerEnv().sessionSecret);
 }
 
+export function shouldUseSecureCookies() {
+  return new URL(getServerEnv().appUrl).protocol === "https:";
+}
+
 function getCookieOptions(
   maxAge = SESSION_MAX_AGE_SECONDS,
-  secure = getServerEnv().appUrl.startsWith("https://"),
+  secure = shouldUseSecureCookies(),
 ) {
   return {
     httpOnly: true,

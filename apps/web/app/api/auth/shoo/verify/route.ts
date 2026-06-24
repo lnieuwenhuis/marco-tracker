@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { getRequestOrigin } from "@/lib/request";
-import { isSecureRequest } from "@/lib/session";
 import { applySessionCookie } from "@/lib/session";
 import { authorizeShooLogin, ShooAuthError } from "@/lib/shoo";
 
@@ -19,17 +17,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const { sessionUser } = await authorizeShooLogin(body.idToken, undefined, {
-      appOrigin: getRequestOrigin(request),
-    });
+    const { sessionUser } = await authorizeShooLogin(body.idToken);
     const response = NextResponse.json({
       ok: true,
       user: sessionUser,
     });
 
-    await applySessionCookie(response, sessionUser, {
-      secure: isSecureRequest(request),
-    });
+    await applySessionCookie(response, sessionUser);
     return response;
   } catch (error) {
     if (error instanceof ShooAuthError) {

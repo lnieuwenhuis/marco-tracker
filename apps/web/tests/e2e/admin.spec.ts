@@ -1,4 +1,6 @@
-import { expect, test, type Page, type APIRequestContext } from "@playwright/test";
+import { expect, test, type Page, type APIRequestContext, type TestInfo } from "@playwright/test";
+
+import { createTestSession, uniqueTestEmail } from "./test-users";
 
 async function openAdminUserDetail(page: Page, email: string) {
   await page.goto(`/admin/users?q=${encodeURIComponent(email)}`);
@@ -8,14 +10,20 @@ async function openAdminUserDetail(page: Page, email: string) {
   ]);
 }
 
-async function ensureAdminUser(page: Page, request: APIRequestContext) {
+async function ensureAdminUser(
+  page: Page,
+  request: APIRequestContext,
+  testInfo: TestInfo,
+) {
+  const adminEmail = uniqueTestEmail("admin", testInfo);
+  const ownerEmail = uniqueTestEmail("owner", testInfo);
   const createUserResponse = await request.post("/api/test/session", {
-    data: { email: "admin@example.com" },
+    data: { email: adminEmail },
   });
   expect(createUserResponse.status()).toBe(200);
 
-  await page.goto("/api/test/session?email=owner@example.com");
-  await openAdminUserDetail(page, "admin@example.com");
+  await createTestSession(page, ownerEmail);
+  await openAdminUserDetail(page, adminEmail);
 
   const roleSelect = page.locator('select[name="role"]');
   if ((await roleSelect.inputValue()) !== "admin") {
@@ -24,12 +32,14 @@ async function ensureAdminUser(page: Page, request: APIRequestContext) {
     await page.waitForURL(/saved=role/);
     await expect(page.getByText("Role updated.")).toBeVisible();
   }
+
+  return adminEmail;
 }
 
 test("owner bootstrap account sees the admin entry and can open /admin", async ({
   page,
-}) => {
-  await page.goto("/api/test/session?email=owner@example.com");
+}, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("owner", testInfo));
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByRole("link", { name: "Admin Panel" })).toBeVisible();
   await page.getByRole("link", { name: "Admin Panel" }).click();
@@ -40,8 +50,8 @@ test("owner bootstrap account sees the admin entry and can open /admin", async (
 
 test("non-admin users do not see the admin link and get a 404 at /admin", async ({
   page,
-}) => {
-  await page.goto("/api/test/session?email=user@example.com");
+}, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(page.getByRole("link", { name: "Admin Panel" })).toHaveCount(0);
 
@@ -52,14 +62,14 @@ test("non-admin users do not see the admin link and get a 404 at /admin", async 
 test("owner can promote an admin, audit the change, and the admin is blocked from owner controls", async ({
   page,
   request,
-}) => {
-  await ensureAdminUser(page, request);
+}, testInfo) => {
+  const adminEmail = await ensureAdminUser(page, request, testInfo);
 
   await page.goto("/admin/audit");
   await expect(page.getByText("user.role_changed")).toBeVisible();
 
-  await page.goto("/api/test/session?email=admin@example.com");
-  await openAdminUserDetail(page, "admin@example.com");
+  await createTestSession(page, adminEmail);
+  await openAdminUserDetail(page, adminEmail);
   await expect(page.getByRole("button", { name: "Update role" })).toHaveCount(0);
 
   await page.goto("/admin/audit");
@@ -69,9 +79,9 @@ test("owner can promote an admin, audit the change, and the admin is blocked fro
 test("admin can edit, soft-delete, and restore barcode products", async ({
   page,
   request,
-}) => {
-  await ensureAdminUser(page, request);
-  await page.goto("/api/test/session?email=admin@example.com");
+}, testInfo) => {
+  const adminEmail = await ensureAdminUser(page, request, testInfo);
+  await createTestSession(page, adminEmail);
   await page.goto("/admin/barcodes");
 
   const barcode = `99${Date.now().toString().slice(-11)}`;

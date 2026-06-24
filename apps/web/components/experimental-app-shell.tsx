@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { type ReactNode, useEffect, useMemo, useState, useTransition } from "react";
 
 import type { ComposeAction } from "@/lib/compose";
 import {
@@ -32,17 +32,6 @@ type ExperimentalAppShellProps = {
   children: ReactNode;
 };
 
-function subscribeToNothing() {
-  return () => {};
-}
-
-function getShowPickerSupport() {
-  return (
-    typeof HTMLInputElement !== "undefined" &&
-    "showPicker" in HTMLInputElement.prototype
-  );
-}
-
 export function ExperimentalAppShell({
   userEmail,
   canAccessAdmin,
@@ -57,12 +46,6 @@ export function ExperimentalAppShell({
   const router = useRouter();
   const [isPending, startNavigation] = useTransition();
   const [profileOpen, setProfileOpen] = useState(false);
-  const supportsShowPicker = useSyncExternalStore(
-    subscribeToNothing,
-    getShowPickerSupport,
-    () => true,
-  );
-  const dateInputRef = useRef<HTMLInputElement>(null);
   const todayStr = useMemo(() => getLocalDateString(), []);
   const isToday = selectedDate === todayStr;
   const basePath = activeTab === "summary" ? "/summary" : "/";
@@ -198,57 +181,30 @@ export function ExperimentalAppShell({
                         </svg>
                       </TransitionLink>
 
-                      {supportsShowPicker ? (
-                        <button
-                          type="button"
-                          className="relative flex h-full flex-1 items-center justify-center text-center"
-                          onClick={() => dateInputRef.current?.showPicker?.()}
+                      <div className="relative flex h-full flex-1 items-center justify-center text-center">
+                        <span
+                          className="pointer-events-none text-sm font-semibold text-[var(--color-ink)]"
+                          aria-hidden="true"
                         >
-                          <span className="text-sm font-semibold text-[var(--color-ink)]">
-                            {formatSelectedDate(selectedDate)}
-                          </span>
-                          <input
-                            ref={dateInputRef}
-                            type="date"
-                            value={selectedDate}
-                            disabled={isPending}
-                            onChange={(event) => {
-                              const nextDate = event.target.value;
-                              const motion =
-                                nextDate < selectedDate ? "day-backward"
-                                : nextDate > selectedDate ? "day-forward"
-                                : "day-jump";
+                          {formatSelectedDate(selectedDate)}
+                        </span>
+                        <input
+                          type="date"
+                          value={selectedDate}
+                          disabled={isPending}
+                          onChange={(event) => {
+                            const nextDate = event.target.value;
+                            const motion =
+                              nextDate < selectedDate ? "day-backward"
+                              : nextDate > selectedDate ? "day-forward"
+                              : "day-jump";
 
-                              navigateToDate(nextDate, motion);
-                            }}
-                            className="absolute inset-0 cursor-pointer opacity-0"
-                            aria-label="Pick a day"
-                          />
-                        </button>
-                      ) : (
-                        <label className="relative flex h-full flex-1 items-center justify-center text-center">
-                          <span className="text-sm font-semibold text-[var(--color-ink)]">
-                            {formatSelectedDate(selectedDate)}
-                          </span>
-                          <input
-                            ref={dateInputRef}
-                            type="date"
-                            value={selectedDate}
-                            disabled={isPending}
-                            onChange={(event) => {
-                              const nextDate = event.target.value;
-                              const motion =
-                                nextDate < selectedDate ? "day-backward"
-                                : nextDate > selectedDate ? "day-forward"
-                                : "day-jump";
-
-                              navigateToDate(nextDate, motion);
-                            }}
-                            className="absolute inset-0 cursor-pointer opacity-0"
-                            aria-label="Pick a day"
-                          />
-                        </label>
-                      )}
+                            navigateToDate(nextDate, motion);
+                          }}
+                          className="absolute inset-0 cursor-pointer opacity-0"
+                          aria-label="Pick a day"
+                        />
+                      </div>
 
                       <TransitionLink
                         href={nextDateHref}
