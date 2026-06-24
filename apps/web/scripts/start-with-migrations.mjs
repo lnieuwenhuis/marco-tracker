@@ -20,8 +20,8 @@ const INSECURE_REMOTE_SSL_MODES = new Set([
   "no-verify",
   "prefer",
 ]);
-const REMOTE_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
-const VERIFY_REMOTE_SSL_MODES = new Set(["verify-ca", "verify-full"]);
+const REMOTE_SSL_MODES = new Set(["require", "verify-full"]);
+const VERIFY_REMOTE_SSL_MODES = new Set(["verify-full"]);
 
 function validateRemoteSslMode(url) {
   const sslMode = url.searchParams.get("sslmode")?.toLowerCase();

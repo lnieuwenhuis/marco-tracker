@@ -40,6 +40,14 @@ describe("database client SSL config", () => {
     });
   });
 
+  it("rejects unsupported remote sslmode=verify-ca", () => {
+    expect(() =>
+      getPostgresConnectionConfig(
+        "postgres://user:pass@db.example.com:5432/macro?sslmode=verify-ca",
+      ),
+    ).toThrow("unsupported sslmode=verify-ca");
+  });
+
   it("keeps chain verification for sslmode=verify-full", () => {
     expect(
       getPostgresConnectionConfig(
