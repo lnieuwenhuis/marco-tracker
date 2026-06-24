@@ -1,5 +1,6 @@
 import {
   createSessionToken,
+  shouldUseSecureCookies,
   verifySessionToken,
 } from "@/lib/session";
 import {
@@ -33,6 +34,7 @@ describe("shoo auth helpers", () => {
 
   beforeEach(async () => {
     process.env.APP_URL = "http://localhost:3000";
+    delete process.env.APP_TRUSTED_ORIGINS;
     process.env.SESSION_SECRET = "test-secret";
     process.env.SHOO_BASE_URL = "https://shoo.dev";
     resetServerEnvForTests();
@@ -170,7 +172,10 @@ describe("shoo auth helpers", () => {
     expect(updatedUser?.displayName).toBe("User Two");
   });
 
-  it("uses forwarded headers to resolve the public request origin", () => {
+  it("uses only trusted forwarded headers to resolve the public request origin", () => {
+    process.env.APP_URL = "https://macro.safasfly.dev";
+    resetServerEnvForTests();
+
     const request = new Request("http://127.0.0.1:3000/api/auth/shoo/verify", {
       headers: {
         "x-forwarded-proto": "https",
@@ -181,7 +186,39 @@ describe("shoo auth helpers", () => {
     expect(getRequestOrigin(request)).toBe("https://macro.safasfly.dev");
   });
 
-  it("can set a secure session cookie from the current request protocol", async () => {
+  it("does not use spoofed forwarded headers as the Shoo audience", async () => {
+    process.env.APP_URL = "https://macro.safasfly.dev";
+    resetServerEnvForTests();
+    const request = new Request("http://127.0.0.1:3000/api/auth/shoo/verify", {
+      headers: {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "evil.example",
+      },
+    });
+    const token = await createToken({
+      audience: "origin:https://evil.example",
+    });
+
+    expect(getRequestOrigin(request)).toBe("https://macro.safasfly.dev");
+    await expect(
+      verifyShooToken(token, {
+        appOrigin: getRequestOrigin(request),
+        shooBaseUrl: "https://shoo.dev",
+        issuer: "https://shoo.dev",
+        jwks: localJwks,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("uses configured app URL to keep production cookies secure", async () => {
+    process.env.APP_URL = "https://macro.safasfly.dev";
+    resetServerEnvForTests();
+    const request = new Request("http://127.0.0.1:3000/api/auth/shoo/verify", {
+      headers: {
+        "x-forwarded-proto": "http",
+        "x-forwarded-host": "macro.safasfly.dev",
+      },
+    });
     const response = NextResponse.json({ ok: true });
 
     await applySessionCookie(
@@ -190,11 +227,10 @@ describe("shoo auth helpers", () => {
         userId: "user-123",
         email: "coach@example.com",
       },
-      {
-        secure: true,
-      },
     );
 
+    expect(getRequestOrigin(request)).toBe("https://macro.safasfly.dev");
+    expect(shouldUseSecureCookies()).toBe(true);
     expect(response.cookies.get(SESSION_COOKIE_NAME)?.value).toBeTruthy();
     expect(response.headers.get("set-cookie")).toContain("Secure");
   });

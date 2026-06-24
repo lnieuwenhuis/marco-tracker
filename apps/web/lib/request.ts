@@ -1,21 +1,62 @@
-export function getRequestProtocol(request: Request) {
-  const forwardedProto = request.headers.get("x-forwarded-proto");
-  const protocol = forwardedProto?.split(",")[0]?.trim();
+import { getServerEnv } from "./env";
 
-  if (protocol) {
-    return `${protocol}:`;
+function getFirstForwardedValue(value: string | null) {
+  return value?.split(",")[0]?.trim() || null;
+}
+
+function normalizeProtocol(value: string | null) {
+  const protocol = value?.replace(/:$/, "").toLowerCase();
+
+  return protocol === "http" || protocol === "https" ? `${protocol}:` : null;
+}
+
+function normalizeHost(value: string | null) {
+  const host = value?.trim().toLowerCase();
+
+  if (!host || host.includes("/") || host.includes("@")) {
+    return null;
   }
 
-  return new URL(request.url).protocol;
+  try {
+    return new URL(`http://${host}`).host;
+  } catch {
+    return null;
+  }
+}
+
+function getTrustedOrigins() {
+  return new Set(getServerEnv().trustedOrigins);
+}
+
+function buildOrigin(protocol: string | null, host: string | null) {
+  if (!protocol || !host) {
+    return null;
+  }
+
+  return new URL(`${protocol}//${host}`).origin;
+}
+
+export function getRequestProtocol(request: Request) {
+  return new URL(getRequestOrigin(request)).protocol;
 }
 
 export function getRequestOrigin(request: Request) {
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  const host = forwardedHost?.split(",")[0]?.trim();
+  const trustedOrigins = getTrustedOrigins();
+  const appOrigin = new URL(getServerEnv().appUrl).origin;
+  const forwardedOrigin = buildOrigin(
+    normalizeProtocol(getFirstForwardedValue(request.headers.get("x-forwarded-proto"))),
+    normalizeHost(getFirstForwardedValue(request.headers.get("x-forwarded-host"))),
+  );
 
-  if (host) {
-    return `${getRequestProtocol(request)}//${host}`;
+  if (forwardedOrigin && trustedOrigins.has(forwardedOrigin)) {
+    return forwardedOrigin;
   }
 
-  return new URL(request.url).origin;
+  const requestOrigin = new URL(request.url).origin;
+
+  if (trustedOrigins.has(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  return appOrigin;
 }

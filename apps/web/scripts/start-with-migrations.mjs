@@ -10,15 +10,19 @@ function isPgliteConnectionString(connectionString) {
   return connectionString === "memory:" || connectionString.startsWith("file:");
 }
 
+function isLocalDatabaseHost(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
 function getSslConfig(connectionString) {
-  if (
-    /sslmode=disable/i.test(connectionString) ||
-    /localhost|127\.0\.0\.1/i.test(connectionString)
-  ) {
+  const url = new URL(connectionString);
+  const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+
+  if (sslMode === "disable" || isLocalDatabaseHost(url.hostname.toLowerCase())) {
     return false;
   }
 
-  return { rejectUnauthorized: false };
+  return { rejectUnauthorized: true };
 }
 
 async function runMigrationsIfNeeded() {
