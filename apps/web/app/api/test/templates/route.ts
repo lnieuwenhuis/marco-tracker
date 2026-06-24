@@ -3,10 +3,14 @@ import { NextResponse } from "next/server";
 
 import { getServerEnv } from "@/lib/env";
 import { getSessionUserFromCookies } from "@/lib/session";
+import { ensureTestRouteRequest } from "@/lib/test-routes";
 
 export async function POST(request: Request) {
-  if (!getServerEnv().enableTestRoutes) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const env = getServerEnv();
+  const testRouteError = ensureTestRouteRequest(request, env);
+
+  if (testRouteError) {
+    return testRouteError;
   }
 
   const sessionUser = await getSessionUserFromCookies();

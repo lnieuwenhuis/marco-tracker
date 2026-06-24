@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
 
-import { createTestSession, uniqueTestEmail } from "./test-users";
+import { createTestSession, testRouteHeaders, uniqueTestEmail } from "./test-users";
 
 async function enableExperimentalUi(page: Page) {
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
@@ -116,10 +116,10 @@ test("keeps low meal action menus above the bottom controls", async ({ page }, t
   await createTestSession(page, uniqueTestEmail("user", testInfo));
   await enableExperimentalUi(page);
   const seedResult = await page.evaluate(
-    async ({ items, templateLabel }) => {
+    async ({ headers, items, templateLabel }) => {
       const response = await fetch("/api/test/templates", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({
           type: "day",
           label: templateLabel,
@@ -128,7 +128,7 @@ test("keeps low meal action menus above the bottom controls", async ({ page }, t
       });
       return { ok: response.ok, status: response.status };
     },
-    { items, templateLabel },
+    { headers: testRouteHeaders(), items, templateLabel },
   );
   expect(seedResult).toEqual({ ok: true, status: 200 });
 
@@ -187,10 +187,10 @@ test("keeps the empty food template tab selectable when only day templates exist
 
   await createTestSession(page, uniqueTestEmail("setup", testInfo));
   await enableExperimentalUi(page);
-  const seedResult = await page.evaluate(async ({ templateLabel }) => {
+  const seedResult = await page.evaluate(async ({ headers, templateLabel }) => {
     const response = await fetch("/api/test/templates", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({
         type: "day",
         label: templateLabel,
@@ -206,7 +206,7 @@ test("keeps the empty food template tab selectable when only day templates exist
       }),
     });
     return { ok: response.ok, status: response.status };
-  }, { templateLabel });
+  }, { headers: testRouteHeaders(), templateLabel });
   expect(seedResult).toEqual({ ok: true, status: 200 });
 
   await page.goto(`/?date=${selectedDate}`);
