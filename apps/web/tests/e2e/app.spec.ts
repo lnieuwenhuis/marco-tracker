@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { createTestSession, testRouteHeaders, uniqueTestEmail } from "./test-users";
+
 async function startCustomFoodDraft(page: Page) {
   const addCustomButton = page.getByRole("button", { name: "Add custom" });
 
@@ -55,11 +57,13 @@ test("redirects unauthenticated users to login", async ({ page }) => {
 
 test("allows an allowlisted user to track food items across days", async ({
   page,
-}) => {
-  await page.goto("/api/test/session?email=coach@example.com");
+}, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("coach", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
   const datePicker = page.getByLabel("Pick a day").first();
+  await expect(page.getByLabel("Pick a day")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Pick a day" })).toHaveCount(0);
   const currentBrowserDate = await page.evaluate(() => {
     const value = new Date();
     const year = value.getFullYear();
@@ -106,14 +110,17 @@ test("allows an allowlisted user to track food items across days", async ({
 
 test("blocks non-allowlisted test logins", async ({ request }) => {
   const response = await request.post("/api/test/session", {
+    headers: testRouteHeaders(),
     data: { email: "stranger@example.com" },
   });
 
   expect(response.status()).toBe(403);
 });
 
-test("new users can calculate daily goals during setup", async ({ page }) => {
-  await page.goto("/api/test/session?email=setup@example.com&onboarded=false");
+test("new users can calculate daily goals during setup", async ({ page }, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("setup", testInfo), {
+    onboarded: false,
+  });
   await expect(page).toHaveURL(/\/onboarding$/);
   await expect(
     page.getByRole("heading", { name: "Set up your tracker" }),
@@ -141,8 +148,8 @@ test("new users can calculate daily goals during setup", async ({ page }) => {
 
 test("fresh users see the current dashboard empty states", async ({
   page,
-}) => {
-  await page.goto("/api/test/session?email=user@example.com");
+}, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
   await expect(
@@ -159,10 +166,10 @@ test("fresh users see the current dashboard empty states", async ({
 
 test("recent foods appear in quick add and create a prefilled draft", async ({
   page,
-}) => {
+}, testInfo) => {
   const label = `Quick Add Item ${Date.now()}`;
 
-  await page.goto("/api/test/session?email=user@example.com");
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
   await page.goto("/?date=2026-03-17");
@@ -193,19 +200,19 @@ test("recent foods appear in quick add and create a prefilled draft", async ({
 
 test("applies a saved day template as collapsed planned entries", async ({
   page,
-}) => {
+}, testInfo) => {
   const suffix = Date.now();
   const firstItem = `Template oats ${suffix}`;
   const secondItem = `Template yogurt ${suffix}`;
   const templateLabel = `Two item day ${suffix}`;
 
-  await page.goto("/api/test/session?email=user@example.com");
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
   const seedResult = await page.evaluate(
-    async ({ firstItem, secondItem, templateLabel }) => {
+    async ({ firstItem, headers, secondItem, templateLabel }) => {
       const response = await fetch("/api/test/templates", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({
           type: "day",
           label: templateLabel,
@@ -231,7 +238,7 @@ test("applies a saved day template as collapsed planned entries", async ({
       });
       return { ok: response.ok, status: response.status };
     },
-    { firstItem, secondItem, templateLabel },
+    { firstItem, headers: testRouteHeaders(), secondItem, templateLabel },
   );
   expect(seedResult).toEqual({ ok: true, status: 200 });
 
@@ -274,8 +281,8 @@ test("applies a saved day template as collapsed planned entries", async ({
 
 test("stats and weight pages load without day navigation chrome", async ({
   page,
-}) => {
-  await page.goto("/api/test/session?email=coach@example.com");
+}, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("coach", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
   await page.goto("/stats?date=2026-03-19");
@@ -300,20 +307,20 @@ test("stats and weight pages load without day navigation chrome", async ({
 
 test("macro trend chart shows planned intake as a translucent projection", async ({
   page,
-}) => {
+}, testInfo) => {
   const suffix = Date.now();
   const eatenLabel = `Projected lunch ${suffix}`;
   const plannedLabel = `Projected dinner ${suffix}`;
   const templateLabel = `Projected day ${suffix}`;
   const plannedDate = "2026-07-04";
 
-  await page.goto("/api/test/session?email=user@example.com");
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
   const seedResult = await page.evaluate(
-    async ({ eatenLabel, plannedLabel, templateLabel }) => {
+    async ({ eatenLabel, headers, plannedLabel, templateLabel }) => {
       const response = await fetch("/api/test/templates", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({
           type: "day",
           label: templateLabel,
@@ -337,7 +344,7 @@ test("macro trend chart shows planned intake as a translucent projection", async
       });
       return { ok: response.ok, status: response.status };
     },
-    { eatenLabel, plannedLabel, templateLabel },
+    { eatenLabel, headers: testRouteHeaders(), plannedLabel, templateLabel },
   );
   expect(seedResult).toEqual({ ok: true, status: 200 });
 
@@ -378,8 +385,8 @@ test("macro trend chart shows planned intake as a translucent projection", async
 
 test("weight goal validation errors stay visible on the page", async ({
   page,
-}) => {
-  await page.goto("/api/test/session?email=user@example.com");
+}, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await page.goto("/weight?date=2026-03-19");
 
   await expect(
@@ -399,8 +406,8 @@ test("weight goal validation errors stay visible on the page", async ({
 
 test("weight entries can be edited from the progress weight tab", async ({
   page,
-}) => {
-  await page.goto("/api/test/session?email=user@example.com");
+}, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await page.goto("/weight?date=2026-03-19");
   await expect(page).toHaveURL(/\/progress\?date=2026-03-19&tab=weight/);
   await expect(
@@ -408,20 +415,30 @@ test("weight entries can be edited from the progress weight tab", async ({
   ).toBeVisible();
 
   const entryForm = page.locator("#weight-entry-form");
-  await entryForm.getByRole("spinbutton", { name: "Weight (kg)" }).fill("82.5");
-  await entryForm.getByRole("spinbutton", { name: "Body fat %" }).fill("18.4");
-  await entryForm.getByRole("textbox", { name: "Notes" }).fill("Morning");
-  await page.getByRole("button", { name: "Save entry" }).click();
+  const weightInput = entryForm.getByRole("spinbutton", { name: "Weight (kg)" });
+  const bodyFatInput = entryForm.getByRole("spinbutton", { name: "Body fat %" });
+  const notesInput = entryForm.getByRole("textbox", { name: "Notes" });
+
+  await weightInput.fill("82.5");
+  await bodyFatInput.fill("18.4");
+  await notesInput.fill("Morning");
+  await expect(weightInput).toHaveValue("82.5");
+  await expect(bodyFatInput).toHaveValue("18.4");
+  await expect(notesInput).toHaveValue("Morning");
+  await entryForm.getByRole("button", { name: "Save entry" }).click();
   await expect(page.getByText(/Morning/)).toBeVisible();
 
   await page.getByRole("button", { name: /Edit entry from/ }).click();
   await expect(
     page.getByRole("heading", { name: "Edit Entry" }),
   ).toBeVisible();
-  await entryForm.getByRole("spinbutton", { name: "Weight (kg)" }).fill("81.9");
-  await entryForm.getByRole("spinbutton", { name: "Body fat %" }).fill("18.1");
-  await entryForm.getByRole("textbox", { name: "Notes" }).fill("After workout");
-  await page.getByRole("button", { name: "Update entry" }).click();
+  await weightInput.fill("81.9");
+  await bodyFatInput.fill("18.1");
+  await notesInput.fill("After workout");
+  await expect(weightInput).toHaveValue("81.9");
+  await expect(bodyFatInput).toHaveValue("18.1");
+  await expect(notesInput).toHaveValue("After workout");
+  await entryForm.getByRole("button", { name: "Update entry" }).click();
 
   await expect(page.getByText("81.9 kg").first()).toBeVisible();
   await expect(page.getByText("18.1% bf")).toBeVisible();

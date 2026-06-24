@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getRequestOrigin } from "@/lib/request";
-import { isSecureRequest } from "@/lib/session";
-import { applySessionCookie } from "@/lib/session";
+import { applySessionCookie, isSecureRequest } from "@/lib/session";
 import { authorizeShooLogin, ShooAuthError } from "@/lib/shoo";
 
 export async function POST(request: Request) {

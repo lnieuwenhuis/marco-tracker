@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 
 import {
   applySessionCookie,
-  SESSION_COOKIE_NAME,
   isSecureRequest,
+  SESSION_COOKIE_NAME,
   verifySessionToken,
 } from "@/lib/session";
 

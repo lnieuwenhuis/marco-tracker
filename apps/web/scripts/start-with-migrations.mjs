@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -10,15 +10,60 @@ function isPgliteConnectionString(connectionString) {
   return connectionString === "memory:" || connectionString.startsWith("file:");
 }
 
-function getSslConfig(connectionString) {
-  if (
-    /sslmode=disable/i.test(connectionString) ||
-    /localhost|127\.0\.0\.1/i.test(connectionString)
-  ) {
+function isLocalDatabaseHost(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+const INSECURE_REMOTE_SSL_MODES = new Set([
+  "allow",
+  "disable",
+  "no-verify",
+  "prefer",
+]);
+const SECURE_REMOTE_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
+
+function validateRemoteSslMode(url) {
+  const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+
+  if (!sslMode || isLocalDatabaseHost(url.hostname.toLowerCase())) {
+    return;
+  }
+
+  if (INSECURE_REMOTE_SSL_MODES.has(sslMode)) {
+    throw new Error(
+      `Remote PostgreSQL DATABASE_URL cannot use insecure sslmode=${sslMode}.`,
+    );
+  }
+
+  if (!SECURE_REMOTE_SSL_MODES.has(sslMode)) {
+    throw new Error(
+      `Remote PostgreSQL DATABASE_URL has unsupported sslmode=${sslMode}.`,
+    );
+  }
+}
+
+export function getSslConfig(connectionString) {
+  const url = new URL(connectionString);
+
+  if (isLocalDatabaseHost(url.hostname.toLowerCase())) {
     return false;
   }
 
-  return { rejectUnauthorized: false };
+  validateRemoteSslMode(url);
+
+  return { rejectUnauthorized: true };
+}
+
+export function getPostgresConnectionConfig(connectionString) {
+  const url = new URL(connectionString);
+  const ssl = getSslConfig(connectionString);
+
+  url.searchParams.delete("sslmode");
+
+  return {
+    connectionString: url.toString(),
+    ssl,
+  };
 }
 
 async function runMigrationsIfNeeded() {
@@ -30,10 +75,7 @@ async function runMigrationsIfNeeded() {
 
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const migrationsFolder = resolve(scriptDir, "../../../packages/db/drizzle");
-  const pool = new Pool({
-    connectionString,
-    ssl: getSslConfig(connectionString),
-  });
+  const pool = new Pool(getPostgresConnectionConfig(connectionString));
 
   try {
     console.info("Running database migrations before Next.js startup");
@@ -60,9 +102,18 @@ function startNext() {
   });
 }
 
-runMigrationsIfNeeded()
-  .then(startNext)
-  .catch((error) => {
-    console.error("Startup migrations failed", error);
-    process.exit(1);
-  });
+function isMainModule() {
+  return Boolean(
+    process.argv[1] &&
+      import.meta.url === pathToFileURL(resolve(process.argv[1])).href,
+  );
+}
+
+if (isMainModule()) {
+  runMigrationsIfNeeded()
+    .then(startNext)
+    .catch((error) => {
+      console.error("Startup migrations failed", error);
+      process.exit(1);
+    });
+}

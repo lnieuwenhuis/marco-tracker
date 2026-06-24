@@ -1,17 +1,24 @@
-import { completeUserOnboarding, getDb, upsertUserFromShooProfile } from "@macro-tracker/db";
+import {
+  completeUserOnboarding,
+  ensureUserRole,
+  getDb,
+  upsertUserFromShooProfile,
+} from "@macro-tracker/db";
 import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getServerEnv } from "@/lib/env";
 import { applySessionCookie, isSecureRequest } from "@/lib/session";
+import { ensureTestRouteRequest } from "@/lib/test-routes";
 
-const TEST_LOGIN_ALLOWLIST = new Set([
-  "coach@example.com",
-  "owner@example.com",
-  "admin@example.com",
-  "user@example.com",
-  "setup@example.com",
-]);
+const TEST_LOGIN_BASES = new Set(["coach", "owner", "admin", "user", "setup"]);
+
+function getTestLoginBase(email: string) {
+  const match = /^([a-z]+)(?:\+[a-z0-9-]+)?@example\.com$/i.exec(email);
+  const base = match?.[1]?.toLowerCase();
+
+  return base && TEST_LOGIN_BASES.has(base) ? base : null;
+}
 
 async function ensureTestSchema() {
   const db = await getDb();
@@ -87,7 +94,9 @@ async function createTestSessionResponse(
     );
   }
 
-  if (!TEST_LOGIN_ALLOWLIST.has(email)) {
+  const testLoginBase = getTestLoginBase(email);
+
+  if (!testLoginBase) {
     return NextResponse.json(
       { error: "This test login is not allowlisted." },
       { status: 403 },
@@ -104,6 +113,9 @@ async function createTestSessionResponse(
     },
     db,
   );
+  if (testLoginBase === "owner") {
+    await ensureUserRole(user.id, "owner", db);
+  }
   if (options.onboarded) {
     await completeUserOnboarding(user.id, { preferredWeightUnit: "kg" }, db);
   } else {
@@ -123,19 +135,26 @@ async function createTestSessionResponse(
         },
       });
 
-  await applySessionCookie(response, {
-    userId: user.id,
-    email: user.email,
-  }, {
-    secure: isSecureRequest(request),
-  });
+  await applySessionCookie(
+    response,
+    {
+      userId: user.id,
+      email: user.email,
+    },
+    {
+      secure: isSecureRequest(request),
+    },
+  );
 
   return response;
 }
 
 export async function GET(request: Request) {
-  if (!getServerEnv().enableTestRoutes) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const env = getServerEnv();
+  const testRouteError = ensureTestRouteRequest(request, env);
+
+  if (testRouteError) {
+    return testRouteError;
   }
 
   const url = new URL(request.url);
@@ -149,8 +168,11 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!getServerEnv().enableTestRoutes) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const env = getServerEnv();
+  const testRouteError = ensureTestRouteRequest(request, env);
+
+  if (testRouteError) {
+    return testRouteError;
   }
 
   const body = (await request.json()) as { email?: string; onboarded?: boolean };

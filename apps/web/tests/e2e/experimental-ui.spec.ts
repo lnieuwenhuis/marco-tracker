@@ -1,12 +1,14 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
 
+import { createTestSession, testRouteHeaders, uniqueTestEmail } from "./test-users";
+
 async function enableExperimentalUi(page: Page) {
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 }
 
-test("canonical app navigation and settings are visible", async ({ page }) => {
-  await page.goto("/api/test/session?email=coach@example.com");
+test("canonical app navigation and settings are visible", async ({ page }, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("coach", testInfo));
   await page.goto("/?date=2026-03-19");
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
 
@@ -62,7 +64,7 @@ test("canonical app navigation and settings are visible", async ({ page }) => {
 
 test("keeps the bottom nav anchored when visual viewport is shortened on launch", async ({
   page,
-}) => {
+}, testInfo) => {
   await page.addInitScript(() => {
     const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
     const fakeVisualViewport = {
@@ -84,7 +86,7 @@ test("keeps the bottom nav anchored when visual viewport is shortened on launch"
     });
   });
 
-  await page.goto("/api/test/session?email=user@example.com");
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await page.goto("/?date=2026-03-19");
 
   const primaryNav = page.getByRole("navigation", { name: "Primary" });
@@ -99,7 +101,7 @@ test("keeps the bottom nav anchored when visual viewport is shortened on launch"
   expect(bottomGap).toBeLessThanOrEqual(24);
 });
 
-test("keeps low meal action menus above the bottom controls", async ({ page }) => {
+test("keeps low meal action menus above the bottom controls", async ({ page }, testInfo) => {
   const suffix = Date.now();
   const targetLabel = `Low menu item ${suffix}`;
   const templateLabel = `Low menu day ${suffix}`;
@@ -111,13 +113,13 @@ test("keeps low meal action menus above the bottom controls", async ({ page }) =
     caloriesKcal: 250 + index,
   }));
 
-  await page.goto("/api/test/session?email=user@example.com");
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await enableExperimentalUi(page);
   const seedResult = await page.evaluate(
-    async ({ items, templateLabel }) => {
+    async ({ headers, items, templateLabel }) => {
       const response = await fetch("/api/test/templates", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({
           type: "day",
           label: templateLabel,
@@ -126,7 +128,7 @@ test("keeps low meal action menus above the bottom controls", async ({ page }) =
       });
       return { ok: response.ok, status: response.status };
     },
-    { items, templateLabel },
+    { headers: testRouteHeaders(), items, templateLabel },
   );
   expect(seedResult).toEqual({ ok: true, status: 200 });
 
@@ -145,6 +147,12 @@ test("keeps low meal action menus above the bottom controls", async ({ page }) =
     has: page.getByRole("heading", { name: targetLabel }),
   });
   await expect(targetCard).toBeVisible();
+  await expect(
+    targetCard.getByRole("button", { name: `More actions for ${targetLabel}` }),
+  ).toHaveCount(1);
+  await expect(
+    targetCard.getByRole("button", { name: targetLabel, exact: true }),
+  ).toHaveCount(0);
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 
   const trigger = targetCard.getByRole("button", {
@@ -172,17 +180,17 @@ test("keeps low meal action menus above the bottom controls", async ({ page }) =
 
 test("keeps the empty food template tab selectable when only day templates exist", async ({
   page,
-}) => {
+}, testInfo) => {
   const suffix = Date.now();
   const templateLabel = `Only day template ${suffix}`;
   const selectedDate = "2035-07-01";
 
-  await page.goto("/api/test/session?email=setup@example.com");
+  await createTestSession(page, uniqueTestEmail("setup", testInfo));
   await enableExperimentalUi(page);
-  const seedResult = await page.evaluate(async ({ templateLabel }) => {
+  const seedResult = await page.evaluate(async ({ headers, templateLabel }) => {
     const response = await fetch("/api/test/templates", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({
         type: "day",
         label: templateLabel,
@@ -198,7 +206,7 @@ test("keeps the empty food template tab selectable when only day templates exist
       }),
     });
     return { ok: response.ok, status: response.status };
-  }, { templateLabel });
+  }, { headers: testRouteHeaders(), templateLabel });
   expect(seedResult).toEqual({ ok: true, status: 200 });
 
   await page.goto(`/?date=${selectedDate}`);
@@ -247,8 +255,8 @@ test("keeps the empty food template tab selectable when only day templates exist
 
 test("experimental mode supports the bottom add flow and merged progress routes", async ({
   page,
-}) => {
-  await page.goto("/api/test/session?email=user@example.com");
+}, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await enableExperimentalUi(page);
 
   await page.goto("/summary?date=2026-03-19");
@@ -287,8 +295,8 @@ test("experimental mode supports the bottom add flow and merged progress routes"
 
 test("goals page includes the macro calculator and applies calculated targets", async ({
   page,
-}) => {
-  await page.goto("/api/test/session?email=user@example.com");
+}, testInfo) => {
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
   await page.goto("/progress?date=2026-03-19&tab=goals");
 
   await expect(page.getByRole("heading", { name: "Macro calculator" })).toBeVisible();
@@ -308,7 +316,7 @@ test("goals page includes the macro calculator and applies calculated targets", 
   await expect(page.getByRole("spinbutton", { name: "Fat g" })).toHaveValue("93.5");
 });
 
-test("photo estimate modal stays open while analyzing", async ({ page }) => {
+test("photo estimate modal stays open while analyzing", async ({ page }, testInfo) => {
   await page.route("/api/ai/food-photo", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     await route.fulfill({
@@ -331,7 +339,7 @@ test("photo estimate modal stays open while analyzing", async ({ page }) => {
     });
   });
 
-  await page.goto("/api/test/session?email=user@example.com");
+  await createTestSession(page, uniqueTestEmail("user", testInfo));
 
   await page.getByRole("button", { name: "Add food" }).click();
   await page.getByRole("button", { name: "Photo" }).click();

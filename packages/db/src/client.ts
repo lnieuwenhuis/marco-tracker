@@ -122,15 +122,60 @@ function getPglitePath(connectionString: string) {
   );
 }
 
-function getSslConfig(connectionString: string) {
-  if (
-    /sslmode=disable/i.test(connectionString) ||
-    /localhost|127\.0\.0\.1/i.test(connectionString)
-  ) {
+function isLocalDatabaseHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+const INSECURE_REMOTE_SSL_MODES = new Set([
+  "allow",
+  "disable",
+  "no-verify",
+  "prefer",
+]);
+const SECURE_REMOTE_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
+
+function validateRemoteSslMode(url: URL) {
+  const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+
+  if (!sslMode || isLocalDatabaseHost(url.hostname.toLowerCase())) {
+    return;
+  }
+
+  if (INSECURE_REMOTE_SSL_MODES.has(sslMode)) {
+    throw new Error(
+      `Remote PostgreSQL DATABASE_URL cannot use insecure sslmode=${sslMode}.`,
+    );
+  }
+
+  if (!SECURE_REMOTE_SSL_MODES.has(sslMode)) {
+    throw new Error(
+      `Remote PostgreSQL DATABASE_URL has unsupported sslmode=${sslMode}.`,
+    );
+  }
+}
+
+export function getSslConfig(connectionString: string) {
+  const url = new URL(connectionString);
+
+  if (isLocalDatabaseHost(url.hostname.toLowerCase())) {
     return false;
   }
 
-  return { rejectUnauthorized: false };
+  validateRemoteSslMode(url);
+
+  return { rejectUnauthorized: true };
+}
+
+export function getPostgresConnectionConfig(connectionString: string) {
+  const url = new URL(connectionString);
+  const ssl = getSslConfig(connectionString);
+
+  url.searchParams.delete("sslmode");
+
+  return {
+    connectionString: url.toString(),
+    ssl,
+  };
 }
 
 async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
@@ -817,10 +862,7 @@ export async function createDatabaseRuntime(
     };
   }
 
-  const pool = new Pool({
-    connectionString,
-    ssl: getSslConfig(connectionString),
-  });
+  const pool = new Pool(getPostgresConnectionConfig(connectionString));
   const db = drizzleNode(pool, { schema });
 
   return {
