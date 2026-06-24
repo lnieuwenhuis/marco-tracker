@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { getPostgresConnectionConfig, getSslConfig } from "../src";
 
 describe("database client SSL config", () => {
-  it("verifies remote database certificates by default", () => {
+  it("uses TLS without chain verification for remote database certificates by default", () => {
     expect(getSslConfig("postgres://user:pass@db.example.com:5432/macro")).toEqual({
-      rejectUnauthorized: true,
+      rejectUnauthorized: false,
     });
   });
 
@@ -29,10 +29,21 @@ describe("database client SSL config", () => {
     expect(getSslConfig("postgres://user:pass@127.0.0.1:5432/macro")).toBe(false);
   });
 
-  it("strips sslmode before constructing remote pool config", () => {
+  it("strips sslmode=require before constructing remote pool config", () => {
     expect(
       getPostgresConnectionConfig(
         "postgres://user:pass@db.example.com:5432/macro?sslmode=require",
+      ),
+    ).toEqual({
+      connectionString: "postgres://user:pass@db.example.com:5432/macro",
+      ssl: { rejectUnauthorized: false },
+    });
+  });
+
+  it("keeps chain verification for sslmode=verify-full", () => {
+    expect(
+      getPostgresConnectionConfig(
+        "postgres://user:pass@db.example.com:5432/macro?sslmode=verify-full",
       ),
     ).toEqual({
       connectionString: "postgres://user:pass@db.example.com:5432/macro",

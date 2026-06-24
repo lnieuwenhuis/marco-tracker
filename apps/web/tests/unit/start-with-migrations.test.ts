@@ -27,12 +27,25 @@ describe("startup migration database SSL config", () => {
     ).toThrow("sslmode=no-verify");
   });
 
-  it("strips secure remote sslmode before constructing the pool", async () => {
+  it("uses TLS without chain verification for remote sslmode=require", async () => {
     const { getPostgresConnectionConfig } = await getStartupMigrationModule();
 
     expect(
       getPostgresConnectionConfig(
         "postgres://user:pass@db.example.com:5432/macro?sslmode=require",
+      ),
+    ).toEqual({
+      connectionString: "postgres://user:pass@db.example.com:5432/macro",
+      ssl: { rejectUnauthorized: false },
+    });
+  });
+
+  it("keeps chain verification for remote sslmode=verify-full", async () => {
+    const { getPostgresConnectionConfig } = await getStartupMigrationModule();
+
+    expect(
+      getPostgresConnectionConfig(
+        "postgres://user:pass@db.example.com:5432/macro?sslmode=verify-full",
       ),
     ).toEqual({
       connectionString: "postgres://user:pass@db.example.com:5432/macro",
