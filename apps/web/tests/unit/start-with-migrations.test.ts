@@ -51,6 +51,16 @@ describe("startup migration database SSL config", () => {
     });
   });
 
+  it("rejects unsupported remote sslmode=verify-ca", async () => {
+    const { getPostgresConnectionConfig } = await getStartupMigrationModule();
+
+    expect(() =>
+      getPostgresConnectionConfig(
+        "postgres://user:pass@db.example.com:5432/macro?sslmode=verify-ca",
+      ),
+    ).toThrow("unsupported sslmode=verify-ca");
+  });
+
   it("keeps chain verification for remote sslmode=verify-full", async () => {
     const { getPostgresConnectionConfig } = await getStartupMigrationModule();
 
