@@ -1,5 +1,6 @@
 import {
   createSessionToken,
+  isSecureRequest,
   shouldUseSecureCookies,
   verifySessionToken,
 } from "@/lib/session";
@@ -208,6 +209,62 @@ describe("shoo auth helpers", () => {
         jwks: localJwks,
       }),
     ).rejects.toThrow();
+  });
+
+  it("uses trusted HTTPS request origins for secure session cookies", async () => {
+    process.env.APP_URL = "http://app.internal";
+    process.env.APP_TRUSTED_ORIGINS = "https://macro.safasfly.dev";
+    resetServerEnvForTests();
+    const request = new Request("http://127.0.0.1:3000/api/auth/shoo/verify", {
+      headers: {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "macro.safasfly.dev",
+      },
+    });
+    const response = NextResponse.json({ ok: true });
+
+    await applySessionCookie(
+      response,
+      {
+        userId: "user-123",
+        email: "coach@example.com",
+      },
+      {
+        secure: isSecureRequest(request),
+      },
+    );
+
+    expect(getRequestOrigin(request)).toBe("https://macro.safasfly.dev");
+    expect(shouldUseSecureCookies()).toBe(false);
+    expect(response.headers.get("set-cookie")).toContain("Secure");
+  });
+
+  it("ignores untrusted forwarded HTTPS spoofing for secure session cookies", async () => {
+    process.env.APP_URL = "http://app.internal";
+    process.env.APP_TRUSTED_ORIGINS = "https://macro.safasfly.dev";
+    resetServerEnvForTests();
+    const request = new Request("http://127.0.0.1:3000/api/auth/shoo/verify", {
+      headers: {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "evil.example",
+      },
+    });
+    const response = NextResponse.json({ ok: true });
+
+    await applySessionCookie(
+      response,
+      {
+        userId: "user-123",
+        email: "coach@example.com",
+      },
+      {
+        secure: isSecureRequest(request),
+      },
+    );
+
+    expect(getRequestOrigin(request)).toBe("http://app.internal");
+    expect(shouldUseSecureCookies()).toBe(false);
+    expect(response.headers.get("set-cookie")).not.toContain("Secure");
   });
 
   it("uses configured app URL to keep production cookies secure", async () => {

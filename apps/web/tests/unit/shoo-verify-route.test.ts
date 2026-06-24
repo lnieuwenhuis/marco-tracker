@@ -21,9 +21,13 @@ const mocked = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/lib/session", () => ({
-  applySessionCookie: mocked.applySessionCookie,
-}));
+vi.mock("@/lib/session", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/session")>();
+  return {
+    ...actual,
+    applySessionCookie: mocked.applySessionCookie,
+  };
+});
 
 vi.mock("@/lib/shoo", () => ({
   authorizeShooLogin: mocked.authorizeShooLogin,
@@ -46,7 +50,7 @@ function shooVerifyRequest(idToken: string, forwardedHost: string) {
 
 describe("POST /api/auth/shoo/verify", () => {
   beforeEach(() => {
-    process.env.APP_URL = "https://app.example";
+    process.env.APP_URL = "http://app.example";
     process.env.APP_TRUSTED_ORIGINS = "https://trusted.example";
     process.env.SESSION_SECRET = "test-secret";
     process.env.SHOO_BASE_URL = "https://shoo.dev";
@@ -100,6 +104,16 @@ describe("POST /api/auth/shoo/verify", () => {
       },
     );
     expect(mocked.applySessionCookie).toHaveBeenCalledTimes(1);
+    expect(mocked.applySessionCookie).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        userId: "user-1",
+        email: "coach@example.com",
+      },
+      {
+        secure: true,
+      },
+    );
   });
 
   it("rejects a token for an untrusted forwarded origin", async () => {
@@ -136,9 +150,54 @@ describe("POST /api/auth/shoo/verify", () => {
       "token-for-untrusted-origin",
       undefined,
       {
-        appOrigin: "https://app.example",
+        appOrigin: "http://app.example",
       },
     );
     expect(mocked.applySessionCookie).not.toHaveBeenCalled();
+  });
+
+  it("does not use untrusted forwarded HTTPS headers for secure cookies", async () => {
+    mocked.authorizeShooLogin.mockImplementation(async (idToken, _db, options) => {
+      if (
+        idToken !== "token-for-app-origin" ||
+        options?.appOrigin !== "http://app.example"
+      ) {
+        throw new mocked.ShooAuthError(
+          "Shoo token has an invalid audience.",
+          401,
+          "invalid_token",
+        );
+      }
+
+      return {
+        sessionUser: {
+          userId: "user-1",
+          email: "coach@example.com",
+        },
+      };
+    });
+
+    const response = await POST(
+      shooVerifyRequest("token-for-app-origin", "evil.example"),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      user: {
+        userId: "user-1",
+        email: "coach@example.com",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(mocked.applySessionCookie).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        userId: "user-1",
+        email: "coach@example.com",
+      },
+      {
+        secure: false,
+      },
+    );
   });
 });

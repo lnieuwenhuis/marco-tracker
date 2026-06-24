@@ -8,7 +8,7 @@ import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getServerEnv } from "@/lib/env";
-import { applySessionCookie } from "@/lib/session";
+import { applySessionCookie, isSecureRequest } from "@/lib/session";
 
 const TEST_LOGIN_BASES = new Set(["coach", "owner", "admin", "user", "setup"]);
 
@@ -134,10 +134,16 @@ async function createTestSessionResponse(
         },
       });
 
-  await applySessionCookie(response, {
-    userId: user.id,
-    email: user.email,
-  });
+  await applySessionCookie(
+    response,
+    {
+      userId: user.id,
+      email: user.email,
+    },
+    {
+      secure: isSecureRequest(request),
+    },
+  );
 
   return response;
 }
