@@ -9,8 +9,8 @@ import { NextResponse } from "next/server";
 
 import { getServerEnv } from "@/lib/env";
 import { applySessionCookie, isSecureRequest } from "@/lib/session";
+import { ensureTestRouteRequest } from "@/lib/test-routes";
 
-const TEST_ROUTE_SECRET_HEADER = "x-test-route-secret";
 const TEST_LOGIN_BASES = new Set(["coach", "owner", "admin", "user", "setup"]);
 
 function getTestLoginBase(email: string) {
@@ -18,16 +18,6 @@ function getTestLoginBase(email: string) {
   const base = match?.[1]?.toLowerCase();
 
   return base && TEST_LOGIN_BASES.has(base) ? base : null;
-}
-
-function hasValidTestRouteSecret(
-  request: Request,
-  testRoutesSecret: string | undefined,
-) {
-  return Boolean(
-    testRoutesSecret &&
-      request.headers.get(TEST_ROUTE_SECRET_HEADER) === testRoutesSecret,
-  );
 }
 
 async function ensureTestSchema() {
@@ -161,12 +151,10 @@ async function createTestSessionResponse(
 
 export async function GET(request: Request) {
   const env = getServerEnv();
+  const testRouteError = ensureTestRouteRequest(request, env);
 
-  if (!env.enableTestRoutes) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
-  }
-  if (!hasValidTestRouteSecret(request, env.testRoutesSecret)) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  if (testRouteError) {
+    return testRouteError;
   }
 
   const url = new URL(request.url);
@@ -181,12 +169,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const env = getServerEnv();
+  const testRouteError = ensureTestRouteRequest(request, env);
 
-  if (!env.enableTestRoutes) {
-    return NextResponse.json({ error: "Not found." }, { status: 404 });
-  }
-  if (!hasValidTestRouteSecret(request, env.testRoutesSecret)) {
-    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  if (testRouteError) {
+    return testRouteError;
   }
 
   const body = (await request.json()) as { email?: string; onboarded?: boolean };

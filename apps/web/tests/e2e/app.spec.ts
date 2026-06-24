@@ -209,10 +209,10 @@ test("applies a saved day template as collapsed planned entries", async ({
   await createTestSession(page, uniqueTestEmail("user", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
   const seedResult = await page.evaluate(
-    async ({ firstItem, secondItem, templateLabel }) => {
+    async ({ firstItem, headers, secondItem, templateLabel }) => {
       const response = await fetch("/api/test/templates", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({
           type: "day",
           label: templateLabel,
@@ -238,7 +238,7 @@ test("applies a saved day template as collapsed planned entries", async ({
       });
       return { ok: response.ok, status: response.status };
     },
-    { firstItem, secondItem, templateLabel },
+    { firstItem, headers: testRouteHeaders(), secondItem, templateLabel },
   );
   expect(seedResult).toEqual({ ok: true, status: 200 });
 
@@ -317,10 +317,10 @@ test("macro trend chart shows planned intake as a translucent projection", async
   await createTestSession(page, uniqueTestEmail("user", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
   const seedResult = await page.evaluate(
-    async ({ eatenLabel, plannedLabel, templateLabel }) => {
+    async ({ eatenLabel, headers, plannedLabel, templateLabel }) => {
       const response = await fetch("/api/test/templates", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({
           type: "day",
           label: templateLabel,
@@ -344,7 +344,7 @@ test("macro trend chart shows planned intake as a translucent projection", async
       });
       return { ok: response.ok, status: response.status };
     },
-    { eatenLabel, plannedLabel, templateLabel },
+    { eatenLabel, headers: testRouteHeaders(), plannedLabel, templateLabel },
   );
   expect(seedResult).toEqual({ ok: true, status: 200 });
 

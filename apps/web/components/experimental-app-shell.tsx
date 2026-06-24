@@ -181,7 +181,7 @@ export function ExperimentalAppShell({
                         </svg>
                       </TransitionLink>
 
-                      <div className="relative flex h-full flex-1 items-center justify-center text-center">
+                      <div className="relative flex h-full flex-1 items-center justify-center rounded-xl text-center">
                         <span
                           className="pointer-events-none text-sm font-semibold text-[var(--color-ink)]"
                           aria-hidden="true"
@@ -201,8 +201,12 @@ export function ExperimentalAppShell({
 
                             navigateToDate(nextDate, motion);
                           }}
-                          className="absolute inset-0 cursor-pointer opacity-0"
+                          className="peer absolute inset-0 cursor-pointer opacity-0"
                           aria-label="Pick a day"
+                        />
+                        <span
+                          className="pointer-events-none absolute inset-0 rounded-xl transition peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-accent)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--color-shell-panel)]"
+                          aria-hidden="true"
                         />
                       </div>
 
