@@ -43,7 +43,7 @@ Set these values for deployed environments:
 | --- | --- |
 | `APP_URL` | Required in production. Use the public app URL, including protocol, for redirects and origin checks. |
 | `SESSION_SECRET` | Required in production. Use a long random value for session signing. |
-| `DATABASE_URL` | Required for the app database. Use `memory:` or `file:<path>` for PGlite, or a PostgreSQL URL for deployed databases. |
+| `DATABASE_URL` | Required for the app database. Use `memory:` or `file:<path>` for PGlite, or a PostgreSQL URL for deployed databases. Remote PostgreSQL URLs use TLS with certificate verification by default when `sslmode` is omitted or set to `verify-full`; use `sslmode=require` only when intentionally opting into encrypted TLS without certificate verification for provider compatibility. |
 | `APP_TRUSTED_ORIGINS` | Optional comma-separated list of additional full origins allowed for auth flows, for example `https://preview.example.com,https://app.example.com`. |
 | `ENABLE_TEST_ROUTES` | Set to `true` only for controlled test runs that need the Playwright-only helper routes. Test routes are also enabled when `NODE_ENV=test`. |
 | `TEST_ROUTES_SECRET` | Required by enabled test routes. Send it in the `x-test-route-secret` header; production deployments should leave test routes disabled. |
