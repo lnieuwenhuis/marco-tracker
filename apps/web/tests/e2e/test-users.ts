@@ -2,13 +2,21 @@ import type { Page, TestInfo } from "@playwright/test";
 
 type TestUserBase = "coach" | "owner" | "admin" | "user" | "setup";
 
-const TEST_ROUTE_SECRET =
-  process.env.TEST_ROUTES_SECRET ?? "playwright-test-route-secret";
 const TEST_ROUTE_SECRET_HEADER = "x-test-route-secret";
+
+function getTestRouteSecret() {
+  const testRouteSecret = process.env.TEST_ROUTES_SECRET;
+
+  if (!testRouteSecret) {
+    throw new Error("TEST_ROUTES_SECRET is required for Playwright test routes.");
+  }
+
+  return testRouteSecret;
+}
 
 export function testRouteHeaders() {
   return {
-    [TEST_ROUTE_SECRET_HEADER]: TEST_ROUTE_SECRET,
+    [TEST_ROUTE_SECRET_HEADER]: getTestRouteSecret(),
   };
 }
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -5,8 +6,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const appPort = process.env.PLAYWRIGHT_PORT ?? "3000";
 const appUrl = `http://localhost:${appPort}`;
-const testRoutesSecret =
-  process.env.TEST_ROUTES_SECRET ?? "playwright-test-route-secret";
+const testRoutesSecret = process.env.TEST_ROUTES_SECRET ?? randomUUID();
+process.env.TEST_ROUTES_SECRET = testRoutesSecret;
 const e2eDatabaseUrl = `file:${join(
   tmpdir(),
   `macro-tracker-playwright-db-${Date.now()}`,
