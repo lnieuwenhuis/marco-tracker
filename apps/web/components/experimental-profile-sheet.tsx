@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 
+import { APP_VERSION_LABEL } from "@/lib/app-version";
+
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 import { ThemePicker } from "./theme-toggle";
 import { TransitionLink } from "./transition-link";
@@ -140,9 +142,14 @@ export function ExperimentalProfileSheet({
             </div>
 
             <div className="space-y-3 border-t border-[var(--color-border)] pt-4">
-              <p className="truncate text-xs text-[var(--color-muted)]">
-                {userEmail}
-              </p>
+              <div className="flex items-center justify-between gap-3 text-xs text-[var(--color-muted)]">
+                <p className="min-w-0 truncate">
+                  {userEmail}
+                </p>
+                <p className="shrink-0 font-semibold tabular-nums">
+                  {APP_VERSION_LABEL}
+                </p>
+              </div>
               <form action="/api/auth/logout" method="post">
                 <button
                   type="submit"
