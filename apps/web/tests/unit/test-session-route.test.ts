@@ -27,15 +27,29 @@ vi.mock("@macro-tracker/db", () => ({
 
 import { POST } from "@/app/api/test/session/route";
 
-function testSessionRequest(forwardedHost: string) {
+const TEST_ROUTE_SECRET = "unit-test-route-secret";
+
+function testSessionRequest(
+  forwardedHost: string,
+  options: {
+    email?: string;
+    includeSecret?: boolean;
+  } = {},
+) {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "x-forwarded-proto": "https",
+    "x-forwarded-host": forwardedHost,
+  };
+
+  if (options.includeSecret !== false) {
+    headers["x-test-route-secret"] = TEST_ROUTE_SECRET;
+  }
+
   return new Request("http://127.0.0.1:3000/api/test/session", {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-forwarded-proto": "https",
-      "x-forwarded-host": forwardedHost,
-    },
-    body: JSON.stringify({ email: "coach@example.com" }),
+    headers,
+    body: JSON.stringify({ email: options.email ?? "coach@example.com" }),
   });
 }
 
@@ -44,6 +58,7 @@ describe("POST /api/test/session", () => {
     process.env.APP_URL = "http://app.internal";
     process.env.APP_TRUSTED_ORIGINS = "https://trusted.example";
     process.env.ENABLE_TEST_ROUTES = "true";
+    process.env.TEST_ROUTES_SECRET = TEST_ROUTE_SECRET;
     resetServerEnvForTests();
     vi.clearAllMocks();
     mocked.execute.mockResolvedValue(undefined);
@@ -61,6 +76,7 @@ describe("POST /api/test/session", () => {
   afterEach(() => {
     delete process.env.APP_TRUSTED_ORIGINS;
     delete process.env.ENABLE_TEST_ROUTES;
+    delete process.env.TEST_ROUTES_SECRET;
     resetServerEnvForTests();
   });
 
@@ -93,6 +109,39 @@ describe("POST /api/test/session", () => {
       {
         secure: false,
       },
+    );
+  });
+
+  it("rejects owner promotion without the test route secret", async () => {
+    const response = await POST(
+      testSessionRequest("trusted.example", {
+        email: "owner+unsafe@example.com",
+        includeSecret: false,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocked.upsertUserFromShooProfile).not.toHaveBeenCalled();
+    expect(mocked.ensureUserRole).not.toHaveBeenCalled();
+  });
+
+  it("promotes owner test logins when the test route secret is valid", async () => {
+    mocked.upsertUserFromShooProfile.mockResolvedValueOnce({
+      id: "owner-1",
+      email: "owner+safe@example.com",
+    });
+
+    const response = await POST(
+      testSessionRequest("trusted.example", {
+        email: "owner+safe@example.com",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocked.ensureUserRole).toHaveBeenCalledWith(
+      "owner-1",
+      "owner",
+      expect.anything(),
     );
   });
 });
