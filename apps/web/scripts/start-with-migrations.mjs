@@ -20,7 +20,7 @@ const INSECURE_REMOTE_SSL_MODES = new Set([
   "no-verify",
   "prefer",
 ]);
-const SECURE_REMOTE_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
+const REMOTE_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
 
 function validateRemoteSslMode(url) {
   const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
@@ -35,7 +35,7 @@ function validateRemoteSslMode(url) {
     );
   }
 
-  if (!SECURE_REMOTE_SSL_MODES.has(sslMode)) {
+  if (!REMOTE_SSL_MODES.has(sslMode)) {
     throw new Error(
       `Remote PostgreSQL DATABASE_URL has unsupported sslmode=${sslMode}.`,
     );
@@ -51,7 +51,9 @@ export function getSslConfig(connectionString) {
 
   validateRemoteSslMode(url);
 
-  return { rejectUnauthorized: true };
+  const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+
+  return { rejectUnauthorized: sslMode !== "require" };
 }
 
 export function getPostgresConnectionConfig(connectionString) {

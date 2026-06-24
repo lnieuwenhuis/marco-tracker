@@ -29,10 +29,21 @@ describe("database client SSL config", () => {
     expect(getSslConfig("postgres://user:pass@127.0.0.1:5432/macro")).toBe(false);
   });
 
-  it("strips sslmode before constructing remote pool config", () => {
+  it("strips sslmode=require before constructing remote pool config", () => {
     expect(
       getPostgresConnectionConfig(
         "postgres://user:pass@db.example.com:5432/macro?sslmode=require",
+      ),
+    ).toEqual({
+      connectionString: "postgres://user:pass@db.example.com:5432/macro",
+      ssl: { rejectUnauthorized: false },
+    });
+  });
+
+  it("keeps chain verification for sslmode=verify-full", () => {
+    expect(
+      getPostgresConnectionConfig(
+        "postgres://user:pass@db.example.com:5432/macro?sslmode=verify-full",
       ),
     ).toEqual({
       connectionString: "postgres://user:pass@db.example.com:5432/macro",

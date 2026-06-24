@@ -17,6 +17,17 @@ async function getStartupMigrationModule() {
 }
 
 describe("startup migration database SSL config", () => {
+  it("verifies remote database certificates by default", async () => {
+    const { getPostgresConnectionConfig } = await getStartupMigrationModule();
+
+    expect(
+      getPostgresConnectionConfig("postgres://user:pass@db.example.com:5432/macro"),
+    ).toEqual({
+      connectionString: "postgres://user:pass@db.example.com:5432/macro",
+      ssl: { rejectUnauthorized: true },
+    });
+  });
+
   it("rejects insecure remote sslmode=no-verify", async () => {
     const { getPostgresConnectionConfig } = await getStartupMigrationModule();
 
@@ -27,12 +38,25 @@ describe("startup migration database SSL config", () => {
     ).toThrow("sslmode=no-verify");
   });
 
-  it("strips secure remote sslmode before constructing the pool", async () => {
+  it("uses TLS without chain verification for remote sslmode=require", async () => {
     const { getPostgresConnectionConfig } = await getStartupMigrationModule();
 
     expect(
       getPostgresConnectionConfig(
         "postgres://user:pass@db.example.com:5432/macro?sslmode=require",
+      ),
+    ).toEqual({
+      connectionString: "postgres://user:pass@db.example.com:5432/macro",
+      ssl: { rejectUnauthorized: false },
+    });
+  });
+
+  it("keeps chain verification for remote sslmode=verify-full", async () => {
+    const { getPostgresConnectionConfig } = await getStartupMigrationModule();
+
+    expect(
+      getPostgresConnectionConfig(
+        "postgres://user:pass@db.example.com:5432/macro?sslmode=verify-full",
       ),
     ).toEqual({
       connectionString: "postgres://user:pass@db.example.com:5432/macro",
