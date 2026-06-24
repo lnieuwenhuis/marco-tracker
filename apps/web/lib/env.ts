@@ -41,7 +41,10 @@ export function getServerEnv(): ServerEnv {
   }
 
   const isProduction = process.env.NODE_ENV === "production";
-  const appUrl = readRequiredEnv("APP_URL", "http://localhost:3000");
+  const appUrl = readRequiredEnv(
+    "APP_URL",
+    isProduction ? undefined : "http://localhost:3000",
+  );
   const appOrigin = new URL(appUrl).origin;
   const sessionSecret = isProduction
     ? readRequiredEnv("SESSION_SECRET")
