@@ -2,7 +2,7 @@
 
 A Next.js macro tracking app for logging meals, tracking goals and weight, saving reusable meal templates, scanning barcodes, and reviewing nutrition trends.
 
-Current app version: `v0.56.0`
+Current app version: `v2.06`
 
 ## Workspace
 
