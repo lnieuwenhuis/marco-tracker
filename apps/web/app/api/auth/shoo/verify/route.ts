@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getRequestOrigin } from "@/lib/request";
 import { applySessionCookie } from "@/lib/session";
 import { authorizeShooLogin, ShooAuthError } from "@/lib/shoo";
 
@@ -17,7 +18,9 @@ export async function POST(request: Request) {
       );
     }
 
-    const { sessionUser } = await authorizeShooLogin(body.idToken);
+    const { sessionUser } = await authorizeShooLogin(body.idToken, undefined, {
+      appOrigin: getRequestOrigin(request),
+    });
     const response = NextResponse.json({
       ok: true,
       user: sessionUser,
