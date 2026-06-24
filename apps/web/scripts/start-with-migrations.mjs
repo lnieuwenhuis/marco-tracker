@@ -21,7 +21,6 @@ const INSECURE_REMOTE_SSL_MODES = new Set([
   "prefer",
 ]);
 const REMOTE_SSL_MODES = new Set(["require", "verify-ca", "verify-full"]);
-const VERIFY_REMOTE_SSL_MODES = new Set(["verify-ca", "verify-full"]);
 
 function validateRemoteSslMode(url) {
   const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
@@ -54,7 +53,7 @@ export function getSslConfig(connectionString) {
 
   const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
 
-  return { rejectUnauthorized: VERIFY_REMOTE_SSL_MODES.has(sslMode) };
+  return { rejectUnauthorized: sslMode !== "require" };
 }
 
 export function getPostgresConnectionConfig(connectionString) {

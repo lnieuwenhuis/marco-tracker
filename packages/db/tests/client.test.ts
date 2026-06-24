@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { getPostgresConnectionConfig, getSslConfig } from "../src";
 
 describe("database client SSL config", () => {
-  it("uses TLS without chain verification for remote database certificates by default", () => {
+  it("verifies remote database certificates by default", () => {
     expect(getSslConfig("postgres://user:pass@db.example.com:5432/macro")).toEqual({
-      rejectUnauthorized: false,
+      rejectUnauthorized: true,
     });
   });
 
