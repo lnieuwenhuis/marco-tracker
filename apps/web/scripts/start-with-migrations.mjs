@@ -53,8 +53,10 @@ export function getSslConfig(connectionString) {
   validateRemoteSslMode(url);
 
   const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
+  const shouldVerifyRemoteCertificate =
+    sslMode !== undefined && VERIFY_REMOTE_SSL_MODES.has(sslMode);
 
-  return { rejectUnauthorized: VERIFY_REMOTE_SSL_MODES.has(sslMode) };
+  return { rejectUnauthorized: shouldVerifyRemoteCertificate };
 }
 
 export function getPostgresConnectionConfig(connectionString) {
