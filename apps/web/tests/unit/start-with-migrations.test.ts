@@ -17,14 +17,14 @@ async function getStartupMigrationModule() {
 }
 
 describe("startup migration database SSL config", () => {
-  it("verifies remote database certificates by default", async () => {
+  it("uses TLS without chain verification when remote sslmode is omitted", async () => {
     const { getPostgresConnectionConfig } = await getStartupMigrationModule();
 
     expect(
       getPostgresConnectionConfig("postgres://user:pass@db.example.com:5432/macro"),
     ).toEqual({
       connectionString: "postgres://user:pass@db.example.com:5432/macro",
-      ssl: { rejectUnauthorized: true },
+      ssl: { rejectUnauthorized: false },
     });
   });
 
