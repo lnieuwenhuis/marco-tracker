@@ -45,7 +45,7 @@ Requirements:
 Clone and install:
 
 ```bash
-git clone https://github.com/lnieuwenhuis/marco-tracker.git
+git clone https://github.com/lnieuwenhuis/marco-tracker.git macro-tracker
 cd macro-tracker
 pnpm install
 ```
