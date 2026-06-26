@@ -1600,6 +1600,7 @@ export async function updateMealEntry(
   entryId: string,
   input: MealEntryInput,
   db?: DatabaseClient,
+  options?: { recalculateProductMacros?: boolean },
 ) {
   const database = await resolveDb(db);
   await assertMealGroupAccessibleForUser(userId, input.mealGroupId, database);
@@ -1613,7 +1614,7 @@ export async function updateMealEntry(
     }
 
     productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
-    if (productControlsMealMacros(product)) {
+    if (options?.recalculateProductMacros !== false && productControlsMealMacros(product)) {
       productMacros = resolveProductNutritionForQuantity(
         product,
         input.quantity ?? product.defaultServingQuantity,

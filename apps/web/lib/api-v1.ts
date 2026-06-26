@@ -242,7 +242,21 @@ async function mergeMealEntryPatchBody(userId: string, entryId: string, body: un
     throw new Error("Meal entry not found.");
   }
 
-  return { ...existing, ...patch };
+  const recalculateProductMacros = [
+    "productId",
+    "quantity",
+    "unit",
+    "servingMultiplier",
+    "proteinG",
+    "carbsG",
+    "fatG",
+    "caloriesKcal",
+  ].some((key) => key in patch);
+
+  return {
+    body: { ...existing, ...patch },
+    recalculateProductMacros,
+  };
 }
 
 function requireTemplateBody(body: unknown) {
@@ -553,8 +567,16 @@ async function dispatchApiRequest(ctx: ApiContext) {
   if (resource === "meal-entries" && id) {
     const entryId = requireUuidPathParam(id);
     if (!action && ctx.method === "PATCH") {
-      const mergedBody = await mergeMealEntryPatchBody(ctx.userId, entryId, await readJson(ctx.request));
-      return ok(await updateMealEntry(ctx.userId, entryId, mergedBody as never));
+      const { body, recalculateProductMacros } = await mergeMealEntryPatchBody(
+        ctx.userId,
+        entryId,
+        await readJson(ctx.request),
+      );
+      return ok(
+        await updateMealEntry(ctx.userId, entryId, body as never, undefined, {
+          recalculateProductMacros,
+        }),
+      );
     }
     if (!action && ctx.method === "DELETE") {
       const deleted = await deleteMealEntry(ctx.userId, entryId);

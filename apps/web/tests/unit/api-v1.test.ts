@@ -664,6 +664,75 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("preserves product-backed meal entry macros when patching only the label", async () => {
+    const foodResponse = await apiRequest("POST", "/foods", {
+      token: fullToken,
+      body: {
+        name: "Patchable skyr",
+        brand: "Macro Dairy",
+        defaultServingQuantity: 100,
+        defaultServingUnit: "g",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 1,
+        caloriesPer100: 65,
+        servingWeightG: 100,
+      },
+    });
+    expect(foodResponse.status).toBe(201);
+    const food = (await foodResponse.json()).data;
+
+    const entryResponse = await apiRequest("POST", "/days/2026-03-19/entries", {
+      token: fullToken,
+      body: {
+        productId: food.id,
+        label: "",
+        quantity: 200,
+        unit: "g",
+        proteinG: 0,
+        carbsG: 0,
+        fatG: 0,
+        caloriesKcal: 1,
+      },
+    });
+    expect(entryResponse.status).toBe(201);
+    const entry = (await entryResponse.json()).data;
+    expect(entry).toMatchObject({
+      proteinG: 20,
+      carbsG: 8,
+      fatG: 2,
+      caloriesKcal: 130,
+    });
+
+    const foodUpdateResponse = await apiRequest("PATCH", `/foods/${food.id}`, {
+      token: fullToken,
+      body: {
+        proteinPer100: 20,
+        carbsPer100: 10,
+        fatPer100: 3,
+        caloriesPer100: 150,
+      },
+    });
+    expect(foodUpdateResponse.status).toBe(200);
+
+    const updatedEntryResponse = await apiRequest("PATCH", `/meal-entries/${entry.id}`, {
+      token: fullToken,
+      body: { label: "Renamed skyr" },
+    });
+    expect(updatedEntryResponse.status).toBe(200);
+    await expect(updatedEntryResponse.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        id: entry.id,
+        label: "Renamed skyr",
+        proteinG: 20,
+        carbsG: 8,
+        fatG: 2,
+        caloriesKcal: 130,
+      },
+    });
+  });
+
   it("omits internal food fields from search responses", async () => {
     await saveBarcodeFoodProduct(
       userId,
