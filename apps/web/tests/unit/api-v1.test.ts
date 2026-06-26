@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { handleApiV1Request } from "@/lib/api-v1";
 import { API_V1_ENDPOINTS, getApiV1OpenApi } from "@/lib/api-v1-openapi";
-import { HEAD, PUT } from "@/app/api/v1/[[...path]]/route";
+import * as apiV1Route from "@/app/api/v1/[[...path]]/route";
 
 describe("Macro Tracker API v1", () => {
   let runtime: DatabaseRuntime;
@@ -541,6 +541,75 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("requires read:foods before PATCH /foods/{id} can return merged product data", async () => {
+    const existing = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Private oats",
+        brand: "Macro Mill",
+        source: "manual",
+        barcode: "6234567890123",
+        proteinPer100: 13,
+        carbsPer100: 68,
+        fatPer100: 7,
+        caloriesPer100: 389,
+      },
+      runtime.db,
+    );
+    const writeOnlyFoods = await createApiToken(
+      userId,
+      {
+        name: "Write-only foods",
+        scopes: ["write:foods"],
+      },
+      runtime.db,
+    );
+
+    const rejected = await apiRequest("PATCH", `/foods/${existing.id}`, {
+      token: writeOnlyFoods.token,
+      body: { name: "Renamed oats" },
+    });
+
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "insufficient_scope" },
+    });
+  });
+
+  it("requires read:weight before PATCH /weight/entries/{id} can return merged entry data", async () => {
+    const writeOnlyWeight = await createApiToken(
+      userId,
+      {
+        name: "Write-only weight",
+        scopes: ["write:weight"],
+      },
+      runtime.db,
+    );
+    const created = await apiRequest("POST", "/weight/entries", {
+      token: fullToken,
+      body: {
+        date: "2026-03-19",
+        weightKg: 80,
+        bodyFatPct: 18.5,
+        notes: "Private notes",
+      },
+    });
+    expect(created.status).toBe(201);
+    const entry = (await created.json()).data;
+
+    const rejected = await apiRequest("PATCH", `/weight/entries/${entry.id}`, {
+      token: writeOnlyWeight.token,
+      body: { weightKg: 79.8 },
+    });
+
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "insufficient_scope" },
+    });
+  });
+
   it("allows read/write daily tokens to update meal entries and status", async () => {
     const readWriteDaily = await createApiToken(
       userId,
@@ -733,7 +802,7 @@ describe("Macro Tracker API v1", () => {
       userId,
       {
         name: "Foods only",
-        scopes: ["write:foods"],
+        scopes: ["write:foods", "read:foods"],
       },
       runtime.db,
     );
@@ -1059,6 +1128,41 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("returns one conflict without overwriting during duplicate-date weight entry races", async () => {
+    const [first, duplicate] = await Promise.all([
+      apiRequest("POST", "/weight/entries", {
+        token: fullToken,
+        body: {
+          date: "2026-03-19",
+          weightKg: 80,
+          bodyFatPct: 18.5,
+          notes: "Original entry",
+        },
+      }),
+      apiRequest("POST", "/weight/entries", {
+        token: fullToken,
+        body: {
+          date: "2026-03-19",
+          weightKg: 79,
+          bodyFatPct: 17,
+          notes: "Should not overwrite",
+        },
+      }),
+    ]);
+
+    expect([first.status, duplicate.status].sort()).toEqual([201, 409]);
+
+    const entries = await apiRequest("GET", "/weight/entries", { token: fullToken });
+    const payload = await entries.json();
+    expect(payload.data).toHaveLength(1);
+    expect(payload.data[0]).toMatchObject({
+      date: "2026-03-19",
+      weightKg: 80,
+      bodyFatPct: 18.5,
+      notes: "Original entry",
+    });
+  });
+
   it("returns conflict when a weight entry update reuses an existing date", async () => {
     const first = await apiRequest("POST", "/weight/entries", {
       token: fullToken,
@@ -1148,7 +1252,7 @@ describe("Macro Tracker API v1", () => {
   });
 
   it("routes unsupported Next HTTP methods through the API error envelope", async () => {
-    for (const [method, handler] of [["PUT", PUT], ["HEAD", HEAD]] as const) {
+    for (const [method, handler] of [["PUT", apiV1Route.PUT]] as const) {
       const response = await handler(new Request("http://localhost/api/v1/goals", { method }), {
         params: Promise.resolve({ path: ["goals"] }),
       });
@@ -1162,6 +1266,8 @@ describe("Macro Tracker API v1", () => {
         error: { code: "method_not_allowed" },
       });
     }
+
+    expect(apiV1Route).not.toHaveProperty("HEAD");
   });
 
   it("rejects invalid goal patches without persisting partial changes", async () => {

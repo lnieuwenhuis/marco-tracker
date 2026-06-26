@@ -71,7 +71,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/foods/{id}",
-    methods: [{ method: "patch", summary: "Update a personal food product", scopes: ["write:foods"] }],
+    methods: [{ method: "patch", summary: "Update a personal food product", scopes: ["write:foods", "read:foods"] }],
   },
   {
     path: "/barcodes/{barcode}",
@@ -133,7 +133,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   {
     path: "/weight/entries/{id}",
     methods: [
-      { method: "patch", summary: "Update a weight entry", scopes: ["write:weight"] },
+      { method: "patch", summary: "Update a weight entry", scopes: ["write:weight", "read:weight"] },
       { method: "delete", summary: "Delete a weight entry", scopes: ["write:weight"] },
     ],
   },

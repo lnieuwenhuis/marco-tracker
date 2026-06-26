@@ -2574,6 +2574,36 @@ export async function createWeightEntry(
   return mapWeightRow(created);
 }
 
+export async function createWeightEntryNoOverwrite(
+  userId: string,
+  input: WeightEntryInput,
+  db?: DatabaseClient,
+): Promise<WeightEntryRecord | null> {
+  const database = await resolveDb(db);
+  const normalized = validateWeightEntryInput(input);
+
+  const [created] = await database
+    .insert(weightEntries)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      entryDate: normalized.date,
+      weightKg: normalized.weightKg.toFixed(2),
+      bodyFatPct:
+        normalized.bodyFatPct != null
+          ? normalized.bodyFatPct.toFixed(1)
+          : null,
+      notes: normalized.notes,
+      updatedAt: new Date(),
+    })
+    .onConflictDoNothing({
+      target: [weightEntries.userId, weightEntries.entryDate],
+    })
+    .returning();
+
+  return created ? mapWeightRow(created) : null;
+}
+
 export async function updateWeightEntry(
   userId: string,
   entryId: string,

@@ -33,10 +33,6 @@ export async function PUT(request: Request, context: ApiV1RouteContext) {
   return handle(request, context);
 }
 
-export async function HEAD(request: Request, context: ApiV1RouteContext) {
-  return handle(request, context);
-}
-
 export async function OPTIONS(request: Request, context: ApiV1RouteContext) {
   return handle(request, context);
 }

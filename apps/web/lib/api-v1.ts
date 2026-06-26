@@ -6,7 +6,7 @@ import {
   createRecipe,
   createTemplate,
   createTemplateFromDate,
-  createWeightEntry,
+  createWeightEntryNoOverwrite,
   deleteMealEntry,
   deleteMealGroup,
   deleteRecipe,
@@ -690,14 +690,14 @@ async function dispatchApiRequest(ctx: ApiContext) {
     }
     if (id === "entries" && !action && ctx.method === "POST") {
       const body = requireBodyDate(await readJson(ctx.request));
-      const existing = (await getWeightEntries(ctx.userId)).find((entry) => entry.date === body.date);
-      if (existing) {
+      const created = await createWeightEntryNoOverwrite(ctx.userId, body as never);
+      if (!created) {
         return conflict(
           "weight_entry_date_conflict",
           "A weight entry already exists for this date.",
         );
       }
-      return ok(await createWeightEntry(ctx.userId, body as never), 201);
+      return ok(created, 201);
     }
     if (id === "entries" && action && ctx.method === "PATCH") {
       const entryId = requireUuidPathParam(action);
@@ -779,7 +779,8 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
   }
   if (resource === "foods") {
     if (id === "search" && !action && method === "GET") return ["read:foods"];
-    if ((!id && method === "POST") || (id && id !== "search" && !action && method === "PATCH")) return ["write:foods"];
+    if (!id && method === "POST") return ["write:foods"];
+    if (id && id !== "search" && !action && method === "PATCH") return ["write:foods", "read:foods"];
   }
   if (resource === "barcodes" && id && !action && method === "GET") return ["read:foods"];
   if (resource === "templates") {
@@ -801,7 +802,9 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
     if ((!id && method === "GET") || (id === "goal" && !action && method === "GET") || (id === "entries" && !action && method === "GET")) {
       return ["read:weight"];
     }
-    if ((id === "entries" && !action && method === "POST") || (id === "entries" && action && (method === "PATCH" || method === "DELETE")) || (id === "goal" && !action && method === "PATCH")) {
+    if (id === "entries" && !action && method === "POST") return ["write:weight"];
+    if (id === "entries" && action && method === "PATCH") return ["write:weight", "read:weight"];
+    if ((id === "entries" && action && method === "DELETE") || (id === "goal" && !action && method === "PATCH")) {
       return ["write:weight"];
     }
   }
