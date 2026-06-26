@@ -49,13 +49,15 @@ cd macro-tracker
 pnpm install
 ```
 
-Create a `.env` file:
+Export the required environment variables in the shell or deployment environment that starts the web app:
 
 ```bash
-APP_URL=http://localhost:3000
-SESSION_SECRET=change-this-to-a-long-random-string
-DATABASE_URL=file:./macro-tracker.db
+export APP_URL=http://localhost:3000
+export SESSION_SECRET=change-this-to-a-long-random-string
+export DATABASE_URL=file:./macro-tracker.db
 ```
+
+The web package runs from `apps/web`, and its production start script reads `process.env` directly. A repo-root `.env` file is not loaded automatically by the start command. If you use a relative PGlite URL such as `file:./macro-tracker.db`, it is resolved relative to the web app process working directory; use an absolute `file:/.../macro-tracker.db` path if that location needs to be unambiguous.
 
 Then build and run:
 
@@ -77,8 +79,8 @@ Useful optional environment variables:
 | `OPENROUTER_MODEL` | Optional primary OpenRouter model. Must be free, for example `google/gemma-4-26b-a4b-it:free`. |
 | `OPENROUTER_FALLBACK_MODELS` | Optional comma-separated free fallback models. |
 | `OPENROUTER_MODEL_TIMEOUT_MS` | Optional request timeout for food-photo estimates. |
-
-Leave `ENABLE_TEST_ROUTES` off in production unless you are doing a controlled test run.
+| `ENABLE_TEST_ROUTES` | Enables controlled test-only routes. Leave off in production unless you are doing a controlled test run. |
+| `TEST_ROUTES_SECRET` | Required whenever `ENABLE_TEST_ROUTES=true`; send it in the `x-test-route-secret` header. |
 
 ## Contributing
 
