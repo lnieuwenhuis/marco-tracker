@@ -90,12 +90,19 @@ function emptyOk(data: unknown = {}) {
   return ok(data);
 }
 
-function error(status: number, code: string, message: string) {
-  return jsonWithCors({ ok: false, error: { code, message } }, { status });
+function error(status: number, code: string, message: string, init?: ResponseInit) {
+  return jsonWithCors({ ok: false, error: { code, message } }, { ...init, status });
 }
 
-function methodNotAllowed() {
-  return error(405, "method_not_allowed", "Method is not allowed for this endpoint.");
+function methodNotAllowed(path?: string[]) {
+  const allowedMethods = path ? getAllowedMethods(path) : [];
+  return error(405, "method_not_allowed", "Method is not allowed for this endpoint.", {
+    headers: allowedMethods.length > 0 ? { Allow: allowedMethods.join(", ") } : undefined,
+  });
+}
+
+function conflict(code: string, message: string) {
+  return error(409, code, message);
 }
 
 function notFound(message = "API endpoint not found.") {
@@ -468,7 +475,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
   const [resource, id, action] = ctx.path;
 
   if (resource === "me" && !id) {
-    if (ctx.method !== "GET") return methodNotAllowed();
+    if (ctx.method !== "GET") return methodNotAllowed(ctx.path);
     const [user, goals] = await Promise.all([
       getUserById(ctx.userId),
       getUserGoals(ctx.userId),
@@ -486,7 +493,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       await saveUserGoals(ctx.userId, goals);
       return ok(await getUserGoals(ctx.userId));
     }
-    return methodNotAllowed();
+    return methodNotAllowed(ctx.path);
   }
 
   if (resource === "days") {
@@ -498,7 +505,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       const body = requireMealEntryBody(await readJson(ctx.request));
       return ok(await createMealEntry(ctx.userId, { ...(body as object), date } as never), 201);
     }
-    return methodNotAllowed();
+    return methodNotAllowed(ctx.path);
   }
 
   if (resource === "meal-entries" && id) {
@@ -519,7 +526,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       }
       return ok(await markMealEntryStatus(ctx.userId, entryId, body.status));
     }
-    return methodNotAllowed();
+    return methodNotAllowed(ctx.path);
   }
 
   if (resource === "meal-groups") {
@@ -532,7 +539,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
     if (id === "reorder" && !action && ctx.method === "POST") {
       return ok(await reorderMealGroups(ctx.userId, getOrderedGroupIds(await readJson(ctx.request))));
     }
-    if (id === "reorder" && !action) return methodNotAllowed();
+    if (id === "reorder" && !action) return methodNotAllowed(ctx.path);
     if (id && !action && ctx.method === "PATCH") {
       return ok(await updateMealGroup(ctx.userId, requireUuidPathParam(id), requireMealGroupBody(await readJson(ctx.request)) as never));
     }
@@ -541,7 +548,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       if (!deleted) return notFound("Meal group not found.");
       return emptyOk({ deleted: true });
     }
-    return methodNotAllowed();
+    return methodNotAllowed(ctx.path);
   }
 
   if (resource === "foods") {
@@ -549,7 +556,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       const products = await searchFoodProducts(ctx.userId, ctx.url.searchParams.get("q") ?? "");
       return ok(products.map(mapFoodProductForApi));
     }
-    if (id === "search" && !action) return methodNotAllowed();
+    if (id === "search" && !action) return methodNotAllowed(ctx.path);
     if (!id && ctx.method === "POST") {
       const product = await createPersonalFoodProduct(
         ctx.userId,
@@ -565,11 +572,11 @@ async function dispatchApiRequest(ctx: ApiContext) {
       );
       return ok(mapFoodProductForApi(product));
     }
-    return methodNotAllowed();
+    return methodNotAllowed(ctx.path);
   }
 
   if (resource === "barcodes" && id && !action) {
-    if (ctx.method !== "GET") return methodNotAllowed();
+    if (ctx.method !== "GET") return methodNotAllowed(ctx.path);
     const product = await lookupBarcodeFoodProduct(decodeURIComponent(id));
     return ok(product ? mapFoodProductForApi(product) : null);
   }
@@ -578,7 +585,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
     if (id === "from-day" && !action && ctx.method === "POST") {
       return ok(await createTemplateFromDate(ctx.userId, requireTemplateFromDayBody(await readJson(ctx.request)) as never), 201);
     }
-    if (id === "from-day" && !action) return methodNotAllowed();
+    if (id === "from-day" && !action) return methodNotAllowed(ctx.path);
     if (!id && ctx.method === "GET") {
       return ok(await getTemplates(ctx.userId));
     }
@@ -601,7 +608,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       if (!deleted) return notFound("Template not found.");
       return emptyOk({ deleted: true });
     }
-    return methodNotAllowed();
+    return methodNotAllowed(ctx.path);
   }
 
   if (resource === "recipes") {
@@ -627,7 +634,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       if (!deleted) return notFound("Recipe not found.");
       return emptyOk({ deleted: true });
     }
-    return methodNotAllowed();
+    return methodNotAllowed(ctx.path);
   }
 
   if (resource === "weight") {
@@ -657,16 +664,16 @@ async function dispatchApiRequest(ctx: ApiContext) {
     if (id === "entries" && !action && ctx.method === "GET") {
       return ok(await getWeightEntries(ctx.userId));
     }
-    return methodNotAllowed();
+    return methodNotAllowed(ctx.path);
   }
 
   if (resource === "stats" && !id) {
-    if (ctx.method !== "GET") return methodNotAllowed();
+    if (ctx.method !== "GET") return methodNotAllowed(ctx.path);
     return ok(await getStatsPageData(ctx.userId, getReferenceDate(ctx.url)));
   }
 
   if (resource === "summary" && !id) {
-    if (ctx.method !== "GET") return methodNotAllowed();
+    if (ctx.method !== "GET") return methodNotAllowed(ctx.path);
     const date = getReferenceDate(ctx.url);
     const [dailySummary, periodAverages, goals, stats] = await Promise.all([
       getDailySummary(ctx.userId, date),
@@ -678,7 +685,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
   }
 
   if (resource === "leaderboard" && !id) {
-    if (ctx.method !== "GET") return methodNotAllowed();
+    if (ctx.method !== "GET") return methodNotAllowed(ctx.path);
     return ok(await getLeaderboardStats(ctx.userId, getReferenceDate(ctx.url)));
   }
 
@@ -744,6 +751,11 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
     return resource === "stats" ? ["read:stats", "read:weight", "read:goals"] : ["read:stats"];
   }
   return null;
+}
+
+function getAllowedMethods(path: string[]) {
+  const methods = ["GET", "POST", "PATCH", "DELETE"] as const satisfies readonly ApiMethod[];
+  return methods.filter((method) => scopesFor(method, path) !== null);
 }
 
 function isKnownApiPath(path: string[]) {
@@ -824,8 +836,38 @@ function isPublicValidationError(caught: unknown, message: string) {
   );
 }
 
+function hasErrorProperty(caught: unknown, key: "code" | "constraint", value: string) {
+  return Boolean(
+    caught &&
+      typeof caught === "object" &&
+      key in caught &&
+      (caught as Record<typeof key, unknown>)[key] === value,
+  );
+}
+
+function getErrorCause(caught: unknown) {
+  if (!caught || typeof caught !== "object" || !("cause" in caught)) return undefined;
+  return (caught as { cause?: unknown }).cause;
+}
+
+function isWeightEntryDateConflict(caught: unknown): boolean {
+  if (hasErrorProperty(caught, "constraint", "weight_entries_user_date_key")) return true;
+
+  const message = caught instanceof Error ? caught.message : "";
+  if (message.includes('unique constraint "weight_entries_user_date_key"')) return true;
+
+  const cause = getErrorCause(caught);
+  return cause ? isWeightEntryDateConflict(cause) : false;
+}
+
 function responseForUnknownError(caught: unknown) {
   const message = caught instanceof Error ? caught.message : "Something went wrong.";
+  if (isWeightEntryDateConflict(caught)) {
+    return conflict(
+      "weight_entry_date_conflict",
+      "A weight entry already exists for this date.",
+    );
+  }
   if (message.toLowerCase().includes("not found")) {
     return notFound(message);
   }
@@ -853,13 +895,13 @@ export async function handleApiV1Request(
   }
 
   if (normalizedPath[0] === "openapi.json" && normalizedPath.length === 1) {
-    if (normalizedMethod !== "GET") return methodNotAllowed();
+    if (normalizedMethod !== "GET") return methodNotAllowed(normalizedPath);
     return jsonWithCors(getApiV1OpenApi());
   }
 
   const requiredScopes = scopesFor(normalizedMethod, normalizedPath);
   if (!requiredScopes) {
-    return isKnownApiPath(normalizedPath) ? methodNotAllowed() : notFound();
+    return isKnownApiPath(normalizedPath) ? methodNotAllowed(normalizedPath) : notFound();
   }
 
   try {

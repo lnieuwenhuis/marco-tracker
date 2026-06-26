@@ -810,7 +810,7 @@ describe("Macro Tracker API v1", () => {
     }
   });
 
-  it("sanitizes database errors instead of returning raw query details", async () => {
+  it("returns conflict when a weight entry update reuses an existing date", async () => {
     const first = await apiRequest("POST", "/weight/entries", {
       token: fullToken,
       body: { date: "2026-03-19", weightKg: 80 },
@@ -827,12 +827,12 @@ describe("Macro Tracker API v1", () => {
       body: { date: "2026-03-20", weightKg: 80.5 },
     });
 
-    expect(conflict.status).toBe(500);
+    expect(conflict.status).toBe(409);
     await expect(conflict.json()).resolves.toMatchObject({
       ok: false,
       error: {
-        code: "internal_error",
-        message: "An internal server error occurred.",
+        code: "weight_entry_date_conflict",
+        message: "A weight entry already exists for this date.",
       },
     });
   });
@@ -882,6 +882,9 @@ describe("Macro Tracker API v1", () => {
       const response = await apiRequest(request.method, request.path);
 
       expect(response.status).toBe(405);
+      if (request.path === "/goals") {
+        expect(response.headers.get("allow")).toBe("GET, PATCH");
+      }
       await expect(response.json()).resolves.toMatchObject({
         ok: false,
         error: { code: "method_not_allowed" },
@@ -902,6 +905,7 @@ describe("Macro Tracker API v1", () => {
       });
 
       expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("GET, PATCH");
       expect(response.headers.get("access-control-allow-origin")).toBe("*");
       expect(response.headers.get("access-control-allow-headers")).toContain("Authorization");
       await expect(response.json()).resolves.toMatchObject({
