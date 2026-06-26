@@ -77,10 +77,6 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     methods: [{ method: "get", summary: "Lookup a barcode food product", scopes: ["read:foods"] }],
   },
   {
-    path: "/barcode-foods",
-    methods: [{ method: "post", summary: "Create a community barcode food product", scopes: ["write:foods"] }],
-  },
-  {
     path: "/templates",
     methods: [
       { method: "get", summary: "List meal templates", scopes: ["read:templates"] },

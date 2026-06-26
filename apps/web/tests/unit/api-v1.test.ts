@@ -1,6 +1,7 @@
 import {
   createApiToken,
   getApiScopes,
+  lookupBarcodeFoodProduct,
   revokeApiToken,
   setDatabaseRuntimeForTesting,
   upsertUserFromShooProfile,
@@ -203,6 +204,57 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("does not allow write:foods tokens to mutate shared barcode foods", async () => {
+    const foodsOnly = await createApiToken(
+      userId,
+      {
+        name: "Foods only",
+        scopes: ["write:foods"],
+      },
+      runtime.db,
+    );
+
+    const response = await apiRequest("POST", "/barcode-foods", {
+      token: foodsOnly.token,
+      body: {
+        barcode: "1234567890123",
+        name: "Shared oats",
+        brands: "Macro Mill",
+        proteinG: 13,
+        carbsG: 68,
+        fatG: 7,
+        caloriesKcal: 389,
+        servingSizeG: 100,
+      },
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "not_found" },
+    });
+    await expect(lookupBarcodeFoodProduct("1234567890123", runtime.db)).resolves.toBeNull();
+  });
+
+  it("rejects invalid date query params while defaulting omitted dates", async () => {
+    for (const path of ["/weight", "/stats", "/summary", "/leaderboard"]) {
+      const omitted = await apiRequest("GET", path, { token: fullToken });
+      expect(omitted.status).toBe(200);
+      await expect(omitted.json()).resolves.toMatchObject({ ok: true });
+
+      for (const invalidDate of ["", "not-a-date", "2026-02-31", "20260319"]) {
+        const response = await apiRequest("GET", `${path}?date=${invalidDate}`, {
+          token: fullToken,
+        });
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toMatchObject({
+          ok: false,
+          error: { code: "bad_request" },
+        });
+      }
+    }
+  });
+
   it("rejects invalid goal patches without persisting partial changes", async () => {
     const initial = {
       caloriesKcal: 2400,
@@ -374,25 +426,6 @@ describe("Macro Tracker API v1", () => {
       token: fullToken,
     });
     expect((await search.json()).data[0].id).toBe(food.id);
-
-    const barcodeFood = await apiRequest("POST", "/barcode-foods", {
-      token: fullToken,
-      body: {
-        barcode: "123456789",
-        name: "Barcode oats",
-        brands: "Macro Mill",
-        proteinG: 13,
-        carbsG: 68,
-        fatG: 7,
-        caloriesKcal: 389,
-        servingSizeG: 100,
-      },
-    });
-    expect(barcodeFood.status).toBe(201);
-    const barcodeLookup = await apiRequest("GET", "/barcodes/123456789", {
-      token: fullToken,
-    });
-    expect((await barcodeLookup.json()).data.name).toBe("Barcode oats");
 
     const entryResponse = await apiRequest("POST", "/days/2026-03-19/entries", {
       token: fullToken,

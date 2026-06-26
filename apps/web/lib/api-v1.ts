@@ -12,7 +12,6 @@ import {
   deleteRecipe,
   deleteTemplate,
   deleteWeightEntry,
-  ensureDateString,
   getDailySummary,
   getLeaderboardStats,
   getMealGroups,
@@ -33,7 +32,6 @@ import {
   markMealEntryStatus,
   applyTemplateToDate,
   reorderMealGroups,
-  saveBarcodeFoodProduct,
   saveUserGoals,
   saveWeightGoal,
   searchFoodProducts,
@@ -222,7 +220,15 @@ function getGoalWeightKg(body: unknown) {
 }
 
 function getReferenceDate(url: URL) {
-  return ensureDateString(url.searchParams.get("date"), todayDateString());
+  const date = url.searchParams.get("date");
+  if (date == null) {
+    return todayDateString();
+  }
+  if (!isValidDateString(date)) {
+    throw new Error("Date must use YYYY-MM-DD.");
+  }
+
+  return date;
 }
 
 function getOrderedGroupIds(body: unknown) {
@@ -418,11 +424,6 @@ async function dispatchApiRequest(ctx: ApiContext) {
     return ok(await lookupBarcodeFoodProduct(decodeURIComponent(id)));
   }
 
-  if (resource === "barcode-foods" && !id) {
-    if (ctx.method !== "POST") return methodNotAllowed();
-    return ok(await saveBarcodeFoodProduct(ctx.userId, (await readJson(ctx.request)) as never), 201);
-  }
-
   if (resource === "templates") {
     if (id === "from-day" && !action && ctx.method === "POST") {
       return ok(await createTemplateFromDate(ctx.userId, (await readJson(ctx.request)) as never), 201);
@@ -562,7 +563,6 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
     if ((!id && method === "POST") || (id && !action && method === "PATCH")) return ["write:foods"];
   }
   if (resource === "barcodes" && id && !action && method === "GET") return ["read:foods"];
-  if (resource === "barcode-foods" && !id && method === "POST") return ["write:foods"];
   if (resource === "templates") {
     if (id === "from-day" && !action && method === "POST") return ["read:daily", "write:templates"];
     if (!id && method === "GET") return ["read:templates"];
