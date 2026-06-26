@@ -255,6 +255,94 @@ describe("Macro Tracker API v1", () => {
     }
   });
 
+  it("rejects invalid request body dates before calling data mutations", async () => {
+    for (const request of [
+      {
+        method: "POST",
+        path: "/weight/entries",
+        body: { date: "2026-02-31", weightKg: 80 },
+      },
+      {
+        method: "PATCH",
+        path: "/weight/entries/weight-entry-id",
+        body: { date: "20260319", weightKg: 80 },
+      },
+      {
+        method: "POST",
+        path: "/templates/from-day",
+        body: { date: "not-a-date", type: "day", label: "Invalid day" },
+      },
+      {
+        method: "POST",
+        path: "/templates/template-id/apply",
+        body: { date: "", status: "planned" },
+      },
+    ]) {
+      const response = await apiRequest(request.method, request.path, {
+        token: fullToken,
+        body: request.body,
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: {
+          code: "bad_request",
+          message: "Date must use YYYY-MM-DD.",
+        },
+      });
+    }
+  });
+
+  it("sanitizes database errors instead of returning raw query details", async () => {
+    const first = await apiRequest("POST", "/weight/entries", {
+      token: fullToken,
+      body: { date: "2026-03-19", weightKg: 80 },
+    });
+    const second = await apiRequest("POST", "/weight/entries", {
+      token: fullToken,
+      body: { date: "2026-03-20", weightKg: 81 },
+    });
+    const firstEntry = (await first.json()).data;
+    await second.json();
+
+    const conflict = await apiRequest("PATCH", `/weight/entries/${firstEntry.id}`, {
+      token: fullToken,
+      body: { date: "2026-03-20", weightKg: 80.5 },
+    });
+
+    expect(conflict.status).toBe(400);
+    await expect(conflict.json()).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "bad_request",
+        message: "Request could not be processed.",
+      },
+    });
+  });
+
+  it("returns method_not_allowed for known routes with unsupported methods", async () => {
+    for (const request of [
+      { method: "POST", path: "/goals" },
+      { method: "POST", path: "/barcodes/1234567890123" },
+      { method: "GET", path: "/templates/template-id/apply" },
+    ]) {
+      const response = await apiRequest(request.method, request.path);
+
+      expect(response.status).toBe(405);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: "method_not_allowed" },
+      });
+    }
+
+    const validMethod = await apiRequest("GET", "/goals");
+    expect(validMethod.status).toBe(401);
+
+    const unknownPath = await apiRequest("POST", "/not-a-route");
+    expect(unknownPath.status).toBe(404);
+  });
+
   it("rejects invalid goal patches without persisting partial changes", async () => {
     const initial = {
       caloriesKcal: 2400,

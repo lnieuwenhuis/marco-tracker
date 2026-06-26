@@ -29,8 +29,10 @@ import {
   isMealEntryStatus,
   isValidDateString,
   lookupBarcodeFoodProduct,
+  MealEntryValidationError,
   markMealEntryStatus,
   applyTemplateToDate,
+  RecipeValidationError,
   reorderMealGroups,
   saveUserGoals,
   saveWeightGoal,
@@ -44,6 +46,7 @@ import {
   updateWeightEntry,
   type ApiScope,
   type MacroGoals,
+  WeightEntryValidationError,
 } from "@macro-tracker/db";
 import { NextResponse } from "next/server";
 
@@ -180,6 +183,14 @@ function requireRecord(body: unknown) {
   }
 
   return body as Record<string, unknown>;
+}
+
+function requireBodyDate(body: unknown) {
+  const record = requireRecord(body);
+  return {
+    ...record,
+    date: requireDate(typeof record.date === "string" ? record.date : undefined),
+  };
 }
 
 function mergeGoalField(
@@ -426,7 +437,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
 
   if (resource === "templates") {
     if (id === "from-day" && !action && ctx.method === "POST") {
-      return ok(await createTemplateFromDate(ctx.userId, (await readJson(ctx.request)) as never), 201);
+      return ok(await createTemplateFromDate(ctx.userId, requireBodyDate(await readJson(ctx.request)) as never), 201);
     }
     if (!id && ctx.method === "GET") {
       return ok(await getTemplates(ctx.userId));
@@ -435,7 +446,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(await createTemplate(ctx.userId, (await readJson(ctx.request)) as never), 201);
     }
     if (id && action === "apply" && ctx.method === "POST") {
-      return ok(await applyTemplateToDate(ctx.userId, { templateId: id, ...((await readJson(ctx.request)) as object) } as never), 201);
+      return ok(await applyTemplateToDate(ctx.userId, { templateId: id, ...requireBodyDate(await readJson(ctx.request)) } as never), 201);
     }
     if (id && !action && ctx.method === "GET") {
       const template = await getTemplateById(ctx.userId, id);
@@ -484,10 +495,10 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(await getWeightPageData(ctx.userId, getReferenceDate(ctx.url)));
     }
     if (id === "entries" && !action && ctx.method === "POST") {
-      return ok(await createWeightEntry(ctx.userId, (await readJson(ctx.request)) as never), 201);
+      return ok(await createWeightEntry(ctx.userId, requireBodyDate(await readJson(ctx.request)) as never), 201);
     }
     if (id === "entries" && action && ctx.method === "PATCH") {
-      const updated = await updateWeightEntry(ctx.userId, action, (await readJson(ctx.request)) as never);
+      const updated = await updateWeightEntry(ctx.userId, action, requireBodyDate(await readJson(ctx.request)) as never);
       if (!updated) return notFound("Weight entry not found.");
       return ok(updated);
     }
@@ -582,7 +593,7 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
     if ((!id && method === "GET") || (id === "goal" && !action && method === "GET") || (id === "entries" && !action && method === "GET")) {
       return ["read:weight"];
     }
-    if ((id === "entries" && method === "POST") || (id === "entries" && action && (method === "PATCH" || method === "DELETE")) || (id === "goal" && !action && method === "PATCH")) {
+    if ((id === "entries" && !action && method === "POST") || (id === "entries" && action && (method === "PATCH" || method === "DELETE")) || (id === "goal" && !action && method === "PATCH")) {
       return ["write:weight"];
     }
   }
@@ -595,13 +606,81 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
   return null;
 }
 
+function isKnownApiPath(path: string[]) {
+  if (path.length > 3) return false;
+
+  const [resource, id, action] = path;
+  if (resource === "openapi.json" && !id) return true;
+  if ((resource === "me" || resource === "goals") && !id) return true;
+  if (resource === "days" && id) return !action || action === "entries";
+  if (resource === "meal-entries" && id) return !action || action === "status";
+  if (resource === "meal-groups") {
+    return !id || (id === "reorder" && !action) || Boolean(id && !action);
+  }
+  if (resource === "foods") {
+    return !id || (id === "search" && !action) || Boolean(id && !action);
+  }
+  if (resource === "barcodes" && id && !action) return true;
+  if (resource === "templates") {
+    return (
+      !id ||
+      (id === "from-day" && !action) ||
+      Boolean(id && action === "apply") ||
+      Boolean(id && !action)
+    );
+  }
+  if (resource === "recipes") {
+    return !id || Boolean(id && action === "log") || Boolean(id && !action);
+  }
+  if (resource === "weight") {
+    return !id || (id === "entries" && (!action || Boolean(action))) || (id === "goal" && !action);
+  }
+  if ((resource === "summary" || resource === "stats" || resource === "leaderboard") && !id) {
+    return true;
+  }
+
+  return false;
+}
+
+const SAFE_BAD_REQUEST_MESSAGES = new Set([
+  "Request body must be valid JSON.",
+  "Date must use YYYY-MM-DD.",
+  "Request body is required.",
+  "caloriesKcal must be an integer.",
+  "goalWeightKg is required.",
+  "goalWeightKg must be null or a finite positive number.",
+  "goalWeightKg must be less than 1000 kg.",
+  "orderedIds must be an array of group IDs.",
+  "Grams consumed must be greater than 0.",
+  "Recipe cooked weight is required to log grams.",
+]);
+
+function isPublicValidationError(caught: unknown, message: string) {
+  if (
+    caught instanceof MealEntryValidationError ||
+    caught instanceof RecipeValidationError ||
+    caught instanceof WeightEntryValidationError
+  ) {
+    return true;
+  }
+
+  return (
+    SAFE_BAD_REQUEST_MESSAGES.has(message) ||
+    /^(caloriesKcal|proteinG|carbsG|fatG) must be null or a finite non-negative number\.$/.test(message)
+  );
+}
+
 function responseForUnknownError(caught: unknown) {
   const message = caught instanceof Error ? caught.message : "Something went wrong.";
   if (message.toLowerCase().includes("not found")) {
     return notFound(message);
   }
+  if (isPublicValidationError(caught, message)) {
+    return badRequest(message);
+  }
 
-  return badRequest(message);
+  console.error("Unexpected API v1 error", caught);
+  return badRequest("Request could not be processed.");
 }
 
 export async function handleApiV1Request(
@@ -626,7 +705,7 @@ export async function handleApiV1Request(
 
   const requiredScopes = scopesFor(normalizedMethod, normalizedPath);
   if (!requiredScopes) {
-    return notFound();
+    return isKnownApiPath(normalizedPath) ? methodNotAllowed() : notFound();
   }
 
   const auth = await authenticateRequest(request, requiredScopes);
