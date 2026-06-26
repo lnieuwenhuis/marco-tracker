@@ -15,6 +15,7 @@ type ApiSettingsClientProps = {
 };
 
 const scopeLabels: Record<ApiScope, string> = {
+  "read:account": "Read account",
   "read:daily": "Read daily logs",
   "write:daily": "Write daily logs",
   "read:foods": "Read foods",

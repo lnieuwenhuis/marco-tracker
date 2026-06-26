@@ -14,7 +14,7 @@ type ApiEndpoint = {
 export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   {
     path: "/me",
-    methods: [{ method: "get", summary: "Read the authenticated account", scopes: ["read:goals"] }],
+    methods: [{ method: "get", summary: "Read the authenticated account", scopes: ["read:account"] }],
   },
   {
     path: "/goals",
@@ -124,7 +124,10 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/weight/entries",
-    methods: [{ method: "post", summary: "Create a weight entry", scopes: ["write:weight"] }],
+    methods: [
+      { method: "get", summary: "List weight entries", scopes: ["read:weight"] },
+      { method: "post", summary: "Create a weight entry", scopes: ["write:weight"] },
+    ],
   },
   {
     path: "/weight/entries/{id}",

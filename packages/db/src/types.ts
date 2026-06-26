@@ -6,6 +6,7 @@ export type MacroNumbers = {
 };
 
 export const API_SCOPE_VALUES = [
+  "read:account",
   "read:daily",
   "write:daily",
   "read:foods",

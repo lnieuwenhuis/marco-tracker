@@ -277,10 +277,10 @@ async function logRecipePortion(
     throw new Error("Recipe not found.");
   }
 
-  const portionCount =
-    typeof body.portionCount === "number" && Number.isFinite(body.portionCount) && body.portionCount > 0
-      ? body.portionCount
-      : 1;
+  const portionCount = "portionCount" in body ? body.portionCount : 1;
+  if (typeof portionCount !== "number" || !Number.isFinite(portionCount) || portionCount <= 0) {
+    throw new Error("portionCount must be a finite positive number.");
+  }
   const gramsConsumed =
     typeof body.gramsConsumed === "number" && Number.isFinite(body.gramsConsumed)
       ? body.gramsConsumed
@@ -295,12 +295,10 @@ async function logRecipePortion(
     throw new Error("Recipe cooked weight is required to log grams.");
   }
 
-  const status =
-    typeof body.status === "string" && isMealEntryStatus(body.status)
-      ? body.status
-      : date > todayDateString()
-        ? "planned"
-        : "eaten";
+  const status = "status" in body ? body.status : date > todayDateString() ? "planned" : "eaten";
+  if (typeof status !== "string" || !isMealEntryStatus(status)) {
+    throw new Error("Meal status is invalid.");
+  }
   const hasGramsConsumed = gramsConsumed != null;
   const factor = hasGramsConsumed
     ? (gramsConsumed / recipe.totalCookedWeightG!) * recipe.portions
@@ -550,7 +548,7 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
 
   const [resource, id, action] = path;
   if (resource === "openapi.json" && !id && method === "GET") return [];
-  if (resource === "me" && !id && method === "GET") return ["read:goals"];
+  if (resource === "me" && !id && method === "GET") return ["read:account"];
   if (resource === "goals" && !id) {
     if (method === "GET") return ["read:goals"];
     if (method === "PATCH") return ["write:goals"];
@@ -651,7 +649,9 @@ const SAFE_BAD_REQUEST_MESSAGES = new Set([
   "goalWeightKg must be null or a finite positive number.",
   "goalWeightKg must be less than 1000 kg.",
   "orderedIds must be an array of group IDs.",
+  "portionCount must be a finite positive number.",
   "Grams consumed must be greater than 0.",
+  "Meal status is invalid.",
   "Recipe cooked weight is required to log grams.",
 ]);
 

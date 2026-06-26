@@ -241,6 +241,44 @@ describe("Macro Tracker API v1", () => {
     }
   });
 
+  it("requires an account scope before /me exposes account metadata", async () => {
+    const goalsOnly = await createApiToken(
+      userId,
+      {
+        name: "Goals only",
+        scopes: ["read:goals"],
+      },
+      runtime.db,
+    );
+    const accountOnly = await createApiToken(
+      userId,
+      {
+        name: "Account only",
+        scopes: ["read:account"],
+      },
+      runtime.db,
+    );
+
+    const rejected = await apiRequest("GET", "/me", { token: goalsOnly.token });
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "insufficient_scope" },
+    });
+
+    const accepted = await apiRequest("GET", "/me", { token: accountOnly.token });
+    expect(accepted.status).toBe(200);
+    await expect(accepted.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        user: {
+          id: userId,
+          email: "api@example.com",
+        },
+      },
+    });
+  });
+
   it("does not allow write:foods tokens to mutate shared barcode foods", async () => {
     const foodsOnly = await createApiToken(
       userId,
@@ -459,6 +497,62 @@ describe("Macro Tracker API v1", () => {
       ok: true,
       data: { goalWeightKg: null },
     });
+  });
+
+  it("rejects invalid recipe log status and portion counts", async () => {
+    const foodResponse = await apiRequest("POST", "/foods", {
+      token: fullToken,
+      body: {
+        name: "Recipe base",
+        defaultServingQuantity: 100,
+        defaultServingUnit: "g",
+        proteinPer100: 10,
+        carbsPer100: 20,
+        fatPer100: 5,
+        caloriesPer100: 165,
+        servingWeightG: 100,
+      },
+    });
+    const food = (await foodResponse.json()).data;
+    const recipeResponse = await apiRequest("POST", "/recipes", {
+      token: fullToken,
+      body: {
+        label: "Invalid log checks",
+        portions: 2,
+        totalCookedWeightG: 400,
+        ingredients: [
+          {
+            productId: food.id,
+            label: "Base",
+            quantity: 100,
+            unit: "g",
+            proteinG: 10,
+            carbsG: 20,
+            fatG: 5,
+            caloriesKcal: 165,
+          },
+        ],
+      },
+    });
+    const recipe = (await recipeResponse.json()).data;
+
+    for (const body of [
+      { date: "2026-03-19", status: "done" },
+      { date: "2026-03-19", portionCount: -1 },
+      { date: "2026-03-19", portionCount: 0 },
+      { date: "2026-03-19", portionCount: Number.NaN },
+    ]) {
+      const response = await apiRequest("POST", `/recipes/${recipe.id}/log`, {
+        token: fullToken,
+        body,
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: "bad_request" },
+      });
+    }
   });
 
   it("rejects routes with unexpected trailing path segments", async () => {
@@ -696,6 +790,10 @@ describe("Macro Tracker API v1", () => {
     expect(payload.paths).toEqual(openApi.paths);
     expect(payload.servers).toEqual([{ url: "/api/v1" }]);
     expect(Object.keys(payload.paths)).toContain("/goals");
+    expect(payload.paths["/weight/entries"]?.get).toMatchObject({
+      summary: "List weight entries",
+      security: [{ bearerAuth: ["read:weight"] }],
+    });
     expect(Object.keys(payload.paths)).not.toContain("/api/v1/goals");
 
     for (const endpoint of API_V1_ENDPOINTS) {
