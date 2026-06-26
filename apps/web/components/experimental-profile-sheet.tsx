@@ -118,6 +118,18 @@ export function ExperimentalProfileSheet({
                   Meal Planner
                   <span aria-hidden="true">+</span>
                 </TransitionLink>
+                <TransitionLink
+                  href="/settings/api"
+                  motion="screen"
+                  onClick={onClose}
+                  className="flex items-center justify-between rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] px-4 py-3 text-sm font-semibold text-[var(--color-ink)] transition hover:bg-[var(--color-card-muted)]"
+                >
+                  API Access
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4.5 2.5h7v7" />
+                    <path d="M11.5 2.5 2.5 11.5" />
+                  </svg>
+                </TransitionLink>
               </div>
 
               {canAccessAdmin ? (

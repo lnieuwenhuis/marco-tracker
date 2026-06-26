@@ -10,7 +10,7 @@
 
 Macro Tracker is a phone-first macro tracking app for the day-to-day work of eating like you meant to. It is built around the stuff I actually want when I am logging food: fast daily entries, planned meals, reusable meals and days, barcode scanning, recipes, weight tracking, and enough stats to see patterns without turning breakfast into a spreadsheet ceremony.
 
-Current app version: `v2.06`
+Current app version: `v2.07`
 
 ## Try It
 
@@ -27,6 +27,7 @@ Sign in with Google, set your goals during onboarding, and start logging. The ho
 - Plan a day ahead, then turn planned meals into real logged meals.
 - Track weight and body-fat notes alongside your food log.
 - Review summaries, trends, rolling averages, adherence, records, and top foods.
+- Use a scoped personal access token API for user-owned data.
 - Install it as a PWA and use it comfortably from a phone.
 - Moderate shared barcode data and audit changes from the owner/admin tools.
 
@@ -44,7 +45,7 @@ Requirements:
 Clone and install:
 
 ```bash
-git clone https://github.com/lnieuwenhuis/marco-tracker.git
+git clone https://github.com/lnieuwenhuis/marco-tracker.git macro-tracker
 cd macro-tracker
 pnpm install
 ```
@@ -67,6 +68,14 @@ pnpm --filter @macro-tracker/web start
 ```
 
 For a deployed instance, set `APP_URL` to the public URL and use a real `SESSION_SECRET`. If you use remote PostgreSQL, `DATABASE_URL` uses TLS with certificate verification by default when `sslmode` is omitted or set to `verify-full`; use `sslmode=require` only when your provider requires encrypted TLS without certificate verification.
+
+## API Access
+
+Macro Tracker API v1 is available under `/api/v1/*`. Create personal access tokens from `/settings/api`, then send them as `Authorization: Bearer <token>`. Tokens start with `mtk_v1_`, are shown only once, store only a hash in the database, and can be scoped to read or write daily logs, foods, templates, recipes, weight, goals, and stats.
+
+OpenAPI JSON is available at `/api/v1/openapi.json`, and the readable docs page is `/docs/api`. API responses use `{ "ok": true, "data": ... }` for success and `{ "ok": false, "error": { "code": "...", "message": "..." } }` for failures. Public API dates use `YYYY-MM-DD`.
+
+Self-hosted instances need the latest database migrations so the `api_tokens` table exists before users create tokens.
 
 Useful optional environment variables:
 

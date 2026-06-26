@@ -5,6 +5,52 @@ export type MacroNumbers = {
   caloriesKcal: number;
 };
 
+export const API_SCOPE_VALUES = [
+  "read:account",
+  "read:daily",
+  "write:daily",
+  "read:foods",
+  "write:foods",
+  "read:templates",
+  "write:templates",
+  "read:recipes",
+  "write:recipes",
+  "read:weight",
+  "write:weight",
+  "read:goals",
+  "write:goals",
+  "read:stats",
+] as const;
+export type ApiScope = (typeof API_SCOPE_VALUES)[number];
+
+export function isApiScope(value: string): value is ApiScope {
+  return API_SCOPE_VALUES.includes(value as ApiScope);
+}
+
+export type ApiTokenRecord = {
+  id: string;
+  userId: string;
+  tokenPrefix: string;
+  name: string;
+  scopes: ApiScope[];
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+};
+
+export type CreatedApiToken = {
+  token: string;
+  record: ApiTokenRecord;
+};
+
+export type ApiTokenAuthResult =
+  | { ok: true; token: ApiTokenRecord }
+  | {
+      ok: false;
+      reason: "missing" | "malformed" | "invalid" | "expired" | "revoked";
+    };
+
 export const QUANTITY_UNIT_VALUES = ["g", "ml", "serving", "count"] as const;
 export type QuantityUnit = (typeof QUANTITY_UNIT_VALUES)[number];
 

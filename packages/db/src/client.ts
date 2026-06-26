@@ -234,6 +234,29 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
     WHERE "onboarding_completed_at" IS NULL
   `));
   await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS "api_tokens" (
+      "id" uuid PRIMARY KEY NOT NULL,
+      "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+      "token_hash" text NOT NULL,
+      "token_prefix" text NOT NULL,
+      "name" text NOT NULL,
+      "scopes" jsonb DEFAULT '[]'::jsonb NOT NULL,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "last_used_at" timestamp with time zone,
+      "expires_at" timestamp with time zone,
+      "revoked_at" timestamp with time zone
+    )
+  `));
+  await db.execute(
+    sql.raw(`CREATE UNIQUE INDEX IF NOT EXISTS "api_tokens_token_hash_key" ON "api_tokens" USING btree ("token_hash")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "api_tokens_user_created_idx" ON "api_tokens" USING btree ("user_id","created_at")`),
+  );
+  await db.execute(
+    sql.raw(`CREATE INDEX IF NOT EXISTS "api_tokens_user_revoked_idx" ON "api_tokens" USING btree ("user_id","revoked_at")`),
+  );
+  await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS "food_products" (
       "id" uuid PRIMARY KEY NOT NULL,
       "owner_user_id" uuid REFERENCES "users"("id") ON DELETE cascade,

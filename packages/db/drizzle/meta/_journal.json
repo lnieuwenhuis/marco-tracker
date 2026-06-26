@@ -85,6 +85,13 @@
       "when": 1782000000000,
       "tag": "0011_active_global_barcode_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1782489600000,
+      "tag": "0012_api_tokens",
+      "breakpoints": true
     }
   ]
 }

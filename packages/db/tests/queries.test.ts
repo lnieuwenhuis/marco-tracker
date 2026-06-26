@@ -1,5 +1,7 @@
 import {
+  authenticateApiToken,
   computeStreaks,
+  createApiToken,
   createMealGroup,
   createRecipe,
   createMealEntry,
@@ -20,8 +22,10 @@ import {
   getUserGoals,
   getWeightPageData,
   lookupBarcodeFoodProduct,
+  listApiTokens,
   markMealEntryStatus,
   applyTemplateToDate,
+  revokeApiToken,
   resolveProductNutritionForQuantity,
   saveBarcodeFoodProduct,
   saveUserGoals,
@@ -33,6 +37,7 @@ import {
   type DatabaseRuntime,
 } from "../src";
 import {
+  apiTokens,
   foodProducts,
   mealEntries,
   mealTemplateItems,
@@ -218,6 +223,169 @@ describe("database queries", () => {
 
     return wrapClient(runtime.db as any);
   }
+
+  it("creates API tokens as one-time-visible secrets with stored hashes", async () => {
+    const created = await createApiToken(
+      userId,
+      {
+        name: "Mobile app",
+        scopes: ["read:daily", "write:daily"],
+      },
+      runtime.db,
+    );
+
+    expect(created.token).toMatch(/^mtk_v1_/);
+    expect(created.record).toMatchObject({
+      userId,
+      tokenPrefix: created.token.slice(0, 19),
+      name: "Mobile app",
+      scopes: ["read:daily", "write:daily"],
+      lastUsedAt: null,
+      revokedAt: null,
+    });
+    expect(created.record.expiresAt).toBeTruthy();
+
+    const [stored] = await runtime.db.select().from(apiTokens);
+    expect(stored?.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(stored?.tokenHash).not.toBe(created.token);
+
+    const listed = await listApiTokens(userId, runtime.db);
+    expect(listed).toHaveLength(1);
+    expect(JSON.stringify(listed)).not.toContain(stored!.tokenHash);
+    expect(JSON.stringify(listed)).not.toContain(created.token);
+  });
+
+  it("supports never-expiring API tokens explicitly", async () => {
+    const created = await createApiToken(
+      userId,
+      {
+        name: "No expiry",
+        scopes: ["read:stats"],
+        expiresAt: null,
+      },
+      runtime.db,
+    );
+
+    expect(created.record.expiresAt).toBeNull();
+  });
+
+  it("authenticates valid API tokens and updates last-used time", async () => {
+    const created = await createApiToken(
+      userId,
+      {
+        name: "Reader",
+        scopes: ["read:daily"],
+      },
+      runtime.db,
+    );
+
+    const result = await authenticateApiToken(created.token, runtime.db);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.token.userId).toBe(userId);
+      expect(result.token.scopes).toEqual(["read:daily"]);
+      expect(result.token.lastUsedAt).toBeTruthy();
+    }
+
+    const listed = await listApiTokens(userId, runtime.db);
+    expect(listed[0]?.lastUsedAt).toBeTruthy();
+  });
+
+  it("throttles API token last-used updates within a short window", async () => {
+    const created = await createApiToken(
+      userId,
+      {
+        name: "Reader",
+        scopes: ["read:daily"],
+      },
+      runtime.db,
+    );
+
+    const first = await authenticateApiToken(created.token, runtime.db);
+    expect(first.ok).toBe(true);
+    const firstLastUsedAt = first.ok ? first.token.lastUsedAt : null;
+    expect(firstLastUsedAt).toBeTruthy();
+
+    const second = await authenticateApiToken(created.token, runtime.db);
+    expect(second.ok).toBe(true);
+    expect(second.ok ? second.token.lastUsedAt : null).toEqual(firstLastUsedAt);
+    const [storedAfterSecond] = await runtime.db.select().from(apiTokens);
+    expect(new Date(storedAfterSecond!.lastUsedAt!).getTime()).toBe(
+      new Date(firstLastUsedAt!).getTime(),
+    );
+
+    const staleLastUsedAt = new Date(Date.now() - 10 * 60 * 1000);
+    await runtime.db
+      .update(apiTokens)
+      .set({ lastUsedAt: staleLastUsedAt })
+      .where(eq(apiTokens.id, created.record.id));
+
+    const stale = await authenticateApiToken(created.token, runtime.db);
+    expect(stale.ok).toBe(true);
+    expect(stale.ok ? new Date(stale.token.lastUsedAt!).getTime() : 0).toBeGreaterThan(
+      staleLastUsedAt.getTime(),
+    );
+  });
+
+  it("rejects malformed, unknown, expired, and revoked API tokens", async () => {
+    await expect(authenticateApiToken(null, runtime.db)).resolves.toEqual({
+      ok: false,
+      reason: "missing",
+    });
+    await expect(authenticateApiToken("not-a-token", runtime.db)).resolves.toEqual({
+      ok: false,
+      reason: "malformed",
+    });
+    await expect(
+      authenticateApiToken("mtk_v1_unknown", runtime.db),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "invalid",
+    });
+
+    const expired = await createApiToken(
+      userId,
+      {
+        name: "Expired",
+        scopes: ["read:daily"],
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+      runtime.db,
+    );
+    await expect(authenticateApiToken(expired.token, runtime.db)).resolves.toEqual({
+      ok: false,
+      reason: "expired",
+    });
+    await expect(listApiTokens(userId, runtime.db)).resolves.toContainEqual(
+      expect.objectContaining({
+        id: expired.record.id,
+        lastUsedAt: null,
+      }),
+    );
+
+    const active = await createApiToken(
+      userId,
+      {
+        name: "Revoked",
+        scopes: ["read:daily"],
+      },
+      runtime.db,
+    );
+    await expect(
+      revokeApiToken(userId, active.record.id, runtime.db),
+    ).resolves.toBe(true);
+    await expect(authenticateApiToken(active.token, runtime.db)).resolves.toEqual({
+      ok: false,
+      reason: "revoked",
+    });
+    await expect(listApiTokens(userId, runtime.db)).resolves.toContainEqual(
+      expect.objectContaining({
+        id: active.record.id,
+        lastUsedAt: null,
+      }),
+    );
+  });
 
   it("calculates daily totals and logged-day-only averages", async () => {
     await createMealEntry(

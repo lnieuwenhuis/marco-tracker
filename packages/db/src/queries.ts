@@ -1,9 +1,9 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, max, ne, or, sql } from "drizzle-orm";
-import { createHash } from "node:crypto";
+import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql } from "drizzle-orm";
+import { createHash, randomBytes } from "node:crypto";
 
 import { computeStreaks, getPeriodRanges } from "./dates";
 import { getDb, type DatabaseClient } from "./client";
-import { adminAuditEvents, foodProductRevisions, foodProducts, mealEntries, mealGroups, mealTemplateItems, mealTemplates, recipeIngredients, recipes, users, weightEntries } from "./schema";
+import { adminAuditEvents, apiTokens, foodProductRevisions, foodProducts, mealEntries, mealGroups, mealTemplateItems, mealTemplates, recipeIngredients, recipes, users, weightEntries } from "./schema";
 import { validateFoodProductInput, validateMealEntryInput, validateRecipeInput, validateWeightEntryInput } from "./validators";
 import type {
   AdminAuditListPage,
@@ -16,6 +16,9 @@ import type {
   AdminUserListItem,
   AdminUserListPage,
   AdminRecipeSummary,
+  ApiScope,
+  ApiTokenAuthResult,
+  ApiTokenRecord,
   AppUser,
   BarcodeFoodProductInput,
   CompleteOnboardingInput,
@@ -48,7 +51,7 @@ import type {
   WeightPageData,
   WeightUnit,
 } from "./types";
-import { canAccessAdmin, isAdminRole, isOwnerRole } from "./types";
+import { API_SCOPE_VALUES, canAccessAdmin, isAdminRole, isApiScope, isOwnerRole } from "./types";
 
 type DailyTotalsRow = {
   entryDate: string;
@@ -572,6 +575,171 @@ export async function getUserById(userId: string, db?: DatabaseClient) {
   return user ? mapUserRow(user as UserSelectRow) : null;
 }
 
+export function getApiScopes(): ApiScope[] {
+  return [...API_SCOPE_VALUES];
+}
+
+function normalizeApiTokenExpiry(expiresAt: Date | string | null | undefined) {
+  if (expiresAt === undefined) {
+    return defaultApiTokenExpiry();
+  }
+
+  if (expiresAt === null) {
+    return null;
+  }
+
+  const date = expiresAt instanceof Date ? expiresAt : new Date(expiresAt);
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error("API token expiry is invalid.");
+  }
+
+  return date;
+}
+
+function apiTokenSelectColumns() {
+  return {
+    id: apiTokens.id,
+    userId: apiTokens.userId,
+    tokenPrefix: apiTokens.tokenPrefix,
+    name: apiTokens.name,
+    scopes: apiTokens.scopes,
+    createdAt: apiTokens.createdAt,
+    lastUsedAt: apiTokens.lastUsedAt,
+    expiresAt: apiTokens.expiresAt,
+    revokedAt: apiTokens.revokedAt,
+  };
+}
+
+export async function createApiToken(
+  userId: string,
+  input: {
+    name: string;
+    scopes: readonly string[];
+    expiresAt?: Date | string | null;
+  },
+  db?: DatabaseClient,
+): Promise<{ token: string; record: ApiTokenRecord }> {
+  const database = await resolveDb(db);
+  const name = input.name.trim();
+  if (!name) {
+    throw new Error("API token name is required.");
+  }
+
+  const scopes = normalizeApiTokenScopes(input.scopes);
+  const token = generateApiTokenSecret();
+  const [created] = await database
+    .insert(apiTokens)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      tokenHash: hashApiToken(token),
+      tokenPrefix: token.slice(0, API_TOKEN_PREFIX_LENGTH),
+      name,
+      scopes,
+      expiresAt: normalizeApiTokenExpiry(input.expiresAt),
+    })
+    .returning();
+
+  return {
+    token,
+    record: mapApiTokenRow(created as ApiTokenSelectRow),
+  };
+}
+
+export async function listApiTokens(
+  userId: string,
+  db?: DatabaseClient,
+): Promise<ApiTokenRecord[]> {
+  const database = await resolveDb(db);
+  const rows = await database
+    .select(apiTokenSelectColumns())
+    .from(apiTokens)
+    .where(eq(apiTokens.userId, userId))
+    .orderBy(desc(apiTokens.createdAt));
+
+  return rows.map((row) => mapApiTokenRow(row as ApiTokenSelectRow));
+}
+
+export async function revokeApiToken(
+  userId: string,
+  tokenId: string,
+  db?: DatabaseClient,
+): Promise<boolean> {
+  const database = await resolveDb(db);
+  const [revoked] = await database
+    .update(apiTokens)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(apiTokens.id, tokenId),
+        eq(apiTokens.userId, userId),
+        isNull(apiTokens.revokedAt),
+      ),
+    )
+    .returning();
+
+  return Boolean(revoked);
+}
+
+export async function authenticateApiToken(
+  token: string | null | undefined,
+  db?: DatabaseClient,
+): Promise<ApiTokenAuthResult> {
+  if (!token) {
+    return { ok: false, reason: "missing" };
+  }
+
+  if (!token.startsWith(API_TOKEN_PREFIX) || token.length <= API_TOKEN_PREFIX.length) {
+    return { ok: false, reason: "malformed" };
+  }
+
+  const database = await resolveDb(db);
+  const tokenHash = hashApiToken(token);
+  const now = new Date();
+  const [row] = await database
+    .select(apiTokenSelectColumns())
+    .from(apiTokens)
+    .where(eq(apiTokens.tokenHash, tokenHash))
+    .limit(1);
+
+  if (!row) {
+    return { ok: false, reason: "invalid" };
+  }
+
+  const record = mapApiTokenRow(row as ApiTokenSelectRow);
+  if (record.revokedAt) {
+    return { ok: false, reason: "revoked" };
+  }
+
+  if (record.expiresAt && new Date(record.expiresAt).getTime() <= Date.now()) {
+    return { ok: false, reason: "expired" };
+  }
+
+  const staleLastUsedAt = new Date(now.getTime() - API_TOKEN_LAST_USED_THROTTLE_MS);
+  const lastUsedAt = record.lastUsedAt ? new Date(record.lastUsedAt) : null;
+  if (!lastUsedAt || lastUsedAt.getTime() < staleLastUsedAt.getTime()) {
+    const [updated] = await database
+      .update(apiTokens)
+      .set({ lastUsedAt: now })
+      .where(
+        and(
+          eq(apiTokens.id, record.id),
+          isNull(apiTokens.revokedAt),
+          or(isNull(apiTokens.expiresAt), gt(apiTokens.expiresAt, now)),
+          or(isNull(apiTokens.lastUsedAt), lt(apiTokens.lastUsedAt, staleLastUsedAt)),
+        ),
+      )
+      .returning();
+
+    return {
+      ok: true,
+      token: mapApiTokenRow((updated ?? row) as ApiTokenSelectRow),
+    };
+  }
+
+  return { ok: true, token: record };
+}
+
 const DEFAULT_MEAL_GROUP_LABELS = ["Breakfast", "Lunch", "Dinner", "Snack"] as const;
 
 function deterministicUuid(seed: string) {
@@ -734,11 +902,23 @@ export async function reorderMealGroups(
   db?: DatabaseClient,
 ): Promise<MealGroup[]> {
   const database = await resolveDb(db);
+  const groups = await getMealGroups(userId, database);
+  const activeGroupIds = new Set(groups.map((group) => group.id));
+  const orderedIdSet = new Set(orderedGroupIds);
+  if (
+    orderedGroupIds.length !== groups.length ||
+    orderedIdSet.size !== orderedGroupIds.length ||
+    orderedGroupIds.some((groupId) => !activeGroupIds.has(groupId))
+  ) {
+    throw new Error("orderedIds must include each active meal group exactly once.");
+  }
+
+  const now = new Date();
   await database.transaction(async (tx) => {
     for (const [index, groupId] of orderedGroupIds.entries()) {
       await tx
         .update(mealGroups)
-        .set({ sortOrder: index, updatedAt: new Date() })
+        .set({ sortOrder: index, updatedAt: now })
         .where(and(eq(mealGroups.id, groupId), eq(mealGroups.userId, userId)));
     }
   });
@@ -978,7 +1158,7 @@ export async function createPersonalFoodProduct(
   });
 }
 
-async function getFoodProductByIdForUser(
+export async function getFoodProductByIdForUser(
   userId: string,
   productId: string,
   db?: DatabaseClient,
@@ -1281,6 +1461,43 @@ async function getMealEntryByClientMutationId(
   return existing ? mapMealRow(existing) : null;
 }
 
+export async function getMealEntryById(
+  userId: string,
+  entryId: string,
+  db?: DatabaseClient,
+): Promise<MealEntryRecord | null> {
+  const database = await resolveDb(db);
+  const [existing] = await database
+    .select({
+      id: mealEntries.id,
+      userId: mealEntries.userId,
+      date: mealEntries.entryDate,
+      mealGroupId: mealEntries.mealGroupId,
+      status: mealEntries.status,
+      productId: foodProducts.id,
+      label: mealEntries.label,
+      sortOrder: mealEntries.sortOrder,
+      quantity: mealEntries.quantity,
+      unit: mealEntries.unit,
+      servingMultiplier: mealEntries.servingMultiplier,
+      proteinG: mealEntries.proteinG,
+      carbsG: mealEntries.carbsG,
+      fatG: mealEntries.fatG,
+      caloriesKcal: mealEntries.caloriesKcal,
+      clientMutationId: mealEntries.clientMutationId,
+      sourceLabel: foodProducts.name,
+    })
+    .from(mealEntries)
+    .leftJoin(
+      foodProducts,
+      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
+    )
+    .where(and(eq(mealEntries.id, entryId), eq(mealEntries.userId, userId)))
+    .limit(1);
+
+  return existing ? mapMealRow(existing) : null;
+}
+
 export async function createMealEntry(
   userId: string,
   input: Omit<MealEntryInput, "sortOrder"> & { sortOrder?: number },
@@ -1383,6 +1600,7 @@ export async function updateMealEntry(
   entryId: string,
   input: MealEntryInput,
   db?: DatabaseClient,
+  options?: { recalculateProductMacros?: boolean },
 ) {
   const database = await resolveDb(db);
   await assertMealGroupAccessibleForUser(userId, input.mealGroupId, database);
@@ -1396,7 +1614,7 @@ export async function updateMealEntry(
     }
 
     productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
-    if (productControlsMealMacros(product)) {
+    if (options?.recalculateProductMacros !== false && productControlsMealMacros(product)) {
       productMacros = resolveProductNutritionForQuantity(
         product,
         input.quantity ?? product.defaultServingQuantity,
@@ -2357,6 +2575,36 @@ export async function createWeightEntry(
   return mapWeightRow(created);
 }
 
+export async function createWeightEntryNoOverwrite(
+  userId: string,
+  input: WeightEntryInput,
+  db?: DatabaseClient,
+): Promise<WeightEntryRecord | null> {
+  const database = await resolveDb(db);
+  const normalized = validateWeightEntryInput(input);
+
+  const [created] = await database
+    .insert(weightEntries)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      entryDate: normalized.date,
+      weightKg: normalized.weightKg.toFixed(2),
+      bodyFatPct:
+        normalized.bodyFatPct != null
+          ? normalized.bodyFatPct.toFixed(1)
+          : null,
+      notes: normalized.notes,
+      updatedAt: new Date(),
+    })
+    .onConflictDoNothing({
+      target: [weightEntries.userId, weightEntries.entryDate],
+    })
+    .returning();
+
+  return created ? mapWeightRow(created) : null;
+}
+
 export async function updateWeightEntry(
   userId: string,
   entryId: string,
@@ -2652,6 +2900,75 @@ export async function getRecipes(
   return recipeRows.map((recipe) =>
     buildRecipeRecord(recipe, ingredientsByRecipe.get(recipe.id) ?? []),
   );
+}
+
+const API_TOKEN_PREFIX = "mtk_v1_";
+const API_TOKEN_PREFIX_LENGTH = 19;
+const API_TOKEN_DEFAULT_EXPIRY_DAYS = 90;
+const API_TOKEN_LAST_USED_THROTTLE_MS = 5 * 60 * 1000;
+
+type ApiTokenSelectRow = {
+  id: string;
+  userId: string;
+  tokenPrefix: string;
+  name: string;
+  scopes: unknown;
+  createdAt: Date | string;
+  lastUsedAt: Date | string | null;
+  expiresAt: Date | string | null;
+  revokedAt: Date | string | null;
+};
+
+function normalizeStoredApiScopes(value: unknown): ApiScope[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const scopes = value.filter((scope): scope is ApiScope => (
+    typeof scope === "string" && isApiScope(scope)
+  ));
+  return Array.from(new Set(scopes));
+}
+
+function normalizeApiTokenScopes(scopes: readonly string[]): ApiScope[] {
+  const normalized = Array.from(new Set(scopes));
+  if (normalized.length === 0) {
+    throw new Error("At least one API scope is required.");
+  }
+
+  for (const scope of normalized) {
+    if (!isApiScope(scope)) {
+      throw new Error(`API scope is invalid: ${scope}`);
+    }
+  }
+
+  return normalized as ApiScope[];
+}
+
+function mapApiTokenRow(row: ApiTokenSelectRow): ApiTokenRecord {
+  return {
+    id: row.id,
+    userId: row.userId,
+    tokenPrefix: row.tokenPrefix,
+    name: row.name,
+    scopes: normalizeStoredApiScopes(row.scopes),
+    createdAt: toTimestampString(row.createdAt),
+    lastUsedAt: toTimestampString(row.lastUsedAt) || null,
+    expiresAt: toTimestampString(row.expiresAt) || null,
+    revokedAt: toTimestampString(row.revokedAt) || null,
+  };
+}
+
+function hashApiToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function generateApiTokenSecret() {
+  return `${API_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+}
+
+function defaultApiTokenExpiry() {
+  return new Date(Date.now() + API_TOKEN_DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 }
 
 export async function getRecipeCount(
