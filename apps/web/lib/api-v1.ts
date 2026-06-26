@@ -46,6 +46,7 @@ import {
   updateWeightEntry,
   type ApiScope,
   type FoodProduct,
+  type FoodProductInput,
   type MacroGoals,
   WeightEntryValidationError,
 } from "@macro-tracker/db";
@@ -257,6 +258,26 @@ function getOrderedGroupIds(body: unknown) {
   return ids;
 }
 
+function sanitizeApiFoodInput(body: unknown): FoodProductInput {
+  const record = requireRecord(body);
+
+  return {
+    name: record.name as FoodProductInput["name"],
+    brand: record.brand as FoodProductInput["brand"],
+    barcode: record.barcode as FoodProductInput["barcode"],
+    defaultServingQuantity: record.defaultServingQuantity as FoodProductInput["defaultServingQuantity"],
+    defaultServingUnit: record.defaultServingUnit as FoodProductInput["defaultServingUnit"],
+    proteinPer100: record.proteinPer100 as FoodProductInput["proteinPer100"],
+    carbsPer100: record.carbsPer100 as FoodProductInput["carbsPer100"],
+    fatPer100: record.fatPer100 as FoodProductInput["fatPer100"],
+    caloriesPer100: record.caloriesPer100 as FoodProductInput["caloriesPer100"],
+    servingWeightG: record.servingWeightG as FoodProductInput["servingWeightG"],
+    servingVolumeMl: record.servingVolumeMl as FoodProductInput["servingVolumeMl"],
+    scope: "personal",
+    source: "manual",
+  };
+}
+
 function mergeGoals(current: MacroGoals, body: unknown): MacroGoals {
   const record = requireRecord(body);
   return {
@@ -282,12 +303,13 @@ async function logRecipePortion(
   if (typeof portionCount !== "number" || !Number.isFinite(portionCount) || portionCount <= 0) {
     throw new Error("portionCount must be a finite positive number.");
   }
-  const gramsConsumed =
-    typeof body.gramsConsumed === "number" && Number.isFinite(body.gramsConsumed)
-      ? body.gramsConsumed
-      : null;
-  if (gramsConsumed != null && gramsConsumed <= 0) {
-    throw new Error("Grams consumed must be greater than 0.");
+  let gramsConsumed: number | null = null;
+  if ("gramsConsumed" in body) {
+    const value = body.gramsConsumed;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      throw new Error("gramsConsumed must be a finite positive number.");
+    }
+    gramsConsumed = value;
   }
   if (
     gramsConsumed != null &&
@@ -302,7 +324,7 @@ async function logRecipePortion(
   }
   const hasGramsConsumed = gramsConsumed != null;
   const factor = hasGramsConsumed
-    ? (gramsConsumed / recipe.totalCookedWeightG!) * recipe.portions
+    ? (gramsConsumed! / recipe.totalCookedWeightG!) * recipe.portions
     : portionCount;
 
   return createMealEntry(userId, {
@@ -444,10 +466,19 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(products.map(mapFoodProductForApi));
     }
     if (!id && ctx.method === "POST") {
-      return ok(await createPersonalFoodProduct(ctx.userId, (await readJson(ctx.request)) as never), 201);
+      const product = await createPersonalFoodProduct(
+        ctx.userId,
+        sanitizeApiFoodInput(await readJson(ctx.request)),
+      );
+      return ok(mapFoodProductForApi(product), 201);
     }
     if (id && !action && ctx.method === "PATCH") {
-      return ok(await updatePersonalFoodProduct(ctx.userId, id, (await readJson(ctx.request)) as never));
+      const product = await updatePersonalFoodProduct(
+        ctx.userId,
+        id,
+        sanitizeApiFoodInput(await readJson(ctx.request)),
+      );
+      return ok(mapFoodProductForApi(product));
     }
     return methodNotAllowed();
   }
@@ -676,6 +707,7 @@ const SAFE_BAD_REQUEST_MESSAGES = new Set([
   "orderedIds must be an array of group IDs.",
   "portionCount must be a finite positive number.",
   "Grams consumed must be greater than 0.",
+  "gramsConsumed must be a finite positive number.",
   "Meal status is invalid.",
   "Recipe cooked weight is required to log grams.",
 ]);
@@ -705,7 +737,7 @@ function responseForUnknownError(caught: unknown) {
   }
 
   console.error("Unexpected API v1 error", caught);
-  return badRequest("Request could not be processed.");
+  return error(500, "internal_error", "An internal server error occurred.");
 }
 
 export async function handleApiV1Request(

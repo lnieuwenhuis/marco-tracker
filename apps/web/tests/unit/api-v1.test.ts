@@ -1,14 +1,18 @@
 import {
   createApiToken,
+  createPersonalFoodProduct,
+  foodProducts,
   getApiScopes,
   lookupBarcodeFoodProduct,
   revokeApiToken,
   saveBarcodeFoodProduct,
   setDatabaseRuntimeForTesting,
+  users,
   upsertUserFromShooProfile,
   type DatabaseRuntime,
 } from "@macro-tracker/db";
 import { createTestDatabase } from "@macro-tracker/db/testing";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { handleApiV1Request } from "@/lib/api-v1";
@@ -76,6 +80,52 @@ describe("Macro Tracker API v1", () => {
       url.pathname.replace("/api/v1", "").split("/").filter(Boolean),
       method,
     );
+  }
+
+  function expectNoInternalFoodFields(product: Record<string, unknown>) {
+    expect(product).not.toHaveProperty("ownerUserId");
+    expect(product).not.toHaveProperty("submittedByUserId");
+    expect(product).not.toHaveProperty("deletedByUserId");
+    expect(product).not.toHaveProperty("sourceProvider");
+    expect(product).not.toHaveProperty("sourceConfidence");
+    expect(product).not.toHaveProperty("sourceMetadata");
+    expect(product).not.toHaveProperty("correctedFromProductId");
+  }
+
+  function createFailingUserLookupRuntime() {
+    const failingDb = new Proxy(runtime.db, {
+      get(target, prop, receiver) {
+        if (prop === "select") {
+          return (...args: unknown[]) => {
+            const select = Reflect.get(target, prop, receiver) as (...selectArgs: unknown[]) => unknown;
+            const builder = select.apply(target, args);
+            return new Proxy(builder as object, {
+              get(selectTarget, selectProp, selectReceiver) {
+                if (selectProp === "from") {
+                  return (table: unknown) => {
+                    if (table === users) {
+                      throw new Error("Forced user lookup failure.");
+                    }
+                    const from = Reflect.get(selectTarget, selectProp, selectReceiver) as (
+                      fromTable: unknown,
+                    ) => unknown;
+                    return from.call(selectTarget, table);
+                  };
+                }
+
+                const value = Reflect.get(selectTarget, selectProp, selectReceiver);
+                return typeof value === "function" ? value.bind(selectTarget) : value;
+              },
+            });
+          };
+        }
+
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    return { ...runtime, db: failingDb } satisfies DatabaseRuntime;
   }
 
   it("returns CORS preflight headers for API v1 paths", async () => {
@@ -327,13 +377,7 @@ describe("Macro Tracker API v1", () => {
       name: "Shared protein bar",
       brand: "Macro Mill",
     });
-    expect(product).not.toHaveProperty("ownerUserId");
-    expect(product).not.toHaveProperty("submittedByUserId");
-    expect(product).not.toHaveProperty("deletedByUserId");
-    expect(product).not.toHaveProperty("sourceProvider");
-    expect(product).not.toHaveProperty("sourceConfidence");
-    expect(product).not.toHaveProperty("sourceMetadata");
-    expect(product).not.toHaveProperty("correctedFromProductId");
+    expectNoInternalFoodFields(product);
   });
 
   it("omits internal food fields from barcode lookup responses", async () => {
@@ -361,13 +405,135 @@ describe("Macro Tracker API v1", () => {
       name: "Shared oats",
       brand: "Macro Mill",
     });
-    expect(payload.data).not.toHaveProperty("ownerUserId");
-    expect(payload.data).not.toHaveProperty("submittedByUserId");
-    expect(payload.data).not.toHaveProperty("deletedByUserId");
-    expect(payload.data).not.toHaveProperty("sourceProvider");
-    expect(payload.data).not.toHaveProperty("sourceConfidence");
-    expect(payload.data).not.toHaveProperty("sourceMetadata");
-    expect(payload.data).not.toHaveProperty("correctedFromProductId");
+    expectNoInternalFoodFields(payload.data);
+  });
+
+  it("sanitizes food create responses and ignores caller-controlled internal metadata", async () => {
+    const foodsOnly = await createApiToken(
+      userId,
+      {
+        name: "Foods only",
+        scopes: ["write:foods"],
+      },
+      runtime.db,
+    );
+
+    const response = await apiRequest("POST", "/foods", {
+      token: foodsOnly.token,
+      body: {
+        name: "Client yogurt",
+        brand: "Client Dairy",
+        barcode: "4234567890123",
+        defaultServingQuantity: 170,
+        defaultServingUnit: "g",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 0,
+        caloriesPer100: 59,
+        servingWeightG: 170,
+        scope: "global",
+        source: "barcode",
+        submittedByUserId: "forged-submitter",
+        deletedByUserId: "forged-deleter",
+        sourceProvider: "forged-provider",
+        sourceConfidence: 0.99,
+        sourceMetadata: { forged: true },
+        correctedFromProductId: "forged-correction",
+      },
+    });
+
+    expect(response.status).toBe(201);
+    const payload = await response.json();
+    expect(payload.data).toMatchObject({
+      name: "Client yogurt",
+      scope: "personal",
+      source: "manual",
+      barcode: "4234567890123",
+    });
+    expectNoInternalFoodFields(payload.data);
+
+    const [stored] = await runtime.db
+      .select()
+      .from(foodProducts)
+      .where(eq(foodProducts.id, payload.data.id));
+    expect(stored).toMatchObject({
+      ownerUserId: userId,
+      scope: "personal",
+      source: "manual",
+      submittedByUserId: userId,
+      deletedByUserId: null,
+      sourceProvider: null,
+      sourceConfidence: null,
+      sourceMetadata: {},
+      correctedFromProductId: null,
+    });
+  });
+
+  it("sanitizes food update responses and ignores caller-controlled internal metadata", async () => {
+    const existing = await createPersonalFoodProduct(
+      userId,
+      {
+        name: "Editable yogurt",
+        source: "manual",
+        proteinPer100: 9,
+        carbsPer100: 5,
+        fatPer100: 1,
+        caloriesPer100: 65,
+        sourceProvider: "server-import",
+        sourceConfidence: 0.8,
+        sourceMetadata: { imported: true },
+      },
+      runtime.db,
+    );
+    const foodsOnly = await createApiToken(
+      userId,
+      {
+        name: "Foods only",
+        scopes: ["write:foods"],
+      },
+      runtime.db,
+    );
+
+    const response = await apiRequest("PATCH", `/foods/${existing.id}`, {
+      token: foodsOnly.token,
+      body: {
+        name: "Updated yogurt",
+        brand: "Updated Dairy",
+        defaultServingQuantity: 100,
+        defaultServingUnit: "g",
+        proteinPer100: 11,
+        carbsPer100: 4,
+        fatPer100: 0,
+        caloriesPer100: 60,
+        servingWeightG: 100,
+        source: "barcode",
+        sourceProvider: "forged-provider",
+        sourceConfidence: 0.99,
+        sourceMetadata: { forged: true },
+        correctedFromProductId: "forged-correction",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.data).toMatchObject({
+      id: existing.id,
+      name: "Updated yogurt",
+      source: "manual",
+    });
+    expectNoInternalFoodFields(payload.data);
+
+    const [stored] = await runtime.db
+      .select()
+      .from(foodProducts)
+      .where(eq(foodProducts.id, existing.id));
+    expect(stored).toMatchObject({
+      source: "manual",
+      sourceProvider: null,
+      sourceConfidence: null,
+      sourceMetadata: {},
+      correctedFromProductId: null,
+    });
   });
 
   it("does not allow write:foods tokens to mutate shared barcode foods", async () => {
@@ -477,12 +643,27 @@ describe("Macro Tracker API v1", () => {
       body: { date: "2026-03-20", weightKg: 80.5 },
     });
 
-    expect(conflict.status).toBe(400);
+    expect(conflict.status).toBe(500);
     await expect(conflict.json()).resolves.toMatchObject({
       ok: false,
       error: {
-        code: "bad_request",
-        message: "Request could not be processed.",
+        code: "internal_error",
+        message: "An internal server error occurred.",
+      },
+    });
+  });
+
+  it("returns internal_error for unexpected dispatch failures", async () => {
+    setDatabaseRuntimeForTesting(createFailingUserLookupRuntime());
+
+    const response = await apiRequest("GET", "/me", { token: fullToken });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "internal_error",
+        message: "An internal server error occurred.",
       },
     });
   });
@@ -632,6 +813,11 @@ describe("Macro Tracker API v1", () => {
       { date: "2026-03-19", portionCount: -1 },
       { date: "2026-03-19", portionCount: 0 },
       { date: "2026-03-19", portionCount: Number.NaN },
+      { date: "2026-03-19", gramsConsumed: "100" },
+      { date: "2026-03-19", gramsConsumed: null },
+      { date: "2026-03-19", gramsConsumed: Number.NaN },
+      { date: "2026-03-19", gramsConsumed: 0 },
+      { date: "2026-03-19", gramsConsumed: -1 },
     ]) {
       const response = await apiRequest("POST", `/recipes/${recipe.id}/log`, {
         token: fullToken,
@@ -885,6 +1071,16 @@ describe("Macro Tracker API v1", () => {
       summary: "List weight entries",
       security: [{ bearerAuth: ["read:weight"] }],
     });
+    expect(payload.paths["/foods"]?.post.responses).toHaveProperty("201");
+    expect(payload.paths["/foods"]?.post.responses).toHaveProperty("405");
+    expect(payload.paths["/foods"]?.post.requestBody).toBeTruthy();
+    expect(payload.paths["/foods/{id}"]?.patch.parameters).toEqual([
+      expect.objectContaining({ name: "id", in: "path", required: true }),
+    ]);
+    expect(payload.paths["/recipes/{id}/log"]?.post.requestBody).toBeTruthy();
+    expect(payload.paths["/foods/search"]?.get.parameters).toEqual([
+      expect.objectContaining({ name: "q", in: "query" }),
+    ]);
     expect(Object.keys(payload.paths)).not.toContain("/api/v1/goals");
 
     for (const endpoint of API_V1_ENDPOINTS) {

@@ -4,6 +4,7 @@ type ApiEndpointMethod = {
   method: "get" | "post" | "patch" | "delete";
   summary: string;
   scopes: ApiScope[];
+  successStatus?: 200 | 201;
 };
 
 type ApiEndpoint = {
@@ -29,7 +30,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/days/{date}/entries",
-    methods: [{ method: "post", summary: "Create a meal entry on a date", scopes: ["write:daily"] }],
+    methods: [{ method: "post", summary: "Create a meal entry on a date", scopes: ["write:daily"], successStatus: 201 }],
   },
   {
     path: "/meal-entries/{id}",
@@ -46,7 +47,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     path: "/meal-groups",
     methods: [
       { method: "get", summary: "List meal groups", scopes: ["read:daily"] },
-      { method: "post", summary: "Create a meal group", scopes: ["write:daily"] },
+      { method: "post", summary: "Create a meal group", scopes: ["write:daily"], successStatus: 201 },
     ],
   },
   {
@@ -66,7 +67,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/foods",
-    methods: [{ method: "post", summary: "Create a personal food product", scopes: ["write:foods"] }],
+    methods: [{ method: "post", summary: "Create a personal food product", scopes: ["write:foods"], successStatus: 201 }],
   },
   {
     path: "/foods/{id}",
@@ -80,7 +81,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     path: "/templates",
     methods: [
       { method: "get", summary: "List meal templates", scopes: ["read:templates"] },
-      { method: "post", summary: "Create a meal template", scopes: ["write:templates"] },
+      { method: "post", summary: "Create a meal template", scopes: ["write:templates"], successStatus: 201 },
     ],
   },
   {
@@ -93,17 +94,17 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/templates/{id}/apply",
-    methods: [{ method: "post", summary: "Apply a template to a date", scopes: ["read:templates", "write:daily"] }],
+    methods: [{ method: "post", summary: "Apply a template to a date", scopes: ["read:templates", "write:daily"], successStatus: 201 }],
   },
   {
     path: "/templates/from-day",
-    methods: [{ method: "post", summary: "Create a template from a day", scopes: ["read:daily", "write:templates"] }],
+    methods: [{ method: "post", summary: "Create a template from a day", scopes: ["read:daily", "write:templates"], successStatus: 201 }],
   },
   {
     path: "/recipes",
     methods: [
       { method: "get", summary: "List recipes", scopes: ["read:recipes"] },
-      { method: "post", summary: "Create a recipe", scopes: ["write:recipes"] },
+      { method: "post", summary: "Create a recipe", scopes: ["write:recipes"], successStatus: 201 },
     ],
   },
   {
@@ -116,7 +117,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/recipes/{id}/log",
-    methods: [{ method: "post", summary: "Log a recipe portion", scopes: ["read:recipes", "write:daily"] }],
+    methods: [{ method: "post", summary: "Log a recipe portion", scopes: ["read:recipes", "write:daily"], successStatus: 201 }],
   },
   {
     path: "/weight",
@@ -126,7 +127,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     path: "/weight/entries",
     methods: [
       { method: "get", summary: "List weight entries", scopes: ["read:weight"] },
-      { method: "post", summary: "Create a weight entry", scopes: ["write:weight"] },
+      { method: "post", summary: "Create a weight entry", scopes: ["write:weight"], successStatus: 201 },
     ],
   },
   {
@@ -201,19 +202,101 @@ function responseSchema() {
   };
 }
 
+function jsonRequestBody(schema: Record<string, unknown>) {
+  return {
+    required: true,
+    content: {
+      "application/json": {
+        schema,
+      },
+    },
+  };
+}
+
+function pathParameter(name: string) {
+  return {
+    name,
+    in: "path",
+    required: true,
+    schema: { type: "string" },
+  };
+}
+
+function queryParameter(name: string) {
+  return {
+    name,
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+  };
+}
+
+const foodMutationSchema = {
+  type: "object",
+  required: ["name", "proteinPer100", "carbsPer100", "fatPer100", "caloriesPer100"],
+  properties: {
+    name: { type: "string" },
+    brand: { type: ["string", "null"] },
+    barcode: { type: ["string", "null"] },
+    defaultServingQuantity: { type: "number", exclusiveMinimum: 0 },
+    defaultServingUnit: { type: "string" },
+    proteinPer100: { type: "number", minimum: 0 },
+    carbsPer100: { type: "number", minimum: 0 },
+    fatPer100: { type: "number", minimum: 0 },
+    caloriesPer100: { type: "integer", minimum: 0 },
+    servingWeightG: { type: ["number", "null"], exclusiveMinimum: 0 },
+    servingVolumeMl: { type: ["number", "null"], exclusiveMinimum: 0 },
+  },
+  additionalProperties: true,
+};
+
+function requestBodyFor(path: string, method: ApiEndpointMethod["method"]) {
+  if ((path === "/foods" && method === "post") || (path === "/foods/{id}" && method === "patch")) {
+    return jsonRequestBody(foodMutationSchema);
+  }
+  if (path === "/recipes/{id}/log" && method === "post") {
+    return jsonRequestBody({
+      type: "object",
+      required: ["date"],
+      properties: {
+        date: { type: "string", format: "date" },
+        portionCount: { type: "number", exclusiveMinimum: 0 },
+        gramsConsumed: { type: "number", exclusiveMinimum: 0 },
+        status: { type: "string", enum: ["planned", "eaten", "skipped"] },
+      },
+      additionalProperties: true,
+    });
+  }
+  return undefined;
+}
+
+function parametersFor(path: string) {
+  const parameters = Array.from(path.matchAll(/\{([^}]+)\}/g), (match) =>
+    pathParameter(match[1]!),
+  );
+  if (path === "/foods/search") {
+    parameters.push(queryParameter("q"));
+  }
+  if (["/weight", "/stats", "/summary", "/leaderboard"].includes(path)) {
+    parameters.push(queryParameter("date"));
+  }
+  return parameters.length ? parameters : undefined;
+}
+
 export function getApiV1OpenApi() {
   const paths: Record<string, Record<string, unknown>> = {};
   for (const endpoint of API_V1_ENDPOINTS) {
     paths[endpoint.path] = Object.fromEntries(
-      endpoint.methods.map((method) => [
-        method.method,
-        {
+      endpoint.methods.map((method) => {
+        const operation: Record<string, unknown> = {
           summary: method.summary,
           security: method.scopes.length
             ? [{ bearerAuth: method.scopes }]
             : [],
+          parameters: parametersFor(endpoint.path),
+          requestBody: requestBodyFor(endpoint.path, method.method),
           responses: {
-            "200": {
+            [String(method.successStatus ?? 200)]: {
               description: "Successful response",
               content: responseSchema(),
             },
@@ -233,9 +316,22 @@ export function getApiV1OpenApi() {
               description: "Resource not found",
               content: responseSchema(),
             },
+            "405": {
+              description: "Method not allowed",
+              content: responseSchema(),
+            },
+            "500": {
+              description: "Internal server error",
+              content: responseSchema(),
+            },
           },
-        },
-      ]),
+        };
+
+        if (!operation.parameters) delete operation.parameters;
+        if (!operation.requestBody) delete operation.requestBody;
+
+        return [method.method, operation];
+      }),
     );
   }
 
