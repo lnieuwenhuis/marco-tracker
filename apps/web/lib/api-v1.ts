@@ -14,6 +14,7 @@ import {
   deleteWeightEntry,
   getDailySummary,
   getLeaderboardStats,
+  getMealEntryById,
   getMealGroups,
   getPeriodAverages,
   getRecipeById,
@@ -211,6 +212,16 @@ function requireMealGroupBody(body: unknown) {
 
 function requireMealEntryBody(body: unknown) {
   return requireRecord(body);
+}
+
+async function mergeMealEntryPatchBody(userId: string, entryId: string, body: unknown) {
+  const patch = requireMealEntryBody(body);
+  const existing = await getMealEntryById(userId, entryId);
+  if (!existing) {
+    throw new Error("Meal entry not found.");
+  }
+
+  return { ...existing, ...patch };
 }
 
 function requireTemplateBody(body: unknown) {
@@ -479,7 +490,8 @@ async function dispatchApiRequest(ctx: ApiContext) {
 
   if (resource === "meal-entries" && id) {
     if (!action && ctx.method === "PATCH") {
-      return ok(await updateMealEntry(ctx.userId, id, requireMealEntryBody(await readJson(ctx.request)) as never));
+      const mergedBody = await mergeMealEntryPatchBody(ctx.userId, id, await readJson(ctx.request));
+      return ok(await updateMealEntry(ctx.userId, id, mergedBody as never));
     }
     if (!action && ctx.method === "DELETE") {
       const deleted = await deleteMealEntry(ctx.userId, id);
@@ -771,6 +783,7 @@ const SAFE_BAD_REQUEST_MESSAGES = new Set([
   "goalWeightKg must be null or a finite positive number.",
   "goalWeightKg must be less than 1000 kg.",
   "orderedIds must be an array of group IDs.",
+  "orderedIds must include each active meal group exactly once.",
   "portionCount must be a finite positive number.",
   "Grams consumed must be greater than 0.",
   "gramsConsumed must be a finite positive number.",

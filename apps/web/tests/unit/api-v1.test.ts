@@ -951,6 +951,87 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("patches meal entries by merging omitted fields from the existing row", async () => {
+    const created = await apiRequest("POST", "/days/2026-03-19/entries", {
+      token: fullToken,
+      body: {
+        label: "Greek yogurt",
+        proteinG: 17,
+        carbsG: 7,
+        fatG: 0,
+        caloriesKcal: 100,
+      },
+    });
+    expect(created.status).toBe(201);
+    const entry = (await created.json()).data;
+
+    const updated = await apiRequest("PATCH", `/meal-entries/${entry.id}`, {
+      token: fullToken,
+      body: { label: "Yogurt bowl" },
+    });
+
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        id: entry.id,
+        date: "2026-03-19",
+        label: "Yogurt bowl",
+        sortOrder: entry.sortOrder,
+        proteinG: 17,
+        carbsG: 7,
+        fatG: 0,
+        caloriesKcal: 100,
+      },
+    });
+  });
+
+  it("rejects meal group reorders that are not an exact active group permutation", async () => {
+    const initialGroupsResponse = await apiRequest("GET", "/meal-groups", { token: fullToken });
+    const initialGroupIds = (await initialGroupsResponse.json()).data.map(
+      (group: { id: string }) => group.id,
+    );
+    const otherUser = await upsertUserFromShooProfile(
+      {
+        pairwiseSub: "api-other-user",
+        email: "api-other@example.com",
+        displayName: "Other API User",
+      },
+      runtime.db,
+    );
+    const otherToken = (
+      await createApiToken(otherUser.id, { name: "Other", scopes: getApiScopes() }, runtime.db)
+    ).token;
+    const otherGroupsResponse = await apiRequest("GET", "/meal-groups", { token: otherToken });
+    const otherGroupId = (await otherGroupsResponse.json()).data[0].id;
+    const customGroupResponse = await apiRequest("POST", "/meal-groups", {
+      token: fullToken,
+      body: { label: "Pre-workout" },
+    });
+    expect(customGroupResponse.status).toBe(201);
+
+    const invalidOrders = [
+      [initialGroupIds[0], initialGroupIds[0], ...initialGroupIds.slice(2)],
+      initialGroupIds.slice(0, -1),
+      [...initialGroupIds.slice(1), "00000000-0000-0000-0000-000000000000"],
+      [...initialGroupIds.slice(1), otherGroupId],
+      initialGroupIds,
+    ];
+
+    for (const orderedIds of invalidOrders) {
+      const response = await apiRequest("POST", "/meal-groups/reorder", {
+        token: fullToken,
+        body: { orderedIds },
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: "bad_request" },
+      });
+    }
+  });
+
   it("reads and writes representative user-owned objects", async () => {
     const goals = await apiRequest("PATCH", "/goals", {
       token: fullToken,
@@ -1176,7 +1257,8 @@ describe("Macro Tracker API v1", () => {
     expect(Object.keys(payload.paths)).toContain("/goals");
     expect(payload.paths["/weight/entries"]?.get).toMatchObject({
       summary: "List weight entries",
-      security: [{ bearerAuth: ["read:weight"] }],
+      security: [{ bearerAuth: [] }],
+      "x-required-scopes": ["read:weight"],
     });
     expect(payload.paths["/foods"]?.post.responses).toHaveProperty("201");
     expect(payload.paths["/foods"]?.post.responses).toHaveProperty("405");
@@ -1207,9 +1289,16 @@ describe("Macro Tracker API v1", () => {
         expect(payload.paths[endpoint.path][method.method]).toMatchObject({
           summary: method.summary,
           security: method.scopes.length
-            ? [{ bearerAuth: method.scopes }]
+            ? [{ bearerAuth: [] }]
             : [],
         });
+        if (method.scopes.length) {
+          expect(payload.paths[endpoint.path][method.method]["x-required-scopes"]).toEqual(
+            method.scopes,
+          );
+        } else {
+          expect(payload.paths[endpoint.path][method.method]["x-required-scopes"]).toBeUndefined();
+        }
       }
     }
   });

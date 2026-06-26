@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lte, max, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql } from "drizzle-orm";
 import { createHash, randomBytes } from "node:crypto";
 
 import { computeStreaks, getPeriodRanges } from "./dates";
@@ -696,25 +696,6 @@ export async function authenticateApiToken(
   const database = await resolveDb(db);
   const tokenHash = hashApiToken(token);
   const now = new Date();
-  const [updated] = await database
-    .update(apiTokens)
-    .set({ lastUsedAt: now })
-    .where(
-      and(
-        eq(apiTokens.tokenHash, tokenHash),
-        isNull(apiTokens.revokedAt),
-        or(isNull(apiTokens.expiresAt), gt(apiTokens.expiresAt, now)),
-      ),
-    )
-    .returning();
-
-  if (updated) {
-    return {
-      ok: true,
-      token: mapApiTokenRow(updated as ApiTokenSelectRow),
-    };
-  }
-
   const [row] = await database
     .select(apiTokenSelectColumns())
     .from(apiTokens)
@@ -734,7 +715,29 @@ export async function authenticateApiToken(
     return { ok: false, reason: "expired" };
   }
 
-  return { ok: false, reason: "invalid" };
+  const staleLastUsedAt = new Date(now.getTime() - API_TOKEN_LAST_USED_THROTTLE_MS);
+  const lastUsedAt = record.lastUsedAt ? new Date(record.lastUsedAt) : null;
+  if (!lastUsedAt || lastUsedAt.getTime() < staleLastUsedAt.getTime()) {
+    const [updated] = await database
+      .update(apiTokens)
+      .set({ lastUsedAt: now })
+      .where(
+        and(
+          eq(apiTokens.id, record.id),
+          isNull(apiTokens.revokedAt),
+          or(isNull(apiTokens.expiresAt), gt(apiTokens.expiresAt, now)),
+          or(isNull(apiTokens.lastUsedAt), lt(apiTokens.lastUsedAt, staleLastUsedAt)),
+        ),
+      )
+      .returning();
+
+    return {
+      ok: true,
+      token: mapApiTokenRow((updated ?? row) as ApiTokenSelectRow),
+    };
+  }
+
+  return { ok: true, token: record };
 }
 
 const DEFAULT_MEAL_GROUP_LABELS = ["Breakfast", "Lunch", "Dinner", "Snack"] as const;
@@ -899,11 +902,23 @@ export async function reorderMealGroups(
   db?: DatabaseClient,
 ): Promise<MealGroup[]> {
   const database = await resolveDb(db);
+  const groups = await getMealGroups(userId, database);
+  const activeGroupIds = new Set(groups.map((group) => group.id));
+  const orderedIdSet = new Set(orderedGroupIds);
+  if (
+    orderedGroupIds.length !== groups.length ||
+    orderedIdSet.size !== orderedGroupIds.length ||
+    orderedGroupIds.some((groupId) => !activeGroupIds.has(groupId))
+  ) {
+    throw new Error("orderedIds must include each active meal group exactly once.");
+  }
+
+  const now = new Date();
   await database.transaction(async (tx) => {
     for (const [index, groupId] of orderedGroupIds.entries()) {
       await tx
         .update(mealGroups)
-        .set({ sortOrder: index, updatedAt: new Date() })
+        .set({ sortOrder: index, updatedAt: now })
         .where(and(eq(mealGroups.id, groupId), eq(mealGroups.userId, userId)));
     }
   });
@@ -1441,6 +1456,43 @@ async function getMealEntryByClientMutationId(
         eq(mealEntries.clientMutationId, clientMutationId),
       ),
     )
+    .limit(1);
+
+  return existing ? mapMealRow(existing) : null;
+}
+
+export async function getMealEntryById(
+  userId: string,
+  entryId: string,
+  db?: DatabaseClient,
+): Promise<MealEntryRecord | null> {
+  const database = await resolveDb(db);
+  const [existing] = await database
+    .select({
+      id: mealEntries.id,
+      userId: mealEntries.userId,
+      date: mealEntries.entryDate,
+      mealGroupId: mealEntries.mealGroupId,
+      status: mealEntries.status,
+      productId: foodProducts.id,
+      label: mealEntries.label,
+      sortOrder: mealEntries.sortOrder,
+      quantity: mealEntries.quantity,
+      unit: mealEntries.unit,
+      servingMultiplier: mealEntries.servingMultiplier,
+      proteinG: mealEntries.proteinG,
+      carbsG: mealEntries.carbsG,
+      fatG: mealEntries.fatG,
+      caloriesKcal: mealEntries.caloriesKcal,
+      clientMutationId: mealEntries.clientMutationId,
+      sourceLabel: foodProducts.name,
+    })
+    .from(mealEntries)
+    .leftJoin(
+      foodProducts,
+      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
+    )
+    .where(and(eq(mealEntries.id, entryId), eq(mealEntries.userId, userId)))
     .limit(1);
 
   return existing ? mapMealRow(existing) : null;
@@ -2822,6 +2874,7 @@ export async function getRecipes(
 const API_TOKEN_PREFIX = "mtk_v1_";
 const API_TOKEN_PREFIX_LENGTH = 19;
 const API_TOKEN_DEFAULT_EXPIRY_DAYS = 90;
+const API_TOKEN_LAST_USED_THROTTLE_MS = 5 * 60 * 1000;
 
 type ApiTokenSelectRow = {
   id: string;

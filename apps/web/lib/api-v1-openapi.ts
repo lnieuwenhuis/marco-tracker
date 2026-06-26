@@ -459,8 +459,9 @@ export function getApiV1OpenApi() {
         const operation: Record<string, unknown> = {
           summary: method.summary,
           security: method.scopes.length
-            ? [{ bearerAuth: method.scopes }]
+            ? [{ bearerAuth: [] }]
             : [],
+          "x-required-scopes": method.scopes.length ? method.scopes : undefined,
           parameters: parametersFor(endpoint.path),
           requestBody: requestBodyFor(endpoint.path, method.method),
           responses: {
@@ -497,6 +498,7 @@ export function getApiV1OpenApi() {
 
         if (!operation.parameters) delete operation.parameters;
         if (!operation.requestBody) delete operation.requestBody;
+        if (!operation["x-required-scopes"]) delete operation["x-required-scopes"];
 
         return [method.method, operation];
       }),

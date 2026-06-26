@@ -292,6 +292,42 @@ describe("database queries", () => {
     expect(listed[0]?.lastUsedAt).toBeTruthy();
   });
 
+  it("throttles API token last-used updates within a short window", async () => {
+    const created = await createApiToken(
+      userId,
+      {
+        name: "Reader",
+        scopes: ["read:daily"],
+      },
+      runtime.db,
+    );
+
+    const first = await authenticateApiToken(created.token, runtime.db);
+    expect(first.ok).toBe(true);
+    const firstLastUsedAt = first.ok ? first.token.lastUsedAt : null;
+    expect(firstLastUsedAt).toBeTruthy();
+
+    const second = await authenticateApiToken(created.token, runtime.db);
+    expect(second.ok).toBe(true);
+    expect(second.ok ? second.token.lastUsedAt : null).toEqual(firstLastUsedAt);
+    const [storedAfterSecond] = await runtime.db.select().from(apiTokens);
+    expect(new Date(storedAfterSecond!.lastUsedAt!).getTime()).toBe(
+      new Date(firstLastUsedAt!).getTime(),
+    );
+
+    const staleLastUsedAt = new Date(Date.now() - 10 * 60 * 1000);
+    await runtime.db
+      .update(apiTokens)
+      .set({ lastUsedAt: staleLastUsedAt })
+      .where(eq(apiTokens.id, created.record.id));
+
+    const stale = await authenticateApiToken(created.token, runtime.db);
+    expect(stale.ok).toBe(true);
+    expect(stale.ok ? new Date(stale.token.lastUsedAt!).getTime() : 0).toBeGreaterThan(
+      staleLastUsedAt.getTime(),
+    );
+  });
+
   it("rejects malformed, unknown, expired, and revoked API tokens", async () => {
     await expect(authenticateApiToken(null, runtime.db)).resolves.toEqual({
       ok: false,
