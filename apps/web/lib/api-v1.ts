@@ -176,6 +176,51 @@ function requireDate(value: string | undefined) {
   return value;
 }
 
+function requireRecord(body: unknown) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("Request body is required.");
+  }
+
+  return body as Record<string, unknown>;
+}
+
+function mergeGoalField(
+  record: Record<string, unknown>,
+  key: keyof MacroGoals,
+  currentValue: number | null,
+) {
+  if (!(key in record)) return currentValue;
+
+  const value = record[key];
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${key} must be null or a finite non-negative number.`);
+  }
+  if (key === "caloriesKcal" && !Number.isInteger(value)) {
+    throw new Error("caloriesKcal must be an integer.");
+  }
+
+  return value;
+}
+
+function getGoalWeightKg(body: unknown) {
+  const record = requireRecord(body);
+  if (!("goalWeightKg" in record)) {
+    throw new Error("goalWeightKg is required.");
+  }
+
+  const value = record.goalWeightKg;
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error("goalWeightKg must be null or a finite positive number.");
+  }
+  if (value >= 1000) {
+    throw new Error("goalWeightKg must be less than 1000 kg.");
+  }
+
+  return Math.round(value * 100) / 100;
+}
+
 function getReferenceDate(url: URL) {
   return ensureDateString(url.searchParams.get("date"), todayDateString());
 }
@@ -195,17 +240,12 @@ function getOrderedGroupIds(body: unknown) {
 }
 
 function mergeGoals(current: MacroGoals, body: unknown): MacroGoals {
-  if (!body || typeof body !== "object") {
-    throw new Error("Request body is required.");
-  }
-
-  const record = body as Partial<MacroGoals>;
+  const record = requireRecord(body);
   return {
-    caloriesKcal:
-      "caloriesKcal" in record ? record.caloriesKcal ?? null : current.caloriesKcal,
-    proteinG: "proteinG" in record ? record.proteinG ?? null : current.proteinG,
-    carbsG: "carbsG" in record ? record.carbsG ?? null : current.carbsG,
-    fatG: "fatG" in record ? record.fatG ?? null : current.fatG,
+    caloriesKcal: mergeGoalField(record, "caloriesKcal", current.caloriesKcal),
+    proteinG: mergeGoalField(record, "proteinG", current.proteinG),
+    carbsG: mergeGoalField(record, "carbsG", current.carbsG),
+    fatG: mergeGoalField(record, "fatG", current.fatG),
   };
 }
 
@@ -282,6 +322,8 @@ function mapAccount(user: Awaited<ReturnType<typeof getUserById>>) {
 }
 
 async function dispatchApiRequest(ctx: ApiContext) {
+  if (ctx.path.length > 3) return notFound();
+
   const [resource, id, action] = ctx.path;
 
   if (resource === "me" && !id) {
@@ -344,7 +386,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
     if (!id && ctx.method === "POST") {
       return ok(await createMealGroup(ctx.userId, (await readJson(ctx.request)) as never), 201);
     }
-    if (id === "reorder" && ctx.method === "POST") {
+    if (id === "reorder" && !action && ctx.method === "POST") {
       return ok(await reorderMealGroups(ctx.userId, getOrderedGroupIds(await readJson(ctx.request))));
     }
     if (id && !action && ctx.method === "PATCH") {
@@ -359,13 +401,13 @@ async function dispatchApiRequest(ctx: ApiContext) {
   }
 
   if (resource === "foods") {
-    if (id === "search" && ctx.method === "GET") {
+    if (id === "search" && !action && ctx.method === "GET") {
       return ok(await searchFoodProducts(ctx.userId, ctx.url.searchParams.get("q") ?? ""));
     }
     if (!id && ctx.method === "POST") {
       return ok(await createPersonalFoodProduct(ctx.userId, (await readJson(ctx.request)) as never), 201);
     }
-    if (id && ctx.method === "PATCH") {
+    if (id && !action && ctx.method === "PATCH") {
       return ok(await updatePersonalFoodProduct(ctx.userId, id, (await readJson(ctx.request)) as never));
     }
     return methodNotAllowed();
@@ -382,7 +424,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
   }
 
   if (resource === "templates") {
-    if (id === "from-day" && ctx.method === "POST") {
+    if (id === "from-day" && !action && ctx.method === "POST") {
       return ok(await createTemplateFromDate(ctx.userId, (await readJson(ctx.request)) as never), 201);
     }
     if (!id && ctx.method === "GET") {
@@ -457,11 +499,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok({ goalWeightKg: await getWeightGoal(ctx.userId) });
     }
     if (id === "goal" && !action && ctx.method === "PATCH") {
-      const body = (await readJson(ctx.request)) as Record<string, unknown>;
-      await saveWeightGoal(
-        ctx.userId,
-        typeof body.goalWeightKg === "number" ? body.goalWeightKg : null,
-      );
+      await saveWeightGoal(ctx.userId, getGoalWeightKg(await readJson(ctx.request)));
       return ok({ goalWeightKg: await getWeightGoal(ctx.userId) });
     }
     if (id === "entries" && !action && ctx.method === "GET") {
@@ -496,6 +534,8 @@ async function dispatchApiRequest(ctx: ApiContext) {
 }
 
 function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
+  if (path.length > 3) return null;
+
   const [resource, id, action] = path;
   if (resource === "openapi.json" && !id && method === "GET") return [];
   if (resource === "me" && !id && method === "GET") return ["read:goals"];
@@ -514,17 +554,17 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
   }
   if (resource === "meal-groups") {
     if (!id && method === "GET") return ["read:daily"];
-    if ((!id && method === "POST") || (id === "reorder" && method === "POST")) return ["write:daily"];
+    if ((!id && method === "POST") || (id === "reorder" && !action && method === "POST")) return ["write:daily"];
     if (id && !action && (method === "PATCH" || method === "DELETE")) return ["write:daily"];
   }
   if (resource === "foods") {
-    if (id === "search" && method === "GET") return ["read:foods"];
-    if ((!id && method === "POST") || (id && method === "PATCH")) return ["write:foods"];
+    if (id === "search" && !action && method === "GET") return ["read:foods"];
+    if ((!id && method === "POST") || (id && !action && method === "PATCH")) return ["write:foods"];
   }
   if (resource === "barcodes" && id && !action && method === "GET") return ["read:foods"];
   if (resource === "barcode-foods" && !id && method === "POST") return ["write:foods"];
   if (resource === "templates") {
-    if (id === "from-day" && method === "POST") return ["read:daily", "write:templates"];
+    if (id === "from-day" && !action && method === "POST") return ["read:daily", "write:templates"];
     if (!id && method === "GET") return ["read:templates"];
     if (!id && method === "POST") return ["write:templates"];
     if (id && action === "apply" && method === "POST") return ["read:templates", "write:daily"];
@@ -546,7 +586,10 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
       return ["write:weight"];
     }
   }
-  if ((resource === "stats" || resource === "summary" || resource === "leaderboard") && !id && method === "GET") {
+  if (resource === "summary" && !id && method === "GET") {
+    return ["read:stats", "read:daily", "read:goals"];
+  }
+  if ((resource === "stats" || resource === "leaderboard") && !id && method === "GET") {
     return ["read:stats"];
   }
   return null;

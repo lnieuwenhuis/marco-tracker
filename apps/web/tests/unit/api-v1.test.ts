@@ -52,13 +52,14 @@ describe("Macro Tracker API v1", () => {
     options: {
       token?: string;
       body?: unknown;
+      rawBody?: string;
     } = {},
   ) {
     const headers: Record<string, string> = {};
     if (options.token) {
       headers.authorization = `Bearer ${options.token}`;
     }
-    if (options.body !== undefined) {
+    if (options.body !== undefined || options.rawBody !== undefined) {
       headers["content-type"] = "application/json";
     }
 
@@ -68,10 +69,7 @@ describe("Macro Tracker API v1", () => {
       new Request(url, {
         method,
         headers,
-        body:
-          options.body !== undefined
-            ? JSON.stringify(options.body)
-            : undefined,
+        body: options.rawBody ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
       }),
       url.pathname.replace("/api/v1", "").split("/").filter(Boolean),
       method,
@@ -159,6 +157,142 @@ describe("Macro Tracker API v1", () => {
     await expect(insufficient.json()).resolves.toMatchObject({
       ok: false,
       error: { code: "insufficient_scope" },
+    });
+  });
+
+  it("requires every scope represented by summary data", async () => {
+    await apiRequest("PATCH", "/goals", {
+      token: fullToken,
+      body: { caloriesKcal: 2400, proteinG: 150 },
+    });
+    const groupResponse = await apiRequest("POST", "/meal-groups", {
+      token: fullToken,
+      body: { label: "Dinner" },
+    });
+    const group = (await groupResponse.json()).data;
+    await apiRequest("POST", "/days/2026-03-19/entries", {
+      token: fullToken,
+      body: {
+        mealGroupId: group.id,
+        label: "Private dinner",
+        quantity: 1,
+        unit: "serving",
+        proteinG: 20,
+        carbsG: 30,
+        fatG: 10,
+        caloriesKcal: 300,
+      },
+    });
+
+    const statsOnly = await createApiToken(
+      userId,
+      {
+        name: "Stats only",
+        scopes: ["read:stats"],
+      },
+      runtime.db,
+    );
+    const response = await apiRequest("GET", "/summary?date=2026-03-19", {
+      token: statsOnly.token,
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "insufficient_scope" },
+    });
+  });
+
+  it("rejects invalid goal patches without persisting partial changes", async () => {
+    const initial = {
+      caloriesKcal: 2400,
+      proteinG: 150,
+      carbsG: 260,
+      fatG: 80,
+    };
+    await apiRequest("PATCH", "/goals", { token: fullToken, body: initial });
+
+    for (const body of [
+      { proteinG: -50 },
+      { caloriesKcal: -1 },
+      { caloriesKcal: 2100.5 },
+      { carbsG: "260" },
+    ]) {
+      const response = await apiRequest("PATCH", "/goals", { token: fullToken, body });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ ok: false });
+    }
+
+    const malformed = await apiRequest("PATCH", "/goals", {
+      token: fullToken,
+      rawBody: "{\"proteinG\":NaN}",
+    });
+    expect(malformed.status).toBe(400);
+
+    const unchanged = await apiRequest("GET", "/goals", { token: fullToken });
+    await expect(unchanged.json()).resolves.toMatchObject({
+      ok: true,
+      data: initial,
+    });
+
+    const omittedAndNull = await apiRequest("PATCH", "/goals", {
+      token: fullToken,
+      body: { proteinG: null },
+    });
+    await expect(omittedAndNull.json()).resolves.toMatchObject({
+      ok: true,
+      data: { ...initial, proteinG: null },
+    });
+  });
+
+  it("rejects invalid weight goals and only clears explicit null", async () => {
+    await apiRequest("PATCH", "/weight/goal", {
+      token: fullToken,
+      body: { goalWeightKg: 78 },
+    });
+
+    for (const body of [
+      {},
+      { goalWeightKg: "78" },
+      { goalWeightKg: -1 },
+      { goalWeightKg: 0 },
+    ]) {
+      const response = await apiRequest("PATCH", "/weight/goal", { token: fullToken, body });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({ ok: false });
+    }
+
+    const malformed = await apiRequest("PATCH", "/weight/goal", {
+      token: fullToken,
+      rawBody: "{\"goalWeightKg\":NaN}",
+    });
+    expect(malformed.status).toBe(400);
+
+    const stillSet = await apiRequest("GET", "/weight/goal", { token: fullToken });
+    await expect(stillSet.json()).resolves.toMatchObject({
+      ok: true,
+      data: { goalWeightKg: 78 },
+    });
+
+    const cleared = await apiRequest("PATCH", "/weight/goal", {
+      token: fullToken,
+      body: { goalWeightKg: null },
+    });
+    await expect(cleared.json()).resolves.toMatchObject({
+      ok: true,
+      data: { goalWeightKg: null },
+    });
+  });
+
+  it("rejects routes with unexpected trailing path segments", async () => {
+    const response = await apiRequest("GET", "/foods/search/extra?q=yogurt", {
+      token: fullToken,
+    });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "not_found" },
     });
   });
 
@@ -400,6 +534,9 @@ describe("Macro Tracker API v1", () => {
 
     expect(response.status).toBe(200);
     expect(payload.data.paths).toEqual(openApi.paths);
+    expect(payload.data.servers).toEqual([{ url: "/api/v1" }]);
+    expect(Object.keys(payload.data.paths)).toContain("/goals");
+    expect(Object.keys(payload.data.paths)).not.toContain("/api/v1/goals");
 
     for (const endpoint of API_V1_ENDPOINTS) {
       expect(payload.data.paths[endpoint.path]).toBeTruthy();

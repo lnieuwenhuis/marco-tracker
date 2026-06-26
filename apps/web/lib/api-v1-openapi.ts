@@ -13,82 +13,82 @@ type ApiEndpoint = {
 
 export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   {
-    path: "/api/v1/me",
+    path: "/me",
     methods: [{ method: "get", summary: "Read the authenticated account", scopes: ["read:goals"] }],
   },
   {
-    path: "/api/v1/goals",
+    path: "/goals",
     methods: [
       { method: "get", summary: "Read macro goals", scopes: ["read:goals"] },
       { method: "patch", summary: "Update macro goals", scopes: ["write:goals"] },
     ],
   },
   {
-    path: "/api/v1/days/{date}",
+    path: "/days/{date}",
     methods: [{ method: "get", summary: "Read a daily log", scopes: ["read:daily"] }],
   },
   {
-    path: "/api/v1/days/{date}/entries",
+    path: "/days/{date}/entries",
     methods: [{ method: "post", summary: "Create a meal entry on a date", scopes: ["write:daily"] }],
   },
   {
-    path: "/api/v1/meal-entries/{id}",
+    path: "/meal-entries/{id}",
     methods: [
       { method: "patch", summary: "Update a meal entry", scopes: ["write:daily"] },
       { method: "delete", summary: "Delete a meal entry", scopes: ["write:daily"] },
     ],
   },
   {
-    path: "/api/v1/meal-entries/{id}/status",
+    path: "/meal-entries/{id}/status",
     methods: [{ method: "patch", summary: "Update a meal entry status", scopes: ["write:daily"] }],
   },
   {
-    path: "/api/v1/meal-groups",
+    path: "/meal-groups",
     methods: [
       { method: "get", summary: "List meal groups", scopes: ["read:daily"] },
       { method: "post", summary: "Create a meal group", scopes: ["write:daily"] },
     ],
   },
   {
-    path: "/api/v1/meal-groups/{id}",
+    path: "/meal-groups/{id}",
     methods: [
       { method: "patch", summary: "Update a meal group", scopes: ["write:daily"] },
       { method: "delete", summary: "Delete a meal group", scopes: ["write:daily"] },
     ],
   },
   {
-    path: "/api/v1/meal-groups/reorder",
+    path: "/meal-groups/reorder",
     methods: [{ method: "post", summary: "Reorder meal groups", scopes: ["write:daily"] }],
   },
   {
-    path: "/api/v1/foods/search",
+    path: "/foods/search",
     methods: [{ method: "get", summary: "Search food products", scopes: ["read:foods"] }],
   },
   {
-    path: "/api/v1/foods",
+    path: "/foods",
     methods: [{ method: "post", summary: "Create a personal food product", scopes: ["write:foods"] }],
   },
   {
-    path: "/api/v1/foods/{id}",
+    path: "/foods/{id}",
     methods: [{ method: "patch", summary: "Update a personal food product", scopes: ["write:foods"] }],
   },
   {
-    path: "/api/v1/barcodes/{barcode}",
+    path: "/barcodes/{barcode}",
     methods: [{ method: "get", summary: "Lookup a barcode food product", scopes: ["read:foods"] }],
   },
   {
-    path: "/api/v1/barcode-foods",
+    path: "/barcode-foods",
     methods: [{ method: "post", summary: "Create a community barcode food product", scopes: ["write:foods"] }],
   },
   {
-    path: "/api/v1/templates",
+    path: "/templates",
     methods: [
       { method: "get", summary: "List meal templates", scopes: ["read:templates"] },
       { method: "post", summary: "Create a meal template", scopes: ["write:templates"] },
     ],
   },
   {
-    path: "/api/v1/templates/{id}",
+    path: "/templates/{id}",
     methods: [
       { method: "get", summary: "Read a meal template", scopes: ["read:templates"] },
       { method: "patch", summary: "Update a meal template", scopes: ["write:templates"] },
@@ -96,22 +96,22 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     ],
   },
   {
-    path: "/api/v1/templates/{id}/apply",
+    path: "/templates/{id}/apply",
     methods: [{ method: "post", summary: "Apply a template to a date", scopes: ["read:templates", "write:daily"] }],
   },
   {
-    path: "/api/v1/templates/from-day",
+    path: "/templates/from-day",
     methods: [{ method: "post", summary: "Create a template from a day", scopes: ["read:daily", "write:templates"] }],
   },
   {
-    path: "/api/v1/recipes",
+    path: "/recipes",
     methods: [
       { method: "get", summary: "List recipes", scopes: ["read:recipes"] },
       { method: "post", summary: "Create a recipe", scopes: ["write:recipes"] },
     ],
   },
   {
-    path: "/api/v1/recipes/{id}",
+    path: "/recipes/{id}",
     methods: [
       { method: "get", summary: "Read a recipe", scopes: ["read:recipes"] },
       { method: "patch", summary: "Update a recipe", scopes: ["write:recipes"] },
@@ -119,45 +119,51 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     ],
   },
   {
-    path: "/api/v1/recipes/{id}/log",
+    path: "/recipes/{id}/log",
     methods: [{ method: "post", summary: "Log a recipe portion", scopes: ["read:recipes", "write:daily"] }],
   },
   {
-    path: "/api/v1/weight",
+    path: "/weight",
     methods: [{ method: "get", summary: "Read weight entries and progress", scopes: ["read:weight"] }],
   },
   {
-    path: "/api/v1/weight/entries",
+    path: "/weight/entries",
     methods: [{ method: "post", summary: "Create a weight entry", scopes: ["write:weight"] }],
   },
   {
-    path: "/api/v1/weight/entries/{id}",
+    path: "/weight/entries/{id}",
     methods: [
       { method: "patch", summary: "Update a weight entry", scopes: ["write:weight"] },
       { method: "delete", summary: "Delete a weight entry", scopes: ["write:weight"] },
     ],
   },
   {
-    path: "/api/v1/weight/goal",
+    path: "/weight/goal",
     methods: [
       { method: "get", summary: "Read the weight goal", scopes: ["read:weight"] },
       { method: "patch", summary: "Update the weight goal", scopes: ["write:weight"] },
     ],
   },
   {
-    path: "/api/v1/stats",
+    path: "/stats",
     methods: [{ method: "get", summary: "Read stats", scopes: ["read:stats"] }],
   },
   {
-    path: "/api/v1/summary",
-    methods: [{ method: "get", summary: "Read dashboard summary data", scopes: ["read:stats"] }],
+    path: "/summary",
+    methods: [
+      {
+        method: "get",
+        summary: "Read dashboard summary data",
+        scopes: ["read:stats", "read:daily", "read:goals"],
+      },
+    ],
   },
   {
-    path: "/api/v1/leaderboard",
+    path: "/leaderboard",
     methods: [{ method: "get", summary: "Read personal leaderboard stats", scopes: ["read:stats"] }],
   },
   {
-    path: "/api/v1/openapi.json",
+    path: "/openapi.json",
     methods: [{ method: "get", summary: "Read the OpenAPI document", scopes: [] }],
   },
 ];
