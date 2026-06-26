@@ -1857,9 +1857,39 @@ describe("Macro Tracker API v1", () => {
       expect.objectContaining({ name: "id", in: "path", required: true }),
     ]);
     expect(payload.paths["/recipes/{id}/log"]?.post.requestBody).toBeTruthy();
+
+    const mealEntryCreateSchema =
+      payload.paths["/days/{date}/entries"]?.post.requestBody.content["application/json"].schema;
+    expect(mealEntryCreateSchema.anyOf).toContainEqual(
+      expect.objectContaining({
+        required: ["productId"],
+        properties: expect.objectContaining({ productId: { type: "string" } }),
+      }),
+    );
+    expect(mealEntryCreateSchema.anyOf).toContainEqual(
+      expect.objectContaining({ required: ["label", "proteinG", "carbsG", "fatG", "caloriesKcal"] }),
+    );
+
     expect(
       payload.paths["/meal-entries/{id}"]?.patch.requestBody.content["application/json"].schema,
     ).not.toHaveProperty("required");
+    expect(
+      payload.paths["/foods/{id}"]?.patch.requestBody.content["application/json"].schema,
+    ).not.toHaveProperty("required");
+    expect(
+      payload.paths["/weight/entries/{id}"]?.patch.requestBody.content["application/json"].schema,
+    ).not.toHaveProperty("required");
+    expect(
+      payload.paths["/foods"]?.post.requestBody.content["application/json"].schema.required,
+    ).toEqual(["name", "proteinPer100", "carbsPer100", "fatPer100", "caloriesPer100"]);
+    expect(
+      payload.paths["/weight/entries"]?.post.requestBody.content["application/json"].schema.required,
+    ).toEqual(["date", "weightKg"]);
+
+    expect(
+      payload.paths["/meal-groups/reorder"]?.post.requestBody.content["application/json"].schema.anyOf,
+    ).toEqual(expect.arrayContaining([{ required: ["orderedIds"] }, { required: ["groupIds"] }]));
+
     expect(payload.paths["/foods/search"]?.get.parameters).toEqual([
       expect.objectContaining({ name: "q", in: "query" }),
     ]);

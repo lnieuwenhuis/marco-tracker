@@ -250,6 +250,12 @@ const foodMutationSchema = {
   additionalProperties: true,
 };
 
+const foodPatchSchema = {
+  type: "object",
+  properties: foodMutationSchema.properties,
+  additionalProperties: true,
+};
+
 const macroFields = {
   proteinG: { type: "number", minimum: 0 },
   carbsG: { type: "number", minimum: 0 },
@@ -291,6 +297,16 @@ const mealEntrySchema = {
   additionalProperties: true,
 };
 
+const mealEntryCreateSchema = {
+  type: "object",
+  anyOf: [
+    { required: mealEntrySchema.required },
+    { required: ["productId"], properties: { productId: { type: "string" } } },
+  ],
+  properties: mealEntrySchema.properties,
+  additionalProperties: true,
+};
+
 const mealEntryPatchSchema = {
   type: "object",
   properties: mealEntrySchema.properties,
@@ -313,6 +329,7 @@ const mealEntryStatusSchema = {
 
 const reorderMealGroupsSchema = {
   type: "object",
+  anyOf: [{ required: ["orderedIds"] }, { required: ["groupIds"] }],
   properties: {
     orderedIds: { type: "array", items: { type: "string" } },
     groupIds: { type: "array", items: { type: "string" } },
@@ -411,6 +428,12 @@ const weightEntrySchema = {
   additionalProperties: true,
 };
 
+const weightEntryPatchSchema = {
+  type: "object",
+  properties: weightEntrySchema.properties,
+  additionalProperties: true,
+};
+
 const weightGoalSchema = {
   type: "object",
   required: ["goalWeightKg"],
@@ -420,15 +443,14 @@ const weightGoalSchema = {
 
 function requestBodyFor(path: string, method: ApiEndpointMethod["method"]) {
   if (path === "/goals" && method === "patch") return jsonRequestBody(goalPatchSchema);
-  if (path === "/days/{date}/entries" && method === "post") return jsonRequestBody(mealEntrySchema);
+  if (path === "/days/{date}/entries" && method === "post") return jsonRequestBody(mealEntryCreateSchema);
   if (path === "/meal-entries/{id}" && method === "patch") return jsonRequestBody(mealEntryPatchSchema);
   if (path === "/meal-entries/{id}/status" && method === "patch") return jsonRequestBody(mealEntryStatusSchema);
   if (path === "/meal-groups" && method === "post") return jsonRequestBody(mealGroupSchema);
   if (path === "/meal-groups/{id}" && method === "patch") return jsonRequestBody(mealGroupSchema);
   if (path === "/meal-groups/reorder" && method === "post") return jsonRequestBody(reorderMealGroupsSchema);
-  if ((path === "/foods" && method === "post") || (path === "/foods/{id}" && method === "patch")) {
-    return jsonRequestBody(foodMutationSchema);
-  }
+  if (path === "/foods" && method === "post") return jsonRequestBody(foodMutationSchema);
+  if (path === "/foods/{id}" && method === "patch") return jsonRequestBody(foodPatchSchema);
   if (path === "/templates" && method === "post") return jsonRequestBody(templateMutationSchema);
   if (path === "/templates/{id}" && method === "patch") return jsonRequestBody(templateMutationSchema);
   if (path === "/templates/{id}/apply" && method === "post") return jsonRequestBody(dateSchema);
@@ -439,7 +461,7 @@ function requestBodyFor(path: string, method: ApiEndpointMethod["method"]) {
     return jsonRequestBody(recipeLogSchema);
   }
   if (path === "/weight/entries" && method === "post") return jsonRequestBody(weightEntrySchema);
-  if (path === "/weight/entries/{id}" && method === "patch") return jsonRequestBody(weightEntrySchema);
+  if (path === "/weight/entries/{id}" && method === "patch") return jsonRequestBody(weightEntryPatchSchema);
   if (path === "/weight/goal" && method === "patch") return jsonRequestBody(weightGoalSchema);
   return undefined;
 }
