@@ -291,6 +291,12 @@ const mealEntrySchema = {
   additionalProperties: true,
 };
 
+const mealEntryPatchSchema = {
+  type: "object",
+  properties: mealEntrySchema.properties,
+  additionalProperties: true,
+};
+
 const mealGroupSchema = {
   type: "object",
   required: ["label"],
@@ -415,7 +421,7 @@ const weightGoalSchema = {
 function requestBodyFor(path: string, method: ApiEndpointMethod["method"]) {
   if (path === "/goals" && method === "patch") return jsonRequestBody(goalPatchSchema);
   if (path === "/days/{date}/entries" && method === "post") return jsonRequestBody(mealEntrySchema);
-  if (path === "/meal-entries/{id}" && method === "patch") return jsonRequestBody(mealEntrySchema);
+  if (path === "/meal-entries/{id}" && method === "patch") return jsonRequestBody(mealEntryPatchSchema);
   if (path === "/meal-entries/{id}/status" && method === "patch") return jsonRequestBody(mealEntryStatusSchema);
   if (path === "/meal-groups" && method === "post") return jsonRequestBody(mealGroupSchema);
   if (path === "/meal-groups/{id}" && method === "patch") return jsonRequestBody(mealGroupSchema);

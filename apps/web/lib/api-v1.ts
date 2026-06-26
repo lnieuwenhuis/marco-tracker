@@ -106,6 +106,16 @@ function badRequest(message: string) {
   return error(400, "bad_request", message);
 }
 
+const UUID_PATH_PARAM_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function requireUuidPathParam(value: string) {
+  if (!UUID_PATH_PARAM_PATTERN.test(value)) {
+    throw new Error("Path parameter must be a valid UUID.");
+  }
+
+  return value;
+}
+
 function getBearerToken(request: Request) {
   const authorization = request.headers.get("authorization");
   if (!authorization) {
@@ -489,12 +499,13 @@ async function dispatchApiRequest(ctx: ApiContext) {
   }
 
   if (resource === "meal-entries" && id) {
+    const entryId = requireUuidPathParam(id);
     if (!action && ctx.method === "PATCH") {
-      const mergedBody = await mergeMealEntryPatchBody(ctx.userId, id, await readJson(ctx.request));
-      return ok(await updateMealEntry(ctx.userId, id, mergedBody as never));
+      const mergedBody = await mergeMealEntryPatchBody(ctx.userId, entryId, await readJson(ctx.request));
+      return ok(await updateMealEntry(ctx.userId, entryId, mergedBody as never));
     }
     if (!action && ctx.method === "DELETE") {
-      const deleted = await deleteMealEntry(ctx.userId, id);
+      const deleted = await deleteMealEntry(ctx.userId, entryId);
       if (!deleted) return notFound("Meal entry not found.");
       return emptyOk({ deleted: true });
     }
@@ -503,7 +514,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       if (typeof body.status !== "string" || !isMealEntryStatus(body.status)) {
         return badRequest("Meal status is invalid.");
       }
-      return ok(await markMealEntryStatus(ctx.userId, id, body.status));
+      return ok(await markMealEntryStatus(ctx.userId, entryId, body.status));
     }
     return methodNotAllowed();
   }
@@ -518,11 +529,12 @@ async function dispatchApiRequest(ctx: ApiContext) {
     if (id === "reorder" && !action && ctx.method === "POST") {
       return ok(await reorderMealGroups(ctx.userId, getOrderedGroupIds(await readJson(ctx.request))));
     }
+    if (id === "reorder" && !action) return methodNotAllowed();
     if (id && !action && ctx.method === "PATCH") {
-      return ok(await updateMealGroup(ctx.userId, id, requireMealGroupBody(await readJson(ctx.request)) as never));
+      return ok(await updateMealGroup(ctx.userId, requireUuidPathParam(id), requireMealGroupBody(await readJson(ctx.request)) as never));
     }
     if (id && !action && ctx.method === "DELETE") {
-      const deleted = await deleteMealGroup(ctx.userId, id);
+      const deleted = await deleteMealGroup(ctx.userId, requireUuidPathParam(id));
       if (!deleted) return notFound("Meal group not found.");
       return emptyOk({ deleted: true });
     }
@@ -534,6 +546,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       const products = await searchFoodProducts(ctx.userId, ctx.url.searchParams.get("q") ?? "");
       return ok(products.map(mapFoodProductForApi));
     }
+    if (id === "search" && !action) return methodNotAllowed();
     if (!id && ctx.method === "POST") {
       const product = await createPersonalFoodProduct(
         ctx.userId,
@@ -544,7 +557,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
     if (id && !action && ctx.method === "PATCH") {
       const product = await updatePersonalFoodProduct(
         ctx.userId,
-        id,
+        requireUuidPathParam(id),
         sanitizeApiFoodInput(await readJson(ctx.request)),
       );
       return ok(mapFoodProductForApi(product));
@@ -562,6 +575,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
     if (id === "from-day" && !action && ctx.method === "POST") {
       return ok(await createTemplateFromDate(ctx.userId, requireTemplateFromDayBody(await readJson(ctx.request)) as never), 201);
     }
+    if (id === "from-day" && !action) return methodNotAllowed();
     if (!id && ctx.method === "GET") {
       return ok(await getTemplates(ctx.userId));
     }
@@ -569,18 +583,18 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(await createTemplate(ctx.userId, requireTemplateBody(await readJson(ctx.request)) as never), 201);
     }
     if (id && action === "apply" && ctx.method === "POST") {
-      return ok(await applyTemplateToDate(ctx.userId, { templateId: id, ...requireBodyDate(await readJson(ctx.request)) } as never), 201);
+      return ok(await applyTemplateToDate(ctx.userId, { templateId: requireUuidPathParam(id), ...requireBodyDate(await readJson(ctx.request)) } as never), 201);
     }
     if (id && !action && ctx.method === "GET") {
-      const template = await getTemplateById(ctx.userId, id);
+      const template = await getTemplateById(ctx.userId, requireUuidPathParam(id));
       if (!template) return notFound("Template not found.");
       return ok(template);
     }
     if (id && !action && ctx.method === "PATCH") {
-      return ok(await updateTemplate(ctx.userId, id, requireTemplateBody(await readJson(ctx.request)) as never));
+      return ok(await updateTemplate(ctx.userId, requireUuidPathParam(id), requireTemplateBody(await readJson(ctx.request)) as never));
     }
     if (id && !action && ctx.method === "DELETE") {
-      const deleted = await deleteTemplate(ctx.userId, id);
+      const deleted = await deleteTemplate(ctx.userId, requireUuidPathParam(id));
       if (!deleted) return notFound("Template not found.");
       return emptyOk({ deleted: true });
     }
@@ -595,18 +609,18 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(await createRecipe(ctx.userId, requireRecipeBody(await readJson(ctx.request)) as never), 201);
     }
     if (id && action === "log" && ctx.method === "POST") {
-      return ok(await logRecipePortion(ctx.userId, id, requireRecord(await readJson(ctx.request))), 201);
+      return ok(await logRecipePortion(ctx.userId, requireUuidPathParam(id), requireRecord(await readJson(ctx.request))), 201);
     }
     if (id && !action && ctx.method === "GET") {
-      const recipe = await getRecipeById(ctx.userId, id);
+      const recipe = await getRecipeById(ctx.userId, requireUuidPathParam(id));
       if (!recipe) return notFound("Recipe not found.");
       return ok(recipe);
     }
     if (id && !action && ctx.method === "PATCH") {
-      return ok(await updateRecipe(ctx.userId, id, requireRecipeBody(await readJson(ctx.request)) as never));
+      return ok(await updateRecipe(ctx.userId, requireUuidPathParam(id), requireRecipeBody(await readJson(ctx.request)) as never));
     }
     if (id && !action && ctx.method === "DELETE") {
-      const deleted = await deleteRecipe(ctx.userId, id);
+      const deleted = await deleteRecipe(ctx.userId, requireUuidPathParam(id));
       if (!deleted) return notFound("Recipe not found.");
       return emptyOk({ deleted: true });
     }
@@ -621,12 +635,12 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(await createWeightEntry(ctx.userId, requireBodyDate(await readJson(ctx.request)) as never), 201);
     }
     if (id === "entries" && action && ctx.method === "PATCH") {
-      const updated = await updateWeightEntry(ctx.userId, action, requireBodyDate(await readJson(ctx.request)) as never);
+      const updated = await updateWeightEntry(ctx.userId, requireUuidPathParam(action), requireBodyDate(await readJson(ctx.request)) as never);
       if (!updated) return notFound("Weight entry not found.");
       return ok(updated);
     }
     if (id === "entries" && action && ctx.method === "DELETE") {
-      const deleted = await deleteWeightEntry(ctx.userId, action);
+      const deleted = await deleteWeightEntry(ctx.userId, requireUuidPathParam(action));
       if (!deleted) return notFound("Weight entry not found.");
       return emptyOk({ deleted: true });
     }
@@ -690,11 +704,11 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
   if (resource === "meal-groups") {
     if (!id && method === "GET") return ["read:daily"];
     if ((!id && method === "POST") || (id === "reorder" && !action && method === "POST")) return ["write:daily"];
-    if (id && !action && (method === "PATCH" || method === "DELETE")) return ["write:daily"];
+    if (id && id !== "reorder" && !action && (method === "PATCH" || method === "DELETE")) return ["write:daily"];
   }
   if (resource === "foods") {
     if (id === "search" && !action && method === "GET") return ["read:foods"];
-    if ((!id && method === "POST") || (id && !action && method === "PATCH")) return ["write:foods"];
+    if ((!id && method === "POST") || (id && id !== "search" && !action && method === "PATCH")) return ["write:foods"];
   }
   if (resource === "barcodes" && id && !action && method === "GET") return ["read:foods"];
   if (resource === "templates") {
@@ -702,8 +716,8 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
     if (!id && method === "GET") return ["read:templates"];
     if (!id && method === "POST") return ["write:templates"];
     if (id && action === "apply" && method === "POST") return ["read:templates", "write:daily"];
-    if (id && !action && method === "GET") return ["read:templates"];
-    if (id && !action && (method === "PATCH" || method === "DELETE")) return ["write:templates"];
+    if (id && id !== "from-day" && !action && method === "GET") return ["read:templates"];
+    if (id && id !== "from-day" && !action && (method === "PATCH" || method === "DELETE")) return ["write:templates"];
   }
   if (resource === "recipes") {
     if (!id && method === "GET") return ["read:recipes"];
@@ -789,6 +803,7 @@ const SAFE_BAD_REQUEST_MESSAGES = new Set([
   "gramsConsumed must be a finite positive number.",
   "Meal status is invalid.",
   "Recipe cooked weight is required to log grams.",
+  "Path parameter must be a valid UUID.",
 ]);
 
 function isPublicValidationError(caught: unknown, message: string) {

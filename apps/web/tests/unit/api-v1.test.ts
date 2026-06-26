@@ -644,7 +644,7 @@ describe("Macro Tracker API v1", () => {
       },
       {
         method: "PATCH",
-        path: "/weight/entries/weight-entry-id",
+        path: "/weight/entries/00000000-0000-0000-0000-000000000000",
         body: { date: "20260319", weightKg: 80 },
       },
       {
@@ -654,7 +654,7 @@ describe("Macro Tracker API v1", () => {
       },
       {
         method: "POST",
-        path: "/templates/template-id/apply",
+        path: "/templates/00000000-0000-0000-0000-000000000000/apply",
         body: { date: "", status: "planned" },
       },
     ]) {
@@ -670,6 +670,42 @@ describe("Macro Tracker API v1", () => {
           code: "bad_request",
           message: "Date must use YYYY-MM-DD.",
         },
+      });
+    }
+  });
+
+  it("returns bad_request for malformed UUID path parameters", async () => {
+    for (const request of [
+      { method: "PATCH", path: "/meal-entries/not-a-uuid", body: { label: "Updated" } },
+      { method: "DELETE", path: "/meal-entries/not-a-uuid" },
+      { method: "PATCH", path: "/meal-entries/not-a-uuid/status", body: { status: "planned" } },
+      { method: "PATCH", path: "/meal-groups/not-a-uuid", body: { label: "Dinner" } },
+      { method: "DELETE", path: "/meal-groups/not-a-uuid" },
+      {
+        method: "PATCH",
+        path: "/foods/not-a-uuid",
+        body: { name: "Food", proteinPer100: 1, carbsPer100: 2, fatPer100: 3, caloriesPer100: 40 },
+      },
+      { method: "GET", path: "/templates/not-a-uuid" },
+      { method: "PATCH", path: "/templates/not-a-uuid", body: { type: "day", label: "Day", items: [] } },
+      { method: "DELETE", path: "/templates/not-a-uuid" },
+      { method: "POST", path: "/templates/not-a-uuid/apply", body: { date: "2026-03-19" } },
+      { method: "GET", path: "/recipes/not-a-uuid" },
+      { method: "PATCH", path: "/recipes/not-a-uuid", body: { label: "Recipe", portions: 1, ingredients: [] } },
+      { method: "DELETE", path: "/recipes/not-a-uuid" },
+      { method: "POST", path: "/recipes/not-a-uuid/log", body: { date: "2026-03-19" } },
+      { method: "PATCH", path: "/weight/entries/not-a-uuid", body: { date: "2026-03-19", weightKg: 80 } },
+      { method: "DELETE", path: "/weight/entries/not-a-uuid" },
+    ]) {
+      const response = await apiRequest(request.method, request.path, {
+        token: fullToken,
+        body: "body" in request ? request.body : undefined,
+      });
+
+      expect(response.status, `${request.method} ${request.path}`).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: "bad_request" },
       });
     }
   });
@@ -763,7 +799,11 @@ describe("Macro Tracker API v1", () => {
     for (const request of [
       { method: "POST", path: "/goals" },
       { method: "POST", path: "/barcodes/1234567890123" },
+      { method: "PATCH", path: "/foods/search" },
+      { method: "PATCH", path: "/meal-groups/reorder" },
+      { method: "GET", path: "/templates/from-day" },
       { method: "GET", path: "/templates/template-id/apply" },
+      { method: "GET", path: "/recipes/recipe-id/log" },
     ]) {
       const response = await apiRequest(request.method, request.path);
 
@@ -1267,6 +1307,9 @@ describe("Macro Tracker API v1", () => {
       expect.objectContaining({ name: "id", in: "path", required: true }),
     ]);
     expect(payload.paths["/recipes/{id}/log"]?.post.requestBody).toBeTruthy();
+    expect(
+      payload.paths["/meal-entries/{id}"]?.patch.requestBody.content["application/json"].schema,
+    ).not.toHaveProperty("required");
     expect(payload.paths["/foods/search"]?.get.parameters).toEqual([
       expect.objectContaining({ name: "q", in: "query" }),
     ]);
