@@ -473,6 +473,128 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("requires read:daily before PATCH /meal-entries/{id} returns merged entry data", async () => {
+    const writeOnlyDaily = await createApiToken(
+      userId,
+      {
+        name: "Write-only daily",
+        scopes: ["write:daily"],
+      },
+      runtime.db,
+    );
+    const created = await apiRequest("POST", "/days/2026-03-19/entries", {
+      token: fullToken,
+      body: {
+        label: "Private snack",
+        proteinG: 17,
+        carbsG: 7,
+        fatG: 0,
+        caloriesKcal: 100,
+      },
+    });
+    expect(created.status).toBe(201);
+    const entry = (await created.json()).data;
+
+    const rejected = await apiRequest("PATCH", `/meal-entries/${entry.id}`, {
+      token: writeOnlyDaily.token,
+      body: {},
+    });
+
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "insufficient_scope" },
+    });
+  });
+
+  it("requires read:daily before PATCH /meal-entries/{id}/status returns entry data", async () => {
+    const writeOnlyDaily = await createApiToken(
+      userId,
+      {
+        name: "Write-only daily",
+        scopes: ["write:daily"],
+      },
+      runtime.db,
+    );
+    const created = await apiRequest("POST", "/days/2026-03-19/entries", {
+      token: fullToken,
+      body: {
+        label: "Private dinner",
+        proteinG: 20,
+        carbsG: 30,
+        fatG: 10,
+        caloriesKcal: 300,
+      },
+    });
+    expect(created.status).toBe(201);
+    const entry = (await created.json()).data;
+
+    const rejected = await apiRequest("PATCH", `/meal-entries/${entry.id}/status`, {
+      token: writeOnlyDaily.token,
+      body: { status: "planned" },
+    });
+
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "insufficient_scope" },
+    });
+  });
+
+  it("allows read/write daily tokens to update meal entries and status", async () => {
+    const readWriteDaily = await createApiToken(
+      userId,
+      {
+        name: "Read/write daily",
+        scopes: ["write:daily", "read:daily"],
+      },
+      runtime.db,
+    );
+    const created = await apiRequest("POST", "/days/2026-03-19/entries", {
+      token: fullToken,
+      body: {
+        label: "Private lunch",
+        proteinG: 24,
+        carbsG: 35,
+        fatG: 12,
+        caloriesKcal: 344,
+      },
+    });
+    expect(created.status).toBe(201);
+    const entry = (await created.json()).data;
+
+    const updated = await apiRequest("PATCH", `/meal-entries/${entry.id}`, {
+      token: readWriteDaily.token,
+      body: { label: "Updated lunch" },
+    });
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        id: entry.id,
+        label: "Updated lunch",
+        proteinG: 24,
+        carbsG: 35,
+        fatG: 12,
+        caloriesKcal: 344,
+      },
+    });
+
+    const status = await apiRequest("PATCH", `/meal-entries/${entry.id}/status`, {
+      token: readWriteDaily.token,
+      body: { status: "planned" },
+    });
+    expect(status.status).toBe(200);
+    await expect(status.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        id: entry.id,
+        status: "planned",
+        label: "Updated lunch",
+      },
+    });
+  });
+
   it("omits internal food fields from search responses", async () => {
     await saveBarcodeFoodProduct(
       userId,

@@ -707,9 +707,9 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
     if (action === "entries" && method === "POST") return ["write:daily"];
   }
   if (resource === "meal-entries" && id) {
-    if ((!action && (method === "PATCH" || method === "DELETE")) || (action === "status" && method === "PATCH")) {
-      return ["write:daily"];
-    }
+    if (!action && method === "PATCH") return ["write:daily", "read:daily"];
+    if (!action && method === "DELETE") return ["write:daily"];
+    if (action === "status" && method === "PATCH") return ["write:daily", "read:daily"];
   }
   if (resource === "meal-groups") {
     if (!id && method === "GET") return ["read:daily"];

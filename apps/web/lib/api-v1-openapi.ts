@@ -35,13 +35,13 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   {
     path: "/meal-entries/{id}",
     methods: [
-      { method: "patch", summary: "Update a meal entry", scopes: ["write:daily"] },
+      { method: "patch", summary: "Update a meal entry", scopes: ["write:daily", "read:daily"] },
       { method: "delete", summary: "Delete a meal entry", scopes: ["write:daily"] },
     ],
   },
   {
     path: "/meal-entries/{id}/status",
-    methods: [{ method: "patch", summary: "Update a meal entry status", scopes: ["write:daily"] }],
+    methods: [{ method: "patch", summary: "Update a meal entry status", scopes: ["write:daily", "read:daily"] }],
   },
   {
     path: "/meal-groups",
