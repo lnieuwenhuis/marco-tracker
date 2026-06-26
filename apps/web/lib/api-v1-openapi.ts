@@ -250,23 +250,191 @@ const foodMutationSchema = {
   additionalProperties: true,
 };
 
+const macroFields = {
+  proteinG: { type: "number", minimum: 0 },
+  carbsG: { type: "number", minimum: 0 },
+  fatG: { type: "number", minimum: 0 },
+  caloriesKcal: { type: "integer", minimum: 0 },
+};
+
+const quantityFields = {
+  quantity: { type: "number", exclusiveMinimum: 0 },
+  unit: { type: "string" },
+  servingMultiplier: { type: "number", exclusiveMinimum: 0 },
+};
+
+const goalPatchSchema = {
+  type: "object",
+  properties: {
+    caloriesKcal: { type: ["integer", "null"], minimum: 0 },
+    proteinG: { type: ["number", "null"], minimum: 0 },
+    carbsG: { type: ["number", "null"], minimum: 0 },
+    fatG: { type: ["number", "null"], minimum: 0 },
+  },
+  additionalProperties: true,
+};
+
+const mealEntrySchema = {
+  type: "object",
+  required: ["label", "proteinG", "carbsG", "fatG", "caloriesKcal"],
+  properties: {
+    date: { type: "string", format: "date" },
+    mealGroupId: { type: ["string", "null"] },
+    status: { type: "string", enum: ["planned", "eaten", "skipped"] },
+    productId: { type: ["string", "null"] },
+    label: { type: "string" },
+    sortOrder: { type: "integer", minimum: 0 },
+    ...quantityFields,
+    ...macroFields,
+    clientMutationId: { type: ["string", "null"] },
+  },
+  additionalProperties: true,
+};
+
+const mealGroupSchema = {
+  type: "object",
+  required: ["label"],
+  properties: { label: { type: "string" } },
+  additionalProperties: true,
+};
+
+const mealEntryStatusSchema = {
+  type: "object",
+  required: ["status"],
+  properties: { status: { type: "string", enum: ["planned", "eaten", "skipped"] } },
+  additionalProperties: true,
+};
+
+const reorderMealGroupsSchema = {
+  type: "object",
+  properties: {
+    orderedIds: { type: "array", items: { type: "string" } },
+    groupIds: { type: "array", items: { type: "string" } },
+  },
+  additionalProperties: true,
+};
+
+const templateItemSchema = {
+  type: "object",
+  required: ["label", "proteinG", "carbsG", "fatG", "caloriesKcal"],
+  properties: {
+    productId: { type: ["string", "null"] },
+    mealGroupLabel: { type: ["string", "null"] },
+    label: { type: "string" },
+    ...quantityFields,
+    ...macroFields,
+  },
+  additionalProperties: true,
+};
+
+const templateMutationSchema = {
+  type: "object",
+  required: ["type", "label", "items"],
+  properties: {
+    type: { type: "string", enum: ["meal", "day"] },
+    label: { type: "string" },
+    notes: { type: ["string", "null"] },
+    items: { type: "array", items: templateItemSchema, minItems: 1 },
+  },
+  additionalProperties: true,
+};
+
+const dateSchema = {
+  type: "object",
+  required: ["date"],
+  properties: { date: { type: "string", format: "date" } },
+  additionalProperties: true,
+};
+
+const templateFromDaySchema = {
+  type: "object",
+  required: ["date", "type", "label"],
+  properties: {
+    date: { type: "string", format: "date" },
+    type: { type: "string", enum: ["meal", "day"] },
+    label: { type: "string" },
+  },
+  additionalProperties: true,
+};
+
+const recipeIngredientSchema = {
+  type: "object",
+  required: ["label", "proteinG", "carbsG", "fatG", "caloriesKcal"],
+  properties: {
+    productId: { type: ["string", "null"] },
+    label: { type: "string" },
+    ...quantityFields,
+    ...macroFields,
+  },
+  additionalProperties: true,
+};
+
+const recipeMutationSchema = {
+  type: "object",
+  required: ["label", "portions", "ingredients"],
+  properties: {
+    label: { type: "string" },
+    portions: { type: "integer", minimum: 1, maximum: 999 },
+    totalCookedWeightG: { type: ["number", "null"], exclusiveMinimum: 0 },
+    ingredients: { type: "array", items: recipeIngredientSchema, minItems: 1 },
+  },
+  additionalProperties: true,
+};
+
+const recipeLogSchema = {
+  type: "object",
+  required: ["date"],
+  properties: {
+    date: { type: "string", format: "date" },
+    portionCount: { type: "number", exclusiveMinimum: 0 },
+    gramsConsumed: { type: "number", exclusiveMinimum: 0 },
+    status: { type: "string", enum: ["planned", "eaten", "skipped"] },
+  },
+  additionalProperties: true,
+};
+
+const weightEntrySchema = {
+  type: "object",
+  required: ["date", "weightKg"],
+  properties: {
+    date: { type: "string", format: "date" },
+    weightKg: { type: "number", exclusiveMinimum: 0, exclusiveMaximum: 1000 },
+    bodyFatPct: { type: ["number", "null"], minimum: 0, maximum: 100 },
+    notes: { type: ["string", "null"] },
+  },
+  additionalProperties: true,
+};
+
+const weightGoalSchema = {
+  type: "object",
+  required: ["goalWeightKg"],
+  properties: { goalWeightKg: { type: ["number", "null"], exclusiveMinimum: 0, exclusiveMaximum: 1000 } },
+  additionalProperties: true,
+};
+
 function requestBodyFor(path: string, method: ApiEndpointMethod["method"]) {
+  if (path === "/goals" && method === "patch") return jsonRequestBody(goalPatchSchema);
+  if (path === "/days/{date}/entries" && method === "post") return jsonRequestBody(mealEntrySchema);
+  if (path === "/meal-entries/{id}" && method === "patch") return jsonRequestBody(mealEntrySchema);
+  if (path === "/meal-entries/{id}/status" && method === "patch") return jsonRequestBody(mealEntryStatusSchema);
+  if (path === "/meal-groups" && method === "post") return jsonRequestBody(mealGroupSchema);
+  if (path === "/meal-groups/{id}" && method === "patch") return jsonRequestBody(mealGroupSchema);
+  if (path === "/meal-groups/reorder" && method === "post") return jsonRequestBody(reorderMealGroupsSchema);
   if ((path === "/foods" && method === "post") || (path === "/foods/{id}" && method === "patch")) {
     return jsonRequestBody(foodMutationSchema);
   }
+  if (path === "/templates" && method === "post") return jsonRequestBody(templateMutationSchema);
+  if (path === "/templates/{id}" && method === "patch") return jsonRequestBody(templateMutationSchema);
+  if (path === "/templates/{id}/apply" && method === "post") return jsonRequestBody(dateSchema);
+  if (path === "/templates/from-day" && method === "post") return jsonRequestBody(templateFromDaySchema);
+  if (path === "/recipes" && method === "post") return jsonRequestBody(recipeMutationSchema);
+  if (path === "/recipes/{id}" && method === "patch") return jsonRequestBody(recipeMutationSchema);
   if (path === "/recipes/{id}/log" && method === "post") {
-    return jsonRequestBody({
-      type: "object",
-      required: ["date"],
-      properties: {
-        date: { type: "string", format: "date" },
-        portionCount: { type: "number", exclusiveMinimum: 0 },
-        gramsConsumed: { type: "number", exclusiveMinimum: 0 },
-        status: { type: "string", enum: ["planned", "eaten", "skipped"] },
-      },
-      additionalProperties: true,
-    });
+    return jsonRequestBody(recipeLogSchema);
   }
+  if (path === "/weight/entries" && method === "post") return jsonRequestBody(weightEntrySchema);
+  if (path === "/weight/entries/{id}" && method === "patch") return jsonRequestBody(weightEntrySchema);
+  if (path === "/weight/goal" && method === "patch") return jsonRequestBody(weightGoalSchema);
   return undefined;
 }
 

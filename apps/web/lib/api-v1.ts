@@ -187,6 +187,62 @@ function requireRecord(body: unknown) {
   return body as Record<string, unknown>;
 }
 
+function requireStringField(record: Record<string, unknown>, key: string, message: string) {
+  const value = record[key];
+  if (typeof value !== "string") {
+    throw new Error(message);
+  }
+  return value;
+}
+
+function requireArrayField(record: Record<string, unknown>, key: string, message: string) {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+function requireMealGroupBody(body: unknown) {
+  const record = requireRecord(body);
+  requireStringField(record, "label", "Meal group name is required.");
+  return record;
+}
+
+function requireMealEntryBody(body: unknown) {
+  return requireRecord(body);
+}
+
+function requireTemplateBody(body: unknown) {
+  const record = requireRecord(body);
+  requireStringField(record, "label", "Template name is required.");
+  requireStringField(record, "type", "Template type is invalid.");
+  const items = requireArrayField(record, "items", "A template must include at least one item.");
+  for (const item of items) {
+    const itemRecord = requireRecord(item);
+    requireStringField(itemRecord, "label", "Meal name is required.");
+  }
+  return record;
+}
+
+function requireTemplateFromDayBody(body: unknown) {
+  const record = requireBodyDate(body);
+  requireStringField(record, "label", "Template name is required.");
+  requireStringField(record, "type", "Template type is invalid.");
+  return record;
+}
+
+function requireRecipeBody(body: unknown) {
+  const record = requireRecord(body);
+  requireStringField(record, "label", "Recipe name is required.");
+  const ingredients = requireArrayField(record, "ingredients", "A recipe must have at least one ingredient.");
+  for (const ingredient of ingredients) {
+    const ingredientRecord = requireRecord(ingredient);
+    requireStringField(ingredientRecord, "label", "Ingredient name is required.");
+  }
+  return record;
+}
+
 function requireBodyDate(body: unknown) {
   const record = requireRecord(body);
   return {
@@ -260,6 +316,7 @@ function getOrderedGroupIds(body: unknown) {
 
 function sanitizeApiFoodInput(body: unknown): FoodProductInput {
   const record = requireRecord(body);
+  requireStringField(record, "name", "Product name is required.");
 
   return {
     name: record.name as FoodProductInput["name"],
@@ -414,7 +471,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(await getDailySummary(ctx.userId, date));
     }
     if (action === "entries" && ctx.method === "POST") {
-      const body = await readJson(ctx.request);
+      const body = requireMealEntryBody(await readJson(ctx.request));
       return ok(await createMealEntry(ctx.userId, { ...(body as object), date } as never), 201);
     }
     return methodNotAllowed();
@@ -422,7 +479,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
 
   if (resource === "meal-entries" && id) {
     if (!action && ctx.method === "PATCH") {
-      return ok(await updateMealEntry(ctx.userId, id, (await readJson(ctx.request)) as never));
+      return ok(await updateMealEntry(ctx.userId, id, requireMealEntryBody(await readJson(ctx.request)) as never));
     }
     if (!action && ctx.method === "DELETE") {
       const deleted = await deleteMealEntry(ctx.userId, id);
@@ -430,7 +487,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return emptyOk({ deleted: true });
     }
     if (action === "status" && ctx.method === "PATCH") {
-      const body = (await readJson(ctx.request)) as Record<string, unknown>;
+      const body = requireRecord(await readJson(ctx.request));
       if (typeof body.status !== "string" || !isMealEntryStatus(body.status)) {
         return badRequest("Meal status is invalid.");
       }
@@ -444,13 +501,13 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(await getMealGroups(ctx.userId));
     }
     if (!id && ctx.method === "POST") {
-      return ok(await createMealGroup(ctx.userId, (await readJson(ctx.request)) as never), 201);
+      return ok(await createMealGroup(ctx.userId, requireMealGroupBody(await readJson(ctx.request)) as never), 201);
     }
     if (id === "reorder" && !action && ctx.method === "POST") {
       return ok(await reorderMealGroups(ctx.userId, getOrderedGroupIds(await readJson(ctx.request))));
     }
     if (id && !action && ctx.method === "PATCH") {
-      return ok(await updateMealGroup(ctx.userId, id, (await readJson(ctx.request)) as never));
+      return ok(await updateMealGroup(ctx.userId, id, requireMealGroupBody(await readJson(ctx.request)) as never));
     }
     if (id && !action && ctx.method === "DELETE") {
       const deleted = await deleteMealGroup(ctx.userId, id);
@@ -491,13 +548,13 @@ async function dispatchApiRequest(ctx: ApiContext) {
 
   if (resource === "templates") {
     if (id === "from-day" && !action && ctx.method === "POST") {
-      return ok(await createTemplateFromDate(ctx.userId, requireBodyDate(await readJson(ctx.request)) as never), 201);
+      return ok(await createTemplateFromDate(ctx.userId, requireTemplateFromDayBody(await readJson(ctx.request)) as never), 201);
     }
     if (!id && ctx.method === "GET") {
       return ok(await getTemplates(ctx.userId));
     }
     if (!id && ctx.method === "POST") {
-      return ok(await createTemplate(ctx.userId, (await readJson(ctx.request)) as never), 201);
+      return ok(await createTemplate(ctx.userId, requireTemplateBody(await readJson(ctx.request)) as never), 201);
     }
     if (id && action === "apply" && ctx.method === "POST") {
       return ok(await applyTemplateToDate(ctx.userId, { templateId: id, ...requireBodyDate(await readJson(ctx.request)) } as never), 201);
@@ -508,7 +565,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(template);
     }
     if (id && !action && ctx.method === "PATCH") {
-      return ok(await updateTemplate(ctx.userId, id, (await readJson(ctx.request)) as never));
+      return ok(await updateTemplate(ctx.userId, id, requireTemplateBody(await readJson(ctx.request)) as never));
     }
     if (id && !action && ctx.method === "DELETE") {
       const deleted = await deleteTemplate(ctx.userId, id);
@@ -523,10 +580,10 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(await getRecipes(ctx.userId));
     }
     if (!id && ctx.method === "POST") {
-      return ok(await createRecipe(ctx.userId, (await readJson(ctx.request)) as never), 201);
+      return ok(await createRecipe(ctx.userId, requireRecipeBody(await readJson(ctx.request)) as never), 201);
     }
     if (id && action === "log" && ctx.method === "POST") {
-      return ok(await logRecipePortion(ctx.userId, id, (await readJson(ctx.request)) as Record<string, unknown>), 201);
+      return ok(await logRecipePortion(ctx.userId, id, requireRecord(await readJson(ctx.request))), 201);
     }
     if (id && !action && ctx.method === "GET") {
       const recipe = await getRecipeById(ctx.userId, id);
@@ -534,7 +591,7 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(recipe);
     }
     if (id && !action && ctx.method === "PATCH") {
-      return ok(await updateRecipe(ctx.userId, id, (await readJson(ctx.request)) as never));
+      return ok(await updateRecipe(ctx.userId, id, requireRecipeBody(await readJson(ctx.request)) as never));
     }
     if (id && !action && ctx.method === "DELETE") {
       const deleted = await deleteRecipe(ctx.userId, id);
@@ -700,6 +757,15 @@ const SAFE_BAD_REQUEST_MESSAGES = new Set([
   "Request body must be valid JSON.",
   "Date must use YYYY-MM-DD.",
   "Request body is required.",
+  "Meal group name is required.",
+  "Template name is required.",
+  "Template type is invalid.",
+  "A template must include at least one item.",
+  "Meal name is required.",
+  "Product name is required.",
+  "Recipe name is required.",
+  "A recipe must have at least one ingredient.",
+  "Ingredient name is required.",
   "caloriesKcal must be an integer.",
   "goalWeightKg is required.",
   "goalWeightKg must be null or a finite positive number.",

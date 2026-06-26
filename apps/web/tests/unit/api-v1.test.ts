@@ -674,6 +674,32 @@ describe("Macro Tracker API v1", () => {
     }
   });
 
+  it("returns bad_request for malformed JSON object mutation bodies", async () => {
+    const writeRequests = [
+      ["PATCH", "/goals", null],
+      ["POST", "/days/2026-03-19/entries", {}],
+      ["PATCH", "/meal-entries/entry-id/status", null],
+      ["POST", "/meal-groups", {}],
+      ["POST", "/foods", {}],
+      ["POST", "/templates", {}],
+      ["POST", "/templates/from-day", null],
+      ["POST", "/recipes", {}],
+      ["POST", "/recipes/recipe-id/log", null],
+      ["POST", "/weight/entries", {}],
+      ["PATCH", "/weight/goal", null],
+    ] as const;
+
+    for (const [method, path, body] of writeRequests) {
+      const response = await apiRequest(method, path, { token: fullToken, body });
+
+      expect(response.status, `${method} ${path}`).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: "bad_request" },
+      });
+    }
+  });
+
   it("sanitizes database errors instead of returning raw query details", async () => {
     const first = await apiRequest("POST", "/weight/entries", {
       token: fullToken,
@@ -1163,6 +1189,17 @@ describe("Macro Tracker API v1", () => {
       expect.objectContaining({ name: "q", in: "query" }),
     ]);
     expect(Object.keys(payload.paths)).not.toContain("/api/v1/goals");
+
+    for (const endpoint of API_V1_ENDPOINTS) {
+      for (const method of endpoint.methods) {
+        if (method.method === "post" || method.method === "patch") {
+          expect(
+            payload.paths[endpoint.path][method.method].requestBody,
+            `${method.method.toUpperCase()} ${endpoint.path}`,
+          ).toBeTruthy();
+        }
+      }
+    }
 
     for (const endpoint of API_V1_ENDPOINTS) {
       expect(payload.paths[endpoint.path]).toBeTruthy();
