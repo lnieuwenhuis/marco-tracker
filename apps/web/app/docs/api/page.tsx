@@ -34,7 +34,7 @@ export default function ApiDocsPage() {
       <section className="space-y-3">
         <h2 className="font-serif text-2xl font-semibold">Authentication</h2>
         <pre className="overflow-x-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4 text-sm">
-          <code>{`curl https://macro.safasfly.dev/api/v1/goals \\
+          <code>{`curl /api/v1/goals \\
   -H "Authorization: Bearer mtk_v1_your_token"`}</code>
         </pre>
         <p className="text-sm text-[var(--color-muted)]">
@@ -109,7 +109,7 @@ export default function ApiDocsPage() {
       <section className="space-y-3">
         <h2 className="font-serif text-2xl font-semibold">Example Request</h2>
         <pre className="overflow-x-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4 text-sm">
-          <code>{`curl -X POST https://macro.safasfly.dev/api/v1/days/2026-03-19/entries \\
+          <code>{`curl -X POST /api/v1/days/2026-03-19/entries \\
   -H "Authorization: Bearer mtk_v1_your_token" \\
   -H "Content-Type: application/json" \\
   -d '{

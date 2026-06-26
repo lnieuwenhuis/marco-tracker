@@ -765,12 +765,12 @@ export async function handleApiV1Request(
     return isKnownApiPath(normalizedPath) ? methodNotAllowed() : notFound();
   }
 
-  const auth = await authenticateRequest(request, requiredScopes);
-  if (!auth.ok) {
-    return auth.response;
-  }
-
   try {
+    const auth = await authenticateRequest(request, requiredScopes);
+    if (!auth.ok) {
+      return auth.response;
+    }
+
     return await dispatchApiRequest({
       request,
       method: normalizedMethod,

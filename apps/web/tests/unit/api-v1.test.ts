@@ -1,4 +1,5 @@
 import {
+  apiTokens,
   createApiToken,
   createPersonalFoodProduct,
   foodProducts,
@@ -17,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { handleApiV1Request } from "@/lib/api-v1";
 import { API_V1_ENDPOINTS, getApiV1OpenApi } from "@/lib/api-v1-openapi";
+import { HEAD, PUT } from "@/app/api/v1/[[...path]]/route";
 
 describe("Macro Tracker API v1", () => {
   let runtime: DatabaseRuntime;
@@ -105,6 +107,52 @@ describe("Macro Tracker API v1", () => {
                   return (table: unknown) => {
                     if (table === users) {
                       throw new Error("Forced user lookup failure.");
+                    }
+                    const from = Reflect.get(selectTarget, selectProp, selectReceiver) as (
+                      fromTable: unknown,
+                    ) => unknown;
+                    return from.call(selectTarget, table);
+                  };
+                }
+
+                const value = Reflect.get(selectTarget, selectProp, selectReceiver);
+                return typeof value === "function" ? value.bind(selectTarget) : value;
+              },
+            });
+          };
+        }
+
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+
+    return { ...runtime, db: failingDb } satisfies DatabaseRuntime;
+  }
+
+  function createFailingApiTokenLookupRuntime() {
+    const failingDb = new Proxy(runtime.db, {
+      get(target, prop, receiver) {
+        if (prop === "update") {
+          return (table: unknown) => {
+            if (table === apiTokens) {
+              throw new Error("Forced API token lookup failure.");
+            }
+            const update = Reflect.get(target, prop, receiver) as (updateTable: unknown) => unknown;
+            return update.call(target, table);
+          };
+        }
+
+        if (prop === "select") {
+          return (...args: unknown[]) => {
+            const select = Reflect.get(target, prop, receiver) as (...selectArgs: unknown[]) => unknown;
+            const builder = select.apply(target, args);
+            return new Proxy(builder as object, {
+              get(selectTarget, selectProp, selectReceiver) {
+                if (selectProp === "from") {
+                  return (table: unknown) => {
+                    if (table === apiTokens) {
+                      throw new Error("Forced API token lookup failure.");
                     }
                     const from = Reflect.get(selectTarget, selectProp, selectReceiver) as (
                       fromTable: unknown,
@@ -668,6 +716,23 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("returns internal_error with CORS headers for unexpected authentication storage failures", async () => {
+    setDatabaseRuntimeForTesting(createFailingApiTokenLookupRuntime());
+
+    const response = await apiRequest("GET", "/me", { token: fullToken });
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-headers")).toContain("Authorization");
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "internal_error",
+        message: "An internal server error occurred.",
+      },
+    });
+  });
+
   it("returns method_not_allowed for known routes with unsupported methods", async () => {
     for (const request of [
       { method: "POST", path: "/goals" },
@@ -688,6 +753,22 @@ describe("Macro Tracker API v1", () => {
 
     const unknownPath = await apiRequest("POST", "/not-a-route");
     expect(unknownPath.status).toBe(404);
+  });
+
+  it("routes unsupported Next HTTP methods through the API error envelope", async () => {
+    for (const [method, handler] of [["PUT", PUT], ["HEAD", HEAD]] as const) {
+      const response = await handler(new Request("http://localhost/api/v1/goals", { method }), {
+        params: Promise.resolve({ path: ["goals"] }),
+      });
+
+      expect(response.status).toBe(405);
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(response.headers.get("access-control-allow-headers")).toContain("Authorization");
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: "method_not_allowed" },
+      });
+    }
   });
 
   it("rejects invalid goal patches without persisting partial changes", async () => {
