@@ -146,7 +146,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/stats",
-    methods: [{ method: "get", summary: "Read stats", scopes: ["read:stats", "read:weight"] }],
+    methods: [{ method: "get", summary: "Read stats", scopes: ["read:stats", "read:weight", "read:goals"] }],
   },
   {
     path: "/summary",

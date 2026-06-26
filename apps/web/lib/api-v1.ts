@@ -741,7 +741,7 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
     return ["read:stats", "read:daily", "read:goals", "read:weight"];
   }
   if ((resource === "stats" || resource === "leaderboard") && !id && method === "GET") {
-    return resource === "stats" ? ["read:stats", "read:weight"] : ["read:stats"];
+    return resource === "stats" ? ["read:stats", "read:weight", "read:goals"] : ["read:stats"];
   }
   return null;
 }

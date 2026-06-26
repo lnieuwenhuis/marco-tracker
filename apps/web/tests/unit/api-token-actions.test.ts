@@ -1,4 +1,5 @@
 import {
+  apiTokens,
   listApiTokens,
   setDatabaseRuntimeForTesting,
   upsertUserFromShooProfile,
@@ -84,6 +85,55 @@ describe("API token settings actions", () => {
 
     const [revoked] = await listApiTokens(mocked.userId, runtime.db);
     expect(revoked?.revokedAt).toBeTruthy();
+  });
+
+  it("returns validation errors for expected API token input failures", async () => {
+    const formData = new FormData();
+    formData.set("name", "   ");
+    formData.set("expires", "never");
+    formData.append("scopes", "read:daily");
+
+    await expect(createApiTokenAction({}, formData)).resolves.toEqual({
+      ok: false,
+      error: "API token name is required.",
+    });
+  });
+
+  it("hides unexpected API token creation failures from the client", async () => {
+    const rawMessage = "database password leaked in driver error";
+    const failingDb = new Proxy(runtime.db, {
+      get(target, prop, receiver) {
+        if (prop === "insert") {
+          return (table: unknown) => {
+            if (table === apiTokens) {
+              throw new Error(rawMessage);
+            }
+
+            const insert = Reflect.get(target, prop, receiver) as (insertTable: unknown) => unknown;
+            return insert.call(target, table);
+          };
+        }
+
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    setDatabaseRuntimeForTesting({ ...runtime, db: failingDb });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const formData = new FormData();
+    formData.set("name", "Shortcut");
+    formData.set("expires", "never");
+    formData.append("scopes", "read:daily");
+
+    const created = await createApiTokenAction({}, formData);
+
+    expect(created).toEqual({
+      ok: false,
+      error: "Unable to create API token.",
+    });
+    expect(JSON.stringify(created)).not.toContain(rawMessage);
+    expect(consoleError).toHaveBeenCalledWith("Unexpected API token creation error", expect.any(Error));
+    consoleError.mockRestore();
   });
 
   it("prefers revalidated server token rows over stale newly-created client state", async () => {

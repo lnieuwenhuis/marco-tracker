@@ -340,6 +340,44 @@ describe("Macro Tracker API v1", () => {
     }
   });
 
+  it("requires read:goals before stats endpoints expose goal-derived stats", async () => {
+    await apiRequest("PATCH", "/goals", {
+      token: fullToken,
+      body: { caloriesKcal: 2400, proteinG: 150, carbsG: 260, fatG: 80 },
+    });
+    await apiRequest("POST", "/days/2026-03-19/entries", {
+      token: fullToken,
+      body: {
+        label: "Goal revealing dinner",
+        quantity: 1,
+        unit: "serving",
+        proteinG: 150,
+        carbsG: 260,
+        fatG: 80,
+        caloriesKcal: 2400,
+      },
+    });
+
+    const statsAndWeightOnly = await createApiToken(
+      userId,
+      {
+        name: "Stats and weight only",
+        scopes: ["read:stats", "read:weight"],
+      },
+      runtime.db,
+    );
+
+    const response = await apiRequest("GET", "/stats?date=2026-03-19", {
+      token: statsAndWeightOnly.token,
+    });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "insufficient_scope" },
+    });
+  });
+
   it("requires account and goals scopes before /me exposes account metadata and goals", async () => {
     const goalsOnly = await createApiToken(
       userId,
@@ -1378,6 +1416,11 @@ describe("Macro Tracker API v1", () => {
       summary: "List weight entries",
       security: [{ bearerAuth: [] }],
       "x-required-scopes": ["read:weight"],
+    });
+    expect(payload.paths["/stats"]?.get).toMatchObject({
+      summary: "Read stats",
+      security: [{ bearerAuth: [] }],
+      "x-required-scopes": ["read:stats", "read:weight", "read:goals"],
     });
     expect(payload.paths["/foods"]?.post.responses).toHaveProperty("201");
     expect(payload.paths["/foods"]?.post.responses).toHaveProperty("405");

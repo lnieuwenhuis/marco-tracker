@@ -10,6 +10,29 @@ import { revalidatePath } from "next/cache";
 
 import { requireSessionUser } from "./auth";
 
+const CREATE_API_TOKEN_VALIDATION_MESSAGES = new Set([
+  "API token name is required.",
+  "At least one API scope is required.",
+  "API token expiry is invalid.",
+]);
+
+function getCreateApiTokenError(caught: unknown) {
+  if (!(caught instanceof Error)) {
+    console.error("Unexpected API token creation error", caught);
+    return "Unable to create API token.";
+  }
+
+  if (
+    CREATE_API_TOKEN_VALIDATION_MESSAGES.has(caught.message) ||
+    caught.message.startsWith("API scope is invalid: ")
+  ) {
+    return caught.message;
+  }
+
+  console.error("Unexpected API token creation error", caught);
+  return "Unable to create API token.";
+}
+
 export type CreateApiTokenActionState = {
   ok?: boolean;
   error?: string;
@@ -52,7 +75,7 @@ export async function createApiTokenAction(
   } catch (caught) {
     return {
       ok: false,
-      error: caught instanceof Error ? caught.message : "Unable to create API token.",
+      error: getCreateApiTokenError(caught),
     };
   }
 }
