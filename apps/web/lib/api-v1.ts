@@ -45,6 +45,7 @@ import {
   updateTemplate,
   updateWeightEntry,
   type ApiScope,
+  type FoodProduct,
   type MacroGoals,
   WeightEntryValidationError,
 } from "@macro-tracker/db";
@@ -336,6 +337,28 @@ function mapAccount(user: Awaited<ReturnType<typeof getUserById>>) {
   };
 }
 
+function mapFoodProductForApi(product: FoodProduct) {
+  return {
+    id: product.id,
+    scope: product.scope,
+    source: product.source,
+    barcode: product.barcode,
+    name: product.name,
+    brand: product.brand,
+    defaultServingQuantity: product.defaultServingQuantity,
+    defaultServingUnit: product.defaultServingUnit,
+    proteinPer100: product.proteinPer100,
+    carbsPer100: product.carbsPer100,
+    fatPer100: product.fatPer100,
+    caloriesPer100: product.caloriesPer100,
+    servingWeightG: product.servingWeightG,
+    servingVolumeMl: product.servingVolumeMl,
+    createdAt: product.createdAt,
+    updatedAt: product.updatedAt,
+    deletedAt: product.deletedAt,
+  };
+}
+
 async function dispatchApiRequest(ctx: ApiContext) {
   if (ctx.path.length > 3) return notFound();
 
@@ -417,7 +440,8 @@ async function dispatchApiRequest(ctx: ApiContext) {
 
   if (resource === "foods") {
     if (id === "search" && !action && ctx.method === "GET") {
-      return ok(await searchFoodProducts(ctx.userId, ctx.url.searchParams.get("q") ?? ""));
+      const products = await searchFoodProducts(ctx.userId, ctx.url.searchParams.get("q") ?? "");
+      return ok(products.map(mapFoodProductForApi));
     }
     if (!id && ctx.method === "POST") {
       return ok(await createPersonalFoodProduct(ctx.userId, (await readJson(ctx.request)) as never), 201);
@@ -430,7 +454,8 @@ async function dispatchApiRequest(ctx: ApiContext) {
 
   if (resource === "barcodes" && id && !action) {
     if (ctx.method !== "GET") return methodNotAllowed();
-    return ok(await lookupBarcodeFoodProduct(decodeURIComponent(id)));
+    const product = await lookupBarcodeFoodProduct(decodeURIComponent(id));
+    return ok(product ? mapFoodProductForApi(product) : null);
   }
 
   if (resource === "templates") {
@@ -548,7 +573,7 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
 
   const [resource, id, action] = path;
   if (resource === "openapi.json" && !id && method === "GET") return [];
-  if (resource === "me" && !id && method === "GET") return ["read:account"];
+  if (resource === "me" && !id && method === "GET") return ["read:account", "read:goals"];
   if (resource === "goals" && !id) {
     if (method === "GET") return ["read:goals"];
     if (method === "PATCH") return ["write:goals"];

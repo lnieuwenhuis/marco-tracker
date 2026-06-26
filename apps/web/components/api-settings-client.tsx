@@ -33,6 +33,20 @@ const scopeLabels: Record<ApiScope, string> = {
 
 const initialState: CreateApiTokenActionState = {};
 
+export function getVisibleApiTokens(
+  tokens: ApiTokenRecord[],
+  stateRecord?: ApiTokenRecord,
+) {
+  if (!stateRecord) {
+    return tokens;
+  }
+  if (tokens.some((token) => token.id === stateRecord.id)) {
+    return tokens;
+  }
+
+  return [stateRecord, ...tokens];
+}
+
 function formatDate(value: string | null) {
   if (!value) {
     return "Never";
@@ -49,16 +63,10 @@ export function ApiSettingsClient({ tokens, scopes }: ApiSettingsClientProps) {
     createApiTokenAction,
     initialState,
   );
-  const visibleTokens = useMemo(() => {
-    if (!state.record) {
-      return tokens;
-    }
-
-    return [
-      state.record,
-      ...tokens.filter((token) => token.id !== state.record?.id),
-    ];
-  }, [state.record, tokens]);
+  const visibleTokens = useMemo(
+    () => getVisibleApiTokens(tokens, state.record),
+    [state.record, tokens],
+  );
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-5 py-8 sm:px-8">

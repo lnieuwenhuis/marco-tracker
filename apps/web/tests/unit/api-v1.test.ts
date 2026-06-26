@@ -3,6 +3,7 @@ import {
   getApiScopes,
   lookupBarcodeFoodProduct,
   revokeApiToken,
+  saveBarcodeFoodProduct,
   setDatabaseRuntimeForTesting,
   upsertUserFromShooProfile,
   type DatabaseRuntime,
@@ -241,7 +242,7 @@ describe("Macro Tracker API v1", () => {
     }
   });
 
-  it("requires an account scope before /me exposes account metadata", async () => {
+  it("requires account and goals scopes before /me exposes account metadata and goals", async () => {
     const goalsOnly = await createApiToken(
       userId,
       {
@@ -258,6 +259,14 @@ describe("Macro Tracker API v1", () => {
       },
       runtime.db,
     );
+    const accountAndGoals = await createApiToken(
+      userId,
+      {
+        name: "Account and goals",
+        scopes: ["read:account", "read:goals"],
+      },
+      runtime.db,
+    );
 
     const rejected = await apiRequest("GET", "/me", { token: goalsOnly.token });
     expect(rejected.status).toBe(403);
@@ -266,7 +275,14 @@ describe("Macro Tracker API v1", () => {
       error: { code: "insufficient_scope" },
     });
 
-    const accepted = await apiRequest("GET", "/me", { token: accountOnly.token });
+    const accountRejected = await apiRequest("GET", "/me", { token: accountOnly.token });
+    expect(accountRejected.status).toBe(403);
+    await expect(accountRejected.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "insufficient_scope" },
+    });
+
+    const accepted = await apiRequest("GET", "/me", { token: accountAndGoals.token });
     expect(accepted.status).toBe(200);
     await expect(accepted.json()).resolves.toMatchObject({
       ok: true,
@@ -275,8 +291,83 @@ describe("Macro Tracker API v1", () => {
           id: userId,
           email: "api@example.com",
         },
+        goals: {
+          caloriesKcal: null,
+          proteinG: null,
+          carbsG: null,
+          fatG: null,
+        },
       },
     });
+  });
+
+  it("omits internal food fields from search responses", async () => {
+    await saveBarcodeFoodProduct(
+      userId,
+      {
+        barcode: "2234567890123",
+        name: "Shared protein bar",
+        brands: "Macro Mill",
+        proteinG: 36,
+        carbsG: 44,
+        fatG: 9,
+        caloriesKcal: 405,
+        servingSizeG: 55,
+      },
+      runtime.db,
+    );
+
+    const response = await apiRequest("GET", "/foods/search?q=protein", { token: fullToken });
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    const product = payload.data.find((item: { barcode: string | null }) => item.barcode === "2234567890123");
+
+    expect(product).toMatchObject({
+      barcode: "2234567890123",
+      name: "Shared protein bar",
+      brand: "Macro Mill",
+    });
+    expect(product).not.toHaveProperty("ownerUserId");
+    expect(product).not.toHaveProperty("submittedByUserId");
+    expect(product).not.toHaveProperty("deletedByUserId");
+    expect(product).not.toHaveProperty("sourceProvider");
+    expect(product).not.toHaveProperty("sourceConfidence");
+    expect(product).not.toHaveProperty("sourceMetadata");
+    expect(product).not.toHaveProperty("correctedFromProductId");
+  });
+
+  it("omits internal food fields from barcode lookup responses", async () => {
+    await saveBarcodeFoodProduct(
+      userId,
+      {
+        barcode: "3234567890123",
+        name: "Shared oats",
+        brands: "Macro Mill",
+        proteinG: 13,
+        carbsG: 68,
+        fatG: 7,
+        caloriesKcal: 389,
+        servingSizeG: 100,
+      },
+      runtime.db,
+    );
+
+    const response = await apiRequest("GET", "/barcodes/3234567890123", { token: fullToken });
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+
+    expect(payload.data).toMatchObject({
+      barcode: "3234567890123",
+      name: "Shared oats",
+      brand: "Macro Mill",
+    });
+    expect(payload.data).not.toHaveProperty("ownerUserId");
+    expect(payload.data).not.toHaveProperty("submittedByUserId");
+    expect(payload.data).not.toHaveProperty("deletedByUserId");
+    expect(payload.data).not.toHaveProperty("sourceProvider");
+    expect(payload.data).not.toHaveProperty("sourceConfidence");
+    expect(payload.data).not.toHaveProperty("sourceMetadata");
+    expect(payload.data).not.toHaveProperty("correctedFromProductId");
   });
 
   it("does not allow write:foods tokens to mutate shared barcode foods", async () => {

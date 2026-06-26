@@ -2,6 +2,7 @@ import {
   listApiTokens,
   setDatabaseRuntimeForTesting,
   upsertUserFromShooProfile,
+  type ApiTokenRecord,
   type DatabaseRuntime,
 } from "@macro-tracker/db";
 import { createTestDatabase } from "@macro-tracker/db/testing";
@@ -25,6 +26,7 @@ import {
   createApiTokenAction,
   revokeApiTokenAction,
 } from "@/lib/api-token-actions";
+import { getVisibleApiTokens } from "@/components/api-settings-client";
 
 describe("API token settings actions", () => {
   let runtime: DatabaseRuntime;
@@ -82,5 +84,26 @@ describe("API token settings actions", () => {
 
     const [revoked] = await listApiTokens(mocked.userId, runtime.db);
     expect(revoked?.revokedAt).toBeTruthy();
+  });
+
+  it("prefers revalidated server token rows over stale newly-created client state", async () => {
+    const staleRecord = {
+      id: "token-id",
+      userId: mocked.userId,
+      name: "Shortcut",
+      tokenPrefix: "mtk_v1_stale",
+      scopes: ["read:daily"],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      lastUsedAt: null,
+      expiresAt: null,
+      revokedAt: null,
+    } satisfies ApiTokenRecord;
+    const serverRecord = {
+      ...staleRecord,
+      tokenPrefix: "mtk_v1_fresh",
+      revokedAt: "2026-01-02T00:00:00.000Z",
+    };
+
+    expect(getVisibleApiTokens([serverRecord], staleRecord)).toEqual([serverRecord]);
   });
 });

@@ -14,7 +14,7 @@ type ApiEndpoint = {
 export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   {
     path: "/me",
-    methods: [{ method: "get", summary: "Read the authenticated account", scopes: ["read:account"] }],
+    methods: [{ method: "get", summary: "Read the authenticated account and goals", scopes: ["read:account", "read:goals"] }],
   },
   {
     path: "/goals",
