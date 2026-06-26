@@ -31,6 +31,12 @@ OPENROUTER_MODEL_TIMEOUT_MS=10000
 Only free OpenRouter food-photo models are allowed. Model values must either
 end in `:free` or use the `openrouter/free` router.
 
+## API access
+
+Signed-in users can create scoped personal access tokens at `/settings/api`.
+API v1 lives under `/api/v1/*`, OpenAPI JSON is available at
+`/api/v1/openapi.json`, and readable docs are at `/docs/api`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

@@ -1,9 +1,9 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, max, ne, or, sql } from "drizzle-orm";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { computeStreaks, getPeriodRanges } from "./dates";
 import { getDb, type DatabaseClient } from "./client";
-import { adminAuditEvents, foodProductRevisions, foodProducts, mealEntries, mealGroups, mealTemplateItems, mealTemplates, recipeIngredients, recipes, users, weightEntries } from "./schema";
+import { adminAuditEvents, apiTokens, foodProductRevisions, foodProducts, mealEntries, mealGroups, mealTemplateItems, mealTemplates, recipeIngredients, recipes, users, weightEntries } from "./schema";
 import { validateFoodProductInput, validateMealEntryInput, validateRecipeInput, validateWeightEntryInput } from "./validators";
 import type {
   AdminAuditListPage,
@@ -16,6 +16,9 @@ import type {
   AdminUserListItem,
   AdminUserListPage,
   AdminRecipeSummary,
+  ApiScope,
+  ApiTokenAuthResult,
+  ApiTokenRecord,
   AppUser,
   BarcodeFoodProductInput,
   CompleteOnboardingInput,
@@ -48,7 +51,7 @@ import type {
   WeightPageData,
   WeightUnit,
 } from "./types";
-import { canAccessAdmin, isAdminRole, isOwnerRole } from "./types";
+import { API_SCOPE_VALUES, canAccessAdmin, isAdminRole, isApiScope, isOwnerRole } from "./types";
 
 type DailyTotalsRow = {
   entryDate: string;
@@ -570,6 +573,159 @@ export async function getUserById(userId: string, db?: DatabaseClient) {
     .limit(1);
 
   return user ? mapUserRow(user as UserSelectRow) : null;
+}
+
+export function getApiScopes(): ApiScope[] {
+  return [...API_SCOPE_VALUES];
+}
+
+function normalizeApiTokenExpiry(expiresAt: Date | string | null | undefined) {
+  if (expiresAt === undefined) {
+    return defaultApiTokenExpiry();
+  }
+
+  if (expiresAt === null) {
+    return null;
+  }
+
+  const date = expiresAt instanceof Date ? expiresAt : new Date(expiresAt);
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error("API token expiry is invalid.");
+  }
+
+  return date;
+}
+
+function apiTokenSelectColumns() {
+  return {
+    id: apiTokens.id,
+    userId: apiTokens.userId,
+    tokenPrefix: apiTokens.tokenPrefix,
+    name: apiTokens.name,
+    scopes: apiTokens.scopes,
+    createdAt: apiTokens.createdAt,
+    lastUsedAt: apiTokens.lastUsedAt,
+    expiresAt: apiTokens.expiresAt,
+    revokedAt: apiTokens.revokedAt,
+  };
+}
+
+export async function createApiToken(
+  userId: string,
+  input: {
+    name: string;
+    scopes: readonly string[];
+    expiresAt?: Date | string | null;
+  },
+  db?: DatabaseClient,
+): Promise<{ token: string; record: ApiTokenRecord }> {
+  const database = await resolveDb(db);
+  const name = input.name.trim();
+  if (!name) {
+    throw new Error("API token name is required.");
+  }
+
+  const scopes = normalizeApiTokenScopes(input.scopes);
+  const token = generateApiTokenSecret();
+  const [created] = await database
+    .insert(apiTokens)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      tokenHash: hashApiToken(token),
+      tokenPrefix: token.slice(0, API_TOKEN_PREFIX_LENGTH),
+      name,
+      scopes,
+      expiresAt: normalizeApiTokenExpiry(input.expiresAt),
+    })
+    .returning();
+
+  return {
+    token,
+    record: mapApiTokenRow(created as ApiTokenSelectRow),
+  };
+}
+
+export async function listApiTokens(
+  userId: string,
+  db?: DatabaseClient,
+): Promise<ApiTokenRecord[]> {
+  const database = await resolveDb(db);
+  const rows = await database
+    .select(apiTokenSelectColumns())
+    .from(apiTokens)
+    .where(eq(apiTokens.userId, userId))
+    .orderBy(desc(apiTokens.createdAt));
+
+  return rows.map((row) => mapApiTokenRow(row as ApiTokenSelectRow));
+}
+
+export async function revokeApiToken(
+  userId: string,
+  tokenId: string,
+  db?: DatabaseClient,
+): Promise<boolean> {
+  const database = await resolveDb(db);
+  const [revoked] = await database
+    .update(apiTokens)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(apiTokens.id, tokenId),
+        eq(apiTokens.userId, userId),
+        isNull(apiTokens.revokedAt),
+      ),
+    )
+    .returning();
+
+  return Boolean(revoked);
+}
+
+export async function authenticateApiToken(
+  token: string | null | undefined,
+  db?: DatabaseClient,
+): Promise<ApiTokenAuthResult> {
+  if (!token) {
+    return { ok: false, reason: "missing" };
+  }
+
+  if (!token.startsWith(API_TOKEN_PREFIX) || token.length <= API_TOKEN_PREFIX.length) {
+    return { ok: false, reason: "malformed" };
+  }
+
+  const database = await resolveDb(db);
+  const [row] = await database
+    .select(apiTokenSelectColumns())
+    .from(apiTokens)
+    .where(eq(apiTokens.tokenHash, hashApiToken(token)))
+    .limit(1);
+
+  if (!row) {
+    return { ok: false, reason: "invalid" };
+  }
+
+  const record = mapApiTokenRow(row as ApiTokenSelectRow);
+  if (record.revokedAt) {
+    return { ok: false, reason: "revoked" };
+  }
+
+  if (record.expiresAt && new Date(record.expiresAt).getTime() <= Date.now()) {
+    return { ok: false, reason: "expired" };
+  }
+
+  const now = new Date();
+  const [updated] = await database
+    .update(apiTokens)
+    .set({ lastUsedAt: now })
+    .where(eq(apiTokens.id, record.id))
+    .returning();
+
+  return {
+    ok: true,
+    token: updated
+      ? mapApiTokenRow(updated as ApiTokenSelectRow)
+      : { ...record, lastUsedAt: now.toISOString() },
+  };
 }
 
 const DEFAULT_MEAL_GROUP_LABELS = ["Breakfast", "Lunch", "Dinner", "Snack"] as const;
@@ -2652,6 +2808,74 @@ export async function getRecipes(
   return recipeRows.map((recipe) =>
     buildRecipeRecord(recipe, ingredientsByRecipe.get(recipe.id) ?? []),
   );
+}
+
+const API_TOKEN_PREFIX = "mtk_v1_";
+const API_TOKEN_PREFIX_LENGTH = 19;
+const API_TOKEN_DEFAULT_EXPIRY_DAYS = 90;
+
+type ApiTokenSelectRow = {
+  id: string;
+  userId: string;
+  tokenPrefix: string;
+  name: string;
+  scopes: unknown;
+  createdAt: Date | string;
+  lastUsedAt: Date | string | null;
+  expiresAt: Date | string | null;
+  revokedAt: Date | string | null;
+};
+
+function normalizeStoredApiScopes(value: unknown): ApiScope[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const scopes = value.filter((scope): scope is ApiScope => (
+    typeof scope === "string" && isApiScope(scope)
+  ));
+  return Array.from(new Set(scopes));
+}
+
+function normalizeApiTokenScopes(scopes: readonly string[]): ApiScope[] {
+  const normalized = Array.from(new Set(scopes));
+  if (normalized.length === 0) {
+    throw new Error("At least one API scope is required.");
+  }
+
+  for (const scope of normalized) {
+    if (!isApiScope(scope)) {
+      throw new Error(`API scope is invalid: ${scope}`);
+    }
+  }
+
+  return normalized as ApiScope[];
+}
+
+function mapApiTokenRow(row: ApiTokenSelectRow): ApiTokenRecord {
+  return {
+    id: row.id,
+    userId: row.userId,
+    tokenPrefix: row.tokenPrefix,
+    name: row.name,
+    scopes: normalizeStoredApiScopes(row.scopes),
+    createdAt: toTimestampString(row.createdAt),
+    lastUsedAt: toTimestampString(row.lastUsedAt) || null,
+    expiresAt: toTimestampString(row.expiresAt) || null,
+    revokedAt: toTimestampString(row.revokedAt) || null,
+  };
+}
+
+function hashApiToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function generateApiTokenSecret() {
+  return `${API_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+}
+
+function defaultApiTokenExpiry() {
+  return new Date(Date.now() + API_TOKEN_DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 }
 
 export async function getRecipeCount(

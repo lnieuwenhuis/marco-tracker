@@ -47,6 +47,31 @@ export const users = pgTable(
   ],
 );
 
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: uuid("id").primaryKey().notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    name: text("name").notNull(),
+    scopes: jsonb("scopes").notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("api_tokens_token_hash_key").on(table.tokenHash),
+    index("api_tokens_user_created_idx").on(table.userId, table.createdAt),
+    index("api_tokens_user_revoked_idx").on(table.userId, table.revokedAt),
+  ],
+);
+
 export const adminAuditEvents = pgTable(
   "admin_audit_events",
   {
@@ -245,6 +270,8 @@ export const mealEntries = pgTable(
 
 export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
+export type ApiTokenRow = typeof apiTokens.$inferSelect;
+export type NewApiTokenRow = typeof apiTokens.$inferInsert;
 export type MealEntryRow = typeof mealEntries.$inferSelect;
 export type NewMealEntryRow = typeof mealEntries.$inferInsert;
 export const weightEntries = pgTable(
