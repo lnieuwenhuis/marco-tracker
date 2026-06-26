@@ -598,10 +598,10 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
     }
   }
   if (resource === "summary" && !id && method === "GET") {
-    return ["read:stats", "read:daily", "read:goals"];
+    return ["read:stats", "read:daily", "read:goals", "read:weight"];
   }
   if ((resource === "stats" || resource === "leaderboard") && !id && method === "GET") {
-    return ["read:stats"];
+    return resource === "stats" ? ["read:stats", "read:weight"] : ["read:stats"];
   }
   return null;
 }
@@ -700,7 +700,7 @@ export async function handleApiV1Request(
 
   if (normalizedPath[0] === "openapi.json" && normalizedPath.length === 1) {
     if (normalizedMethod !== "GET") return methodNotAllowed();
-    return ok(getApiV1OpenApi());
+    return jsonWithCors(getApiV1OpenApi());
   }
 
   const requiredScopes = scopesFor(normalizedMethod, normalizedPath);

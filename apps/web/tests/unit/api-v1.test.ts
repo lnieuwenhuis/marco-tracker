@@ -204,6 +204,43 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("requires read:weight before stats endpoints can expose weight-derived data", async () => {
+    await apiRequest("POST", "/weight/entries", {
+      token: fullToken,
+      body: { date: "2026-03-19", weightKg: 80 },
+    });
+
+    const statsOnly = await createApiToken(
+      userId,
+      {
+        name: "Stats only",
+        scopes: ["read:stats"],
+      },
+      runtime.db,
+    );
+    const summaryWithoutWeight = await createApiToken(
+      userId,
+      {
+        name: "Summary without weight",
+        scopes: ["read:stats", "read:daily", "read:goals"],
+      },
+      runtime.db,
+    );
+
+    for (const [path, token] of [
+      ["/stats?date=2026-03-19", statsOnly.token],
+      ["/summary?date=2026-03-19", summaryWithoutWeight.token],
+    ] as const) {
+      const response = await apiRequest("GET", path, { token });
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: false,
+        error: { code: "insufficient_scope" },
+      });
+    }
+  });
+
   it("does not allow write:foods tokens to mutate shared barcode foods", async () => {
     const foodsOnly = await createApiToken(
       userId,
@@ -654,15 +691,17 @@ describe("Macro Tracker API v1", () => {
     const openApi = getApiV1OpenApi();
 
     expect(response.status).toBe(200);
-    expect(payload.data.paths).toEqual(openApi.paths);
-    expect(payload.data.servers).toEqual([{ url: "/api/v1" }]);
-    expect(Object.keys(payload.data.paths)).toContain("/goals");
-    expect(Object.keys(payload.data.paths)).not.toContain("/api/v1/goals");
+    expect(payload.openapi).toBe("3.1.0");
+    expect(payload.info).toEqual(openApi.info);
+    expect(payload.paths).toEqual(openApi.paths);
+    expect(payload.servers).toEqual([{ url: "/api/v1" }]);
+    expect(Object.keys(payload.paths)).toContain("/goals");
+    expect(Object.keys(payload.paths)).not.toContain("/api/v1/goals");
 
     for (const endpoint of API_V1_ENDPOINTS) {
-      expect(payload.data.paths[endpoint.path]).toBeTruthy();
+      expect(payload.paths[endpoint.path]).toBeTruthy();
       for (const method of endpoint.methods) {
-        expect(payload.data.paths[endpoint.path][method.method]).toMatchObject({
+        expect(payload.paths[endpoint.path][method.method]).toMatchObject({
           summary: method.summary,
           security: method.scopes.length
             ? [{ bearerAuth: method.scopes }]

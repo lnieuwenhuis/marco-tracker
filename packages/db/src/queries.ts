@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, max, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lte, max, ne, or, sql } from "drizzle-orm";
 import { createHash, randomBytes } from "node:crypto";
 
 import { computeStreaks, getPeriodRanges } from "./dates";
@@ -694,10 +694,31 @@ export async function authenticateApiToken(
   }
 
   const database = await resolveDb(db);
+  const tokenHash = hashApiToken(token);
+  const now = new Date();
+  const [updated] = await database
+    .update(apiTokens)
+    .set({ lastUsedAt: now })
+    .where(
+      and(
+        eq(apiTokens.tokenHash, tokenHash),
+        isNull(apiTokens.revokedAt),
+        or(isNull(apiTokens.expiresAt), gt(apiTokens.expiresAt, now)),
+      ),
+    )
+    .returning();
+
+  if (updated) {
+    return {
+      ok: true,
+      token: mapApiTokenRow(updated as ApiTokenSelectRow),
+    };
+  }
+
   const [row] = await database
     .select(apiTokenSelectColumns())
     .from(apiTokens)
-    .where(eq(apiTokens.tokenHash, hashApiToken(token)))
+    .where(eq(apiTokens.tokenHash, tokenHash))
     .limit(1);
 
   if (!row) {
@@ -713,19 +734,7 @@ export async function authenticateApiToken(
     return { ok: false, reason: "expired" };
   }
 
-  const now = new Date();
-  const [updated] = await database
-    .update(apiTokens)
-    .set({ lastUsedAt: now })
-    .where(eq(apiTokens.id, record.id))
-    .returning();
-
-  return {
-    ok: true,
-    token: updated
-      ? mapApiTokenRow(updated as ApiTokenSelectRow)
-      : { ...record, lastUsedAt: now.toISOString() },
-  };
+  return { ok: false, reason: "invalid" };
 }
 
 const DEFAULT_MEAL_GROUP_LABELS = ["Breakfast", "Lunch", "Dinner", "Snack"] as const;

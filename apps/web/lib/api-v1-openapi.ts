@@ -142,7 +142,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/stats",
-    methods: [{ method: "get", summary: "Read stats", scopes: ["read:stats"] }],
+    methods: [{ method: "get", summary: "Read stats", scopes: ["read:stats", "read:weight"] }],
   },
   {
     path: "/summary",
@@ -150,7 +150,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
       {
         method: "get",
         summary: "Read dashboard summary data",
-        scopes: ["read:stats", "read:daily", "read:goals"],
+        scopes: ["read:stats", "read:daily", "read:goals", "read:weight"],
       },
     ],
   },

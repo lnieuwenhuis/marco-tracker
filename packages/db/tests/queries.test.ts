@@ -321,6 +321,12 @@ describe("database queries", () => {
       ok: false,
       reason: "expired",
     });
+    await expect(listApiTokens(userId, runtime.db)).resolves.toContainEqual(
+      expect.objectContaining({
+        id: expired.record.id,
+        lastUsedAt: null,
+      }),
+    );
 
     const active = await createApiToken(
       userId,
@@ -337,6 +343,12 @@ describe("database queries", () => {
       ok: false,
       reason: "revoked",
     });
+    await expect(listApiTokens(userId, runtime.db)).resolves.toContainEqual(
+      expect.objectContaining({
+        id: active.record.id,
+        lastUsedAt: null,
+      }),
+    );
   });
 
   it("calculates daily totals and logged-day-only averages", async () => {
