@@ -1158,7 +1158,7 @@ export async function createPersonalFoodProduct(
   });
 }
 
-async function getFoodProductByIdForUser(
+export async function getFoodProductByIdForUser(
   userId: string,
   productId: string,
   db?: DatabaseClient,

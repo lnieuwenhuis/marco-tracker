@@ -13,6 +13,7 @@ import {
   deleteTemplate,
   deleteWeightEntry,
   getDailySummary,
+  getFoodProductByIdForUser,
   getLeaderboardStats,
   getMealEntryById,
   getMealGroups,
@@ -366,6 +367,47 @@ function sanitizeApiFoodInput(body: unknown): FoodProductInput {
   };
 }
 
+function mergeFoodPatchInput(existing: FoodProduct, body: unknown): FoodProductInput {
+  const patch = requireRecord(body);
+  return sanitizeApiFoodInput({
+    name: "name" in patch ? patch.name : existing.name,
+    brand: "brand" in patch ? patch.brand : existing.brand,
+    barcode: "barcode" in patch ? patch.barcode : existing.barcode,
+    defaultServingQuantity:
+      "defaultServingQuantity" in patch
+        ? patch.defaultServingQuantity
+        : existing.defaultServingQuantity,
+    defaultServingUnit:
+      "defaultServingUnit" in patch ? patch.defaultServingUnit : existing.defaultServingUnit,
+    proteinPer100: "proteinPer100" in patch ? patch.proteinPer100 : existing.proteinPer100,
+    carbsPer100: "carbsPer100" in patch ? patch.carbsPer100 : existing.carbsPer100,
+    fatPer100: "fatPer100" in patch ? patch.fatPer100 : existing.fatPer100,
+    caloriesPer100:
+      "caloriesPer100" in patch ? patch.caloriesPer100 : existing.caloriesPer100,
+    servingWeightG: "servingWeightG" in patch ? patch.servingWeightG : existing.servingWeightG,
+    servingVolumeMl:
+      "servingVolumeMl" in patch ? patch.servingVolumeMl : existing.servingVolumeMl,
+  });
+}
+
+async function mergeWeightEntryPatchBody(userId: string, entryId: string, body: unknown) {
+  const patch = requireRecord(body);
+  if ("date" in patch) {
+    patch.date = requireDate(typeof patch.date === "string" ? patch.date : undefined);
+  }
+  const existing = (await getWeightEntries(userId)).find((entry) => entry.id === entryId);
+  if (!existing) {
+    throw new Error("Weight entry not found.");
+  }
+
+  return {
+    date: "date" in patch ? patch.date : existing.date,
+    weightKg: "weightKg" in patch ? patch.weightKg : existing.weightKg,
+    bodyFatPct: "bodyFatPct" in patch ? patch.bodyFatPct : existing.bodyFatPct,
+    notes: "notes" in patch ? patch.notes : existing.notes,
+  };
+}
+
 function mergeGoals(current: MacroGoals, body: unknown): MacroGoals {
   const record = requireRecord(body);
   return {
@@ -565,10 +607,15 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(mapFoodProductForApi(product), 201);
     }
     if (id && !action && ctx.method === "PATCH") {
+      const productId = requireUuidPathParam(id);
+      const existing = await getFoodProductByIdForUser(ctx.userId, productId);
+      if (!existing || existing.ownerUserId !== ctx.userId || existing.scope !== "personal") {
+        return notFound("Food product not found.");
+      }
       const product = await updatePersonalFoodProduct(
         ctx.userId,
-        requireUuidPathParam(id),
-        sanitizeApiFoodInput(await readJson(ctx.request)),
+        productId,
+        mergeFoodPatchInput(existing, await readJson(ctx.request)),
       );
       return ok(mapFoodProductForApi(product));
     }
@@ -642,10 +689,24 @@ async function dispatchApiRequest(ctx: ApiContext) {
       return ok(await getWeightPageData(ctx.userId, getReferenceDate(ctx.url)));
     }
     if (id === "entries" && !action && ctx.method === "POST") {
-      return ok(await createWeightEntry(ctx.userId, requireBodyDate(await readJson(ctx.request)) as never), 201);
+      const body = requireBodyDate(await readJson(ctx.request));
+      const existing = (await getWeightEntries(ctx.userId)).find((entry) => entry.date === body.date);
+      if (existing) {
+        return conflict(
+          "weight_entry_date_conflict",
+          "A weight entry already exists for this date.",
+        );
+      }
+      return ok(await createWeightEntry(ctx.userId, body as never), 201);
     }
     if (id === "entries" && action && ctx.method === "PATCH") {
-      const updated = await updateWeightEntry(ctx.userId, requireUuidPathParam(action), requireBodyDate(await readJson(ctx.request)) as never);
+      const entryId = requireUuidPathParam(action);
+      const mergedBody = await mergeWeightEntryPatchBody(
+        ctx.userId,
+        entryId,
+        await readJson(ctx.request),
+      );
+      const updated = await updateWeightEntry(ctx.userId, entryId, mergedBody as never);
       if (!updated) return notFound("Weight entry not found.");
       return ok(updated);
     }

@@ -780,6 +780,57 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("preserves omitted optional food fields when patching a personal food", async () => {
+    const created = await apiRequest("POST", "/foods", {
+      token: fullToken,
+      body: {
+        name: "Patchable yogurt",
+        brand: "Macro Dairy",
+        barcode: "5234567890123",
+        defaultServingQuantity: 170,
+        defaultServingUnit: "g",
+        proteinPer100: 10,
+        carbsPer100: 4,
+        fatPer100: 0,
+        caloriesPer100: 59,
+        servingWeightG: 170,
+        servingVolumeMl: null,
+      },
+    });
+    expect(created.status).toBe(201);
+    const food = (await created.json()).data;
+
+    const updated = await apiRequest("PATCH", `/foods/${food.id}`, {
+      token: fullToken,
+      body: {
+        name: "Patchable yogurt 0%",
+        proteinPer100: 11,
+        carbsPer100: 3,
+        fatPer100: 0,
+        caloriesPer100: 56,
+      },
+    });
+
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        id: food.id,
+        name: "Patchable yogurt 0%",
+        brand: "Macro Dairy",
+        barcode: "5234567890123",
+        defaultServingQuantity: 170,
+        defaultServingUnit: "g",
+        proteinPer100: 11,
+        carbsPer100: 3,
+        fatPer100: 0,
+        caloriesPer100: 56,
+        servingWeightG: 170,
+        servingVolumeMl: null,
+      },
+    });
+  });
+
   it("does not allow write:foods tokens to mutate shared barcode foods", async () => {
     const foodsOnly = await createApiToken(
       userId,
@@ -930,6 +981,82 @@ describe("Macro Tracker API v1", () => {
         error: { code: "bad_request" },
       });
     }
+  });
+
+  it("preserves omitted notes and body fat when patching a weight entry", async () => {
+    const created = await apiRequest("POST", "/weight/entries", {
+      token: fullToken,
+      body: {
+        date: "2026-03-19",
+        weightKg: 80,
+        bodyFatPct: 18.5,
+        notes: "Morning weigh-in",
+      },
+    });
+    expect(created.status).toBe(201);
+    const entry = (await created.json()).data;
+
+    const updated = await apiRequest("PATCH", `/weight/entries/${entry.id}`, {
+      token: fullToken,
+      body: { date: "2026-03-19", weightKg: 79.8 },
+    });
+
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        id: entry.id,
+        date: "2026-03-19",
+        weightKg: 79.8,
+        bodyFatPct: 18.5,
+        notes: "Morning weigh-in",
+      },
+    });
+  });
+
+  it("returns conflict without overwriting when creating a duplicate-date weight entry", async () => {
+    const first = await apiRequest("POST", "/weight/entries", {
+      token: fullToken,
+      body: {
+        date: "2026-03-19",
+        weightKg: 80,
+        bodyFatPct: 18.5,
+        notes: "Original entry",
+      },
+    });
+    expect(first.status).toBe(201);
+
+    const duplicate = await apiRequest("POST", "/weight/entries", {
+      token: fullToken,
+      body: {
+        date: "2026-03-19",
+        weightKg: 79,
+        bodyFatPct: 17,
+        notes: "Should not overwrite",
+      },
+    });
+
+    expect(duplicate.status).toBe(409);
+    await expect(duplicate.json()).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "weight_entry_date_conflict",
+        message: "A weight entry already exists for this date.",
+      },
+    });
+
+    const entries = await apiRequest("GET", "/weight/entries", { token: fullToken });
+    await expect(entries.json()).resolves.toMatchObject({
+      ok: true,
+      data: [
+        {
+          date: "2026-03-19",
+          weightKg: 80,
+          bodyFatPct: 18.5,
+          notes: "Original entry",
+        },
+      ],
+    });
   });
 
   it("returns conflict when a weight entry update reuses an existing date", async () => {
