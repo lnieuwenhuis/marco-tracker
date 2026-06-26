@@ -226,6 +226,9 @@ function requireMealEntryBody(body: unknown) {
 
 async function mergeMealEntryPatchBody(userId: string, entryId: string, body: unknown) {
   const patch = requireMealEntryBody(body);
+  if ("date" in patch) {
+    patch.date = requireDate(typeof patch.date === "string" ? patch.date : undefined);
+  }
   const existing = await getMealEntryById(userId, entryId);
   if (!existing) {
     throw new Error("Meal entry not found.");
@@ -690,7 +693,7 @@ function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
   if (resource === "me" && !id && method === "GET") return ["read:account", "read:goals"];
   if (resource === "goals" && !id) {
     if (method === "GET") return ["read:goals"];
-    if (method === "PATCH") return ["write:goals"];
+    if (method === "PATCH") return ["write:goals", "read:goals"];
   }
   if (resource === "days" && id) {
     if (!action && method === "GET") return ["read:daily"];

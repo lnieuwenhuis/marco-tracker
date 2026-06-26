@@ -399,6 +399,42 @@ describe("Macro Tracker API v1", () => {
     });
   });
 
+  it("requires read:goals before PATCH /goals returns merged goal values", async () => {
+    const readWriteGoals = await createApiToken(
+      userId,
+      {
+        name: "Read/write goals",
+        scopes: ["write:goals", "read:goals"],
+      },
+      runtime.db,
+    );
+    const writeOnlyGoals = await createApiToken(
+      userId,
+      {
+        name: "Write-only goals",
+        scopes: ["write:goals"],
+      },
+      runtime.db,
+    );
+
+    const seeded = await apiRequest("PATCH", "/goals", {
+      token: readWriteGoals.token,
+      body: { caloriesKcal: 2400, proteinG: 150, carbsG: 260, fatG: 80 },
+    });
+    expect(seeded.status).toBe(200);
+
+    const rejected = await apiRequest("PATCH", "/goals", {
+      token: writeOnlyGoals.token,
+      body: {},
+    });
+
+    expect(rejected.status).toBe(403);
+    await expect(rejected.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "insufficient_scope" },
+    });
+  });
+
   it("omits internal food fields from search responses", async () => {
     await saveBarcodeFoodProduct(
       userId,
@@ -1022,6 +1058,49 @@ describe("Macro Tracker API v1", () => {
         carbsG: 7,
         fatG: 0,
         caloriesKcal: 100,
+      },
+    });
+  });
+
+  it("rejects invalid meal entry patch dates without mutating the entry", async () => {
+    const created = await apiRequest("POST", "/days/2026-03-19/entries", {
+      token: fullToken,
+      body: {
+        label: "Greek yogurt",
+        proteinG: 17,
+        carbsG: 7,
+        fatG: 0,
+        caloriesKcal: 100,
+      },
+    });
+    expect(created.status).toBe(201);
+    const entry = (await created.json()).data;
+
+    const rejected = await apiRequest("PATCH", `/meal-entries/${entry.id}`, {
+      token: fullToken,
+      body: { date: "2026-02-31", label: "Mutated yogurt" },
+    });
+
+    expect(rejected.status).toBe(400);
+    await expect(rejected.json()).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "bad_request",
+        message: "Date must use YYYY-MM-DD.",
+      },
+    });
+
+    const day = await apiRequest("GET", "/days/2026-03-19", { token: fullToken });
+    await expect(day.json()).resolves.toMatchObject({
+      ok: true,
+      data: {
+        meals: [
+          {
+            id: entry.id,
+            date: "2026-03-19",
+            label: "Greek yogurt",
+          },
+        ],
       },
     });
   });

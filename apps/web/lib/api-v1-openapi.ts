@@ -21,7 +21,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     path: "/goals",
     methods: [
       { method: "get", summary: "Read macro goals", scopes: ["read:goals"] },
-      { method: "patch", summary: "Update macro goals", scopes: ["write:goals"] },
+      { method: "patch", summary: "Update macro goals", scopes: ["write:goals", "read:goals"] },
     ],
   },
   {
