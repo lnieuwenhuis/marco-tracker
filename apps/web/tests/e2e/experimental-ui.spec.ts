@@ -153,24 +153,47 @@ test("keeps low meal action menus above the bottom controls", async ({ page }, t
   await expect(
     targetCard.getByRole("button", { name: targetLabel, exact: true }),
   ).toHaveCount(0);
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 
   const trigger = targetCard.getByRole("button", {
     name: `More actions for ${targetLabel}`,
   });
+  await trigger.evaluate((element) => {
+    element.scrollIntoView({ block: "nearest", inline: "nearest" });
+
+    const rect = element.getBoundingClientRect();
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+
+    window.scrollBy(0, rect.bottom - (viewportHeight - 132));
+  });
   await expect(trigger).toBeVisible();
-  const triggerBox = await trigger.boundingBox();
-  expect(triggerBox).not.toBeNull();
+  await expect
+    .poll(() =>
+      trigger.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+
+        return viewportHeight - rect.bottom;
+      }),
+    )
+    .toBeGreaterThanOrEqual(112);
+  const triggerBox = await trigger.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+
+    return { y: rect.y, height: rect.height };
+  });
   await trigger.click();
 
   const menu = page.getByRole("menu");
   await expect(menu.getByRole("menuitem", { name: "Copy to today" })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "Delete" })).toBeVisible();
 
-  const menuBox = await menu.boundingBox();
+  const menuBox = await menu.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
 
-  expect(menuBox).not.toBeNull();
-  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(triggerBox!.y);
+    return { y: rect.y, height: rect.height };
+  });
+
+  expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(triggerBox.y);
 });
 
 test("keeps the empty food template tab selectable when only day templates exist", async ({
