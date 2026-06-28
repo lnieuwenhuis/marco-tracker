@@ -157,43 +157,21 @@ test("keeps low meal action menus above the bottom controls", async ({ page }, t
   const trigger = targetCard.getByRole("button", {
     name: `More actions for ${targetLabel}`,
   });
-  await trigger.evaluate((element) => {
-    element.scrollIntoView({ block: "nearest", inline: "nearest" });
-
-    const rect = element.getBoundingClientRect();
-    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-
-    window.scrollBy(0, rect.bottom - (viewportHeight - 132));
-  });
   await expect(trigger).toBeVisible();
-  await expect
-    .poll(() =>
-      trigger.evaluate((element) => {
-        const rect = element.getBoundingClientRect();
-        const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-
-        return viewportHeight - rect.bottom;
-      }),
-    )
-    .toBeGreaterThanOrEqual(112);
-  const triggerBox = await trigger.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-
-    return { y: rect.y, height: rect.height };
-  });
+  const triggerBox = await trigger.boundingBox();
+  expect(triggerBox).not.toBeNull();
   await trigger.click();
 
   const menu = page.getByRole("menu");
-  await expect(menu.getByRole("menuitem", { name: "Copy to today" })).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: "Delete" })).toBeVisible();
+  const copyItem = menu.getByRole("menuitem", { name: "Copy to today" });
+  const deleteItem = menu.getByRole("menuitem", { name: "Delete" });
+  await expect(copyItem).toBeVisible();
+  await expect(deleteItem).toBeVisible();
 
-  const menuBox = await menu.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
+  const deleteBox = await deleteItem.boundingBox();
 
-    return { y: rect.y, height: rect.height };
-  });
-
-  expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(triggerBox.y);
+  expect(deleteBox).not.toBeNull();
+  expect(deleteBox!.y + deleteBox!.height).toBeLessThanOrEqual(triggerBox!.y);
 });
 
 test("keeps the empty food template tab selectable when only day templates exist", async ({
