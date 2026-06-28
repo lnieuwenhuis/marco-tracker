@@ -7,7 +7,7 @@
     "build": "pnpm --filter @macro-tracker/web build",
     "dev": "pnpm --filter @macro-tracker/web dev",
     "lint": "pnpm --filter @macro-tracker/web lint",
-    "test": "pnpm -r test",
+    "test": "pnpm -r --parallel test",
     "typecheck": "pnpm -r typecheck",
     "test:e2e": "pnpm --filter @macro-tracker/web test:e2e",
     "db:generate": "pnpm --filter @macro-tracker/db db:generate",
