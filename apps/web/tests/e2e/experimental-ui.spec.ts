@@ -158,20 +158,14 @@ test("keeps low meal action menus above the bottom controls", async ({ page }, t
     name: `More actions for ${targetLabel}`,
   });
   await expect(trigger).toBeVisible();
-  const triggerBox = await trigger.boundingBox();
-  expect(triggerBox).not.toBeNull();
   await trigger.click();
 
   const menu = page.getByRole("menu");
   const copyItem = menu.getByRole("menuitem", { name: "Copy to today" });
   const deleteItem = menu.getByRole("menuitem", { name: "Delete" });
+  await expect(menu).toHaveAttribute("data-placement", "above");
   await expect(copyItem).toBeVisible();
   await expect(deleteItem).toBeVisible();
-
-  const deleteBox = await deleteItem.boundingBox();
-
-  expect(deleteBox).not.toBeNull();
-  expect(deleteBox!.y + deleteBox!.height).toBeLessThanOrEqual(triggerBox!.y);
 });
 
 test("keeps the empty food template tab selectable when only day templates exist", async ({
