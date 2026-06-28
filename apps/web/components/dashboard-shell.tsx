@@ -21,8 +21,7 @@ import {
 
 import { AiFoodPhotoModal } from "./ai-food-photo-modal";
 import { invalidateAppDataCache } from "./app-data-cache";
-import { BarcodeResult } from "./barcode-result";
-import { BarcodeScanner } from "./barcode-scanner";
+import { BarcodeCaptureModals } from "./barcode-capture-modals";
 import { ExperimentalAppShell } from "./experimental-app-shell";
 import { FoodSearchModal } from "./food-search-modal";
 import { MacroBarGroup } from "./macro-bar";
@@ -179,6 +178,47 @@ function toNumber(value: string, fallback = 0) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function mealDraftToSaveInput(
+  draft: MealDraft,
+  {
+    date,
+    includeId = true,
+    includeSortOrder = true,
+    mealGroupId = draft.mealGroupId ?? null,
+    status = draft.status,
+  }: {
+    date: string;
+    includeId?: boolean;
+    includeSortOrder?: boolean;
+    mealGroupId?: string | null;
+    status?: MealEntryStatus;
+  },
+): Parameters<typeof saveMealEntryAction>[0] {
+  const input: Parameters<typeof saveMealEntryAction>[0] = {
+    date,
+    mealGroupId,
+    status,
+    productId: draft.productId ?? null,
+    label: draft.label,
+    quantity: toNumber(draft.quantity, 1),
+    unit: draft.unit,
+    servingMultiplier: toNumber(draft.servingMultiplier, 1),
+    proteinG: toNumber(draft.proteinG),
+    carbsG: toNumber(draft.carbsG),
+    fatG: toNumber(draft.fatG),
+    caloriesKcal: Math.round(toNumber(draft.caloriesKcal)),
+  };
+
+  if (includeId && draft.id) {
+    input.id = draft.id;
+  }
+  if (includeSortOrder) {
+    input.sortOrder = draft.sortOrder;
+  }
+
+  return input;
 }
 
 function getNextSortOrder(drafts: MealDraft[]) {
@@ -385,22 +425,10 @@ export function DashboardShell({
 
     setActiveMutation(clientId);
     beginMutation(async () => {
-      const result = await saveMealEntryAction({
-        id: draft.id,
+      const result = await saveMealEntryAction(mealDraftToSaveInput(draft, {
         date: selectedDate,
         mealGroupId,
-        status: draft.status,
-        productId: draft.productId ?? null,
-        label: draft.label,
-        sortOrder: draft.sortOrder,
-        quantity: toNumber(draft.quantity, 1),
-        unit: draft.unit,
-        servingMultiplier: toNumber(draft.servingMultiplier, 1),
-        proteinG: toNumber(draft.proteinG),
-        carbsG: toNumber(draft.carbsG),
-        fatG: toNumber(draft.fatG),
-        caloriesKcal: Math.round(toNumber(draft.caloriesKcal)),
-      });
+      }));
 
       if (!result.ok) {
         setErrors((currentErrors) => ({
@@ -568,22 +596,9 @@ export function DashboardShell({
 
     setSavingClientId(clientId);
     try {
-      const result = await saveMealEntryAction({
-        id: draft.id,
-        date: selectedDate,
-        mealGroupId: draft.mealGroupId ?? null,
-        status: draft.status,
-        productId: draft.productId ?? null,
-        label: draft.label,
-        sortOrder: draft.sortOrder,
-        quantity: toNumber(draft.quantity, 1),
-        unit: draft.unit,
-        servingMultiplier: toNumber(draft.servingMultiplier, 1),
-        proteinG: toNumber(draft.proteinG),
-        carbsG: toNumber(draft.carbsG),
-        fatG: toNumber(draft.fatG),
-        caloriesKcal: Math.round(toNumber(draft.caloriesKcal)),
-      });
+      const result = await saveMealEntryAction(
+        mealDraftToSaveInput(draft, { date: selectedDate }),
+      );
 
       if (!result.ok) {
         setErrors((currentErrors) => ({
@@ -838,20 +853,12 @@ export function DashboardShell({
 
     setActiveMutation(clientId);
     beginMutation(async () => {
-      const result = await saveMealEntryAction({
+      const result = await saveMealEntryAction(mealDraftToSaveInput(draft, {
         date: todayStr,
-        mealGroupId: draft.mealGroupId ?? null,
+        includeId: false,
+        includeSortOrder: false,
         status: "eaten",
-        productId: draft.productId ?? null,
-        label: draft.label,
-        quantity: toNumber(draft.quantity, 1),
-        unit: draft.unit,
-        servingMultiplier: toNumber(draft.servingMultiplier, 1),
-        proteinG: toNumber(draft.proteinG),
-        carbsG: toNumber(draft.carbsG),
-        fatG: toNumber(draft.fatG),
-        caloriesKcal: Math.round(toNumber(draft.caloriesKcal)),
-      });
+      }));
 
       if (!result.ok) {
         setErrors((currentErrors) => ({
@@ -1243,53 +1250,28 @@ export function DashboardShell({
         />
       )}
 
-      {showScanner && (
-        <BarcodeScanner
-          onScan={(product) => {
-            setShowScanner(false);
-            setScanResult(product);
-            setNotFoundBarcode(null);
-          }}
-          onNotFound={(barcode) => {
-            setShowScanner(false);
-            setScanResult(null);
-            setNotFoundBarcode(barcode);
-          }}
-          onClose={() => setShowScanner(false)}
-        />
-      )}
-
-      {(scanResult || notFoundBarcode) && (
-        <BarcodeResult
-          product={scanResult}
-          notFoundBarcode={notFoundBarcode}
-          onAddToLog={(macros) => {
-            setDrafts((currentDrafts) => [
-              ...currentDrafts,
-              createDraftFromMacroSelection(
-                macros,
-                getNextSortOrder(currentDrafts),
-                defaultEntryStatus,
-              ),
-            ]);
-            invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
-            setScanResult(null);
-            setNotFoundBarcode(null);
-          }}
-          onSaveAsPreset={(input) => {
-            handleSavePreset(input);
-          }}
-          onScanAnother={() => {
-            setScanResult(null);
-            setNotFoundBarcode(null);
-            setShowScanner(true);
-          }}
-          onClose={() => {
-            setScanResult(null);
-            setNotFoundBarcode(null);
-          }}
-        />
-      )}
+      <BarcodeCaptureModals
+        showScanner={showScanner}
+        scanResult={scanResult}
+        notFoundBarcode={notFoundBarcode}
+        setShowScanner={setShowScanner}
+        setScanResult={setScanResult}
+        setNotFoundBarcode={setNotFoundBarcode}
+        onAddToLog={(macros) => {
+          setDrafts((currentDrafts) => [
+            ...currentDrafts,
+            createDraftFromMacroSelection(
+              macros,
+              getNextSortOrder(currentDrafts),
+              defaultEntryStatus,
+            ),
+          ]);
+          invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
+        }}
+        onSaveAsPreset={(input) => {
+          handleSavePreset(input);
+        }}
+      />
     </>
   );
 }

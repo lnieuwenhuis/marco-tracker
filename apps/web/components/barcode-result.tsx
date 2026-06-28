@@ -17,7 +17,7 @@ type BarcodeResultProps = {
   onClose: () => void;
 };
 
-type BarcodeFoodSelection = {
+export type BarcodeFoodSelection = {
   productId?: string | null;
   label: string;
   quantity: number;

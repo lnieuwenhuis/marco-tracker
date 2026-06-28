@@ -3,11 +3,12 @@ import Link from "next/link";
 import { getAdminDashboardData, isOwnerRole } from "@macro-tracker/db";
 
 import {
+  AdminAuditEventCard,
+  AdminBarcodeProductRow,
   AdminNotice,
   AdminRoleBadge,
   AdminSection,
   AdminStatCard,
-  formatAdminTimestamp,
 } from "@/components/admin-ui";
 import { requireAdminUser } from "@/lib/auth";
 
@@ -77,30 +78,7 @@ export default async function AdminDashboardPage() {
                 </thead>
                 <tbody className="divide-y divide-[var(--color-border)]">
                   {dashboard.recentBarcodeAdditions.map((item) => (
-                    <tr key={item.id}>
-                      <td className="py-3 pr-4">
-                        <Link
-                          href={`/admin/barcodes/${item.id}`}
-                          className="font-semibold text-[var(--color-ink)] underline-offset-4 hover:underline"
-                        >
-                          {item.name}
-                        </Link>
-                      </td>
-                      <td className="py-3 pr-4 font-mono text-xs text-[var(--color-muted)]">
-                        {item.barcode}
-                      </td>
-                      <td className="py-3 pr-4 text-[var(--color-muted)]">
-                        {item.sourceProvider ?? item.source}
-                      </td>
-                      <td className="py-3 pr-4">
-                        <span className="rounded-full bg-[var(--color-card-muted)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
-                          {item.deletedAt ? "deleted" : "active"}
-                        </span>
-                      </td>
-                      <td className="py-3 text-[var(--color-muted)]">
-                        {formatAdminTimestamp(item.createdAt)}
-                      </td>
-                    </tr>
+                    <AdminBarcodeProductRow key={item.id} product={item} />
                   ))}
                 </tbody>
               </table>
@@ -146,28 +124,7 @@ export default async function AdminDashboardPage() {
           ) : (
             <div className="space-y-3">
               {dashboard.recentAuditEvents.map((event) => (
-                <div
-                  key={event.id}
-                  className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3"
-                >
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="font-semibold text-[var(--color-ink)]">
-                        {event.action}
-                      </p>
-                      <p className="mt-1 text-sm text-[var(--color-muted)]">
-                        {event.actorEmail ?? "Unknown user"} on {event.targetType}{" "}
-                        <span className="font-mono text-xs">{event.targetId}</span>
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <AdminRoleBadge role={event.actorRole} />
-                      <span className="text-xs text-[var(--color-muted)]">
-                        {formatAdminTimestamp(event.createdAt)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                <AdminAuditEventCard key={event.id} event={event} />
               ))}
             </div>
           )}

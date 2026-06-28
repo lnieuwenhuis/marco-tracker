@@ -1,13 +1,14 @@
-import Link from "next/link";
-
 import { listAdminBarcodeProducts } from "@macro-tracker/db";
 
 import { AdminFormField } from "@/components/admin-form-field";
 import {
+  AdminBarcodeProductRow,
+  AdminFilterInput,
+  AdminFilterSelect,
+  AdminFilterSubmitButton,
   AdminNotice,
   AdminPaginationLinks,
   AdminSection,
-  formatAdminTimestamp,
 } from "@/components/admin-ui";
 import { createAdminBarcodeProductAction } from "@/lib/admin-actions";
 
@@ -72,35 +73,27 @@ export default async function AdminBarcodesPage({
         description="Search, filter, and inspect all shared barcode records."
       >
         <form className="grid gap-3 md:grid-cols-[1.6fr_0.8fr_1fr_auto]">
-          <input
+          <AdminFilterInput
             type="search"
             name="q"
             placeholder="Search barcode, name, or brand"
             defaultValue={q}
-            className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
           />
-          <select
+          <AdminFilterSelect
             name="status"
             defaultValue={status}
-            className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
           >
             <option value="all">All statuses</option>
             <option value="active">Active</option>
             <option value="deleted">Deleted</option>
-          </select>
-          <input
+          </AdminFilterSelect>
+          <AdminFilterInput
             type="search"
             name="submitter"
             placeholder="Filter by submitter email"
             defaultValue={submitter}
-            className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
           />
-          <button
-            type="submit"
-            className="rounded-2xl bg-[var(--color-accent)] px-4 py-3 text-sm font-semibold text-white transition hover:opacity-90"
-          >
-            Apply
-          </button>
+          <AdminFilterSubmitButton />
         </form>
 
         <div className="mt-5 overflow-x-auto">
@@ -116,41 +109,12 @@ export default async function AdminBarcodesPage({
             </thead>
             <tbody className="divide-y divide-[var(--color-border)]">
               {result.items.map((item) => (
-                <tr key={item.id}>
-                  <td className="py-3 pr-4">
-                    <Link
-                      href={`/admin/barcodes/${item.id}`}
-                      className="font-semibold text-[var(--color-ink)] underline-offset-4 hover:underline"
-                    >
-                      {item.name}
-                    </Link>
-                    {item.brand ? (
-                      <p className="mt-1 text-xs text-[var(--color-muted)]">{item.brand}</p>
-                    ) : null}
-                  </td>
-                  <td className="py-3 pr-4 font-mono text-xs text-[var(--color-muted)]">
-                    {item.barcode}
-                  </td>
-                  <td className="py-3 pr-4 text-[var(--color-muted)]">
-                    <span>{item.sourceProvider ?? item.source}</span>
-                    {item.sourceConfidence != null ? (
-                      <span className="ml-1 text-xs">
-                        ({Math.round(item.sourceConfidence * 100)}%)
-                      </span>
-                    ) : null}
-                    {item.submittedByUserId ? (
-                      <p className="mt-1 font-mono text-[10px]">{item.submittedByUserId}</p>
-                    ) : null}
-                  </td>
-                  <td className="py-3 pr-4">
-                    <span className="rounded-full bg-[var(--color-card-muted)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
-                      {item.deletedAt ? "deleted" : "active"}
-                    </span>
-                  </td>
-                  <td className="py-3 text-[var(--color-muted)]">
-                    {formatAdminTimestamp(item.updatedAt)}
-                  </td>
-                </tr>
+                <AdminBarcodeProductRow
+                  key={item.id}
+                  product={item}
+                  detail="full"
+                  timestamp="updated"
+                />
               ))}
             </tbody>
           </table>
