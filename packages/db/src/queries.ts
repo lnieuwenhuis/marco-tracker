@@ -1,9 +1,9 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, max, ne, or, sql } from "drizzle-orm";
-import { createHash } from "node:crypto";
+import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, max, ne, or, sql } from "drizzle-orm";
+import { createHash, randomBytes } from "node:crypto";
 
 import { computeStreaks, getPeriodRanges } from "./dates";
 import { getDb, type DatabaseClient } from "./client";
-import { adminAuditEvents, foodProductRevisions, foodProducts, mealEntries, mealGroups, mealTemplateItems, mealTemplates, recipeIngredients, recipes, users, weightEntries } from "./schema";
+import { adminAuditEvents, apiTokens, foodProductRevisions, foodProducts, mealEntries, mealGroups, mealTemplateItems, mealTemplates, recipeIngredients, recipes, users, weightEntries } from "./schema";
 import { validateFoodProductInput, validateMealEntryInput, validateRecipeInput, validateWeightEntryInput } from "./validators";
 import type {
   AdminAuditListPage,
@@ -16,6 +16,9 @@ import type {
   AdminUserListItem,
   AdminUserListPage,
   AdminRecipeSummary,
+  ApiScope,
+  ApiTokenAuthResult,
+  ApiTokenRecord,
   AppUser,
   BarcodeFoodProductInput,
   CompleteOnboardingInput,
@@ -48,7 +51,7 @@ import type {
   WeightPageData,
   WeightUnit,
 } from "./types";
-import { canAccessAdmin, isAdminRole, isOwnerRole } from "./types";
+import { API_SCOPE_VALUES, canAccessAdmin, isAdminRole, isApiScope, isOwnerRole } from "./types";
 
 type DailyTotalsRow = {
   entryDate: string;
@@ -96,6 +99,10 @@ function roundToSingleDecimal(value: number) {
 
 function roundToTwoDecimals(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function fixed(value: number, digits: number) {
+  return value.toFixed(digits);
 }
 
 function toTimestampString(value: Date | string | null | undefined) {
@@ -307,6 +314,134 @@ const foodProductSelectColumns = {
   deletedAt: foodProducts.deletedAt,
 };
 
+const mealEntryWithProductSelectColumns = {
+  id: mealEntries.id,
+  userId: mealEntries.userId,
+  date: mealEntries.entryDate,
+  mealGroupId: mealEntries.mealGroupId,
+  status: mealEntries.status,
+  productId: foodProducts.id,
+  label: mealEntries.label,
+  sortOrder: mealEntries.sortOrder,
+  quantity: mealEntries.quantity,
+  unit: mealEntries.unit,
+  servingMultiplier: mealEntries.servingMultiplier,
+  proteinG: mealEntries.proteinG,
+  carbsG: mealEntries.carbsG,
+  fatG: mealEntries.fatG,
+  caloriesKcal: mealEntries.caloriesKcal,
+  clientMutationId: mealEntries.clientMutationId,
+  sourceLabel: foodProducts.name,
+};
+
+function selectMealEntriesWithAccessibleProduct(db: DatabaseClient, userId: string) {
+  return db
+    .select(mealEntryWithProductSelectColumns)
+    .from(mealEntries)
+    .leftJoin(
+      foodProducts,
+      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
+    );
+}
+
+type ValidatedFoodProductInput = ReturnType<typeof validateFoodProductInput>;
+
+function buildFoodProductInputValues(
+  normalized: ValidatedFoodProductInput,
+  options: {
+    servingWeightFallback?: string | null;
+    forceNullServingVolume?: boolean;
+    sourceProviderFallback?: string | null;
+    updatedAt?: Date;
+  } = {},
+) {
+  return {
+    source: normalized.source,
+    barcode: normalized.barcode,
+    name: normalized.name,
+    brand: normalized.brand ?? "",
+    defaultServingQuantity: fixed(normalized.defaultServingQuantity, 2),
+    defaultServingUnit: normalized.defaultServingUnit,
+    proteinPer100: fixed(normalized.proteinPer100, 2),
+    carbsPer100: fixed(normalized.carbsPer100, 2),
+    fatPer100: fixed(normalized.fatPer100, 2),
+    caloriesPer100: normalized.caloriesPer100,
+    servingWeightG:
+      normalized.servingWeightG != null
+        ? fixed(normalized.servingWeightG, 2)
+        : options.servingWeightFallback ?? null,
+    servingVolumeMl: options.forceNullServingVolume
+      ? null
+      : normalized.servingVolumeMl != null
+        ? fixed(normalized.servingVolumeMl, 2)
+        : null,
+    sourceProvider: normalized.sourceProvider ?? options.sourceProviderFallback ?? null,
+    sourceConfidence:
+      normalized.sourceConfidence != null
+        ? fixed(normalized.sourceConfidence, 2)
+        : null,
+    sourceMetadata: normalized.sourceMetadata ?? {},
+    correctedFromProductId: normalized.correctedFromProductId ?? null,
+    updatedAt: options.updatedAt ?? new Date(),
+  };
+}
+
+function buildMealEntryValues(normalized: MealEntryInput) {
+  return {
+    entryDate: normalized.date,
+    mealGroupId: normalized.mealGroupId,
+    status: normalized.status ?? "eaten",
+    productId: normalized.productId,
+    label: normalized.label,
+    sortOrder: normalized.sortOrder,
+    quantity: normalized.quantity?.toFixed(2) ?? "1.00",
+    unit: normalized.unit ?? "serving",
+    servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
+    proteinG: normalized.proteinG.toFixed(1),
+    carbsG: normalized.carbsG.toFixed(1),
+    fatG: normalized.fatG.toFixed(1),
+    caloriesKcal: normalized.caloriesKcal,
+    clientMutationId: normalized.clientMutationId,
+    updatedAt: new Date(),
+  };
+}
+
+function buildMealEntryInsertValues(userId: string, normalized: MealEntryInput) {
+  return {
+    id: crypto.randomUUID(),
+    userId,
+    ...buildMealEntryValues(normalized),
+  };
+}
+
+function buildWeightEntryValues(userId: string, normalized: WeightEntryInput) {
+  return {
+    id: crypto.randomUUID(),
+    userId,
+    entryDate: normalized.date,
+    weightKg: normalized.weightKg.toFixed(2),
+    bodyFatPct:
+      normalized.bodyFatPct != null
+        ? normalized.bodyFatPct.toFixed(1)
+        : null,
+    notes: normalized.notes,
+    updatedAt: new Date(),
+  };
+}
+
+function buildWeightEntryUpdateValues(normalized: WeightEntryInput) {
+  return {
+    entryDate: normalized.date,
+    weightKg: normalized.weightKg.toFixed(2),
+    bodyFatPct:
+      normalized.bodyFatPct != null
+        ? normalized.bodyFatPct.toFixed(1)
+        : null,
+    notes: normalized.notes,
+    updatedAt: new Date(),
+  };
+}
+
 function mapFoodProductRevisionRow(row: {
   id: string;
   productId: string;
@@ -410,6 +545,40 @@ async function resolveDb(db?: DatabaseClient) {
   return db ?? (await getDb());
 }
 
+function dailyMacroTotalsSelectColumns() {
+  return {
+    entryDate: mealEntries.entryDate,
+    proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
+    carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
+    fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
+    caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
+  };
+}
+
+function selectDailyMacroTotals(db: DatabaseClient) {
+  return db
+    .select(dailyMacroTotalsSelectColumns())
+    .from(mealEntries);
+}
+
+function selectDailyMacroTotalsWithItemCount(db: DatabaseClient) {
+  return db
+    .select({
+      ...dailyMacroTotalsSelectColumns(),
+      itemCount: sql<string>`count(${mealEntries.id})`,
+    })
+    .from(mealEntries);
+}
+
+function selectDailyMacroTotalsWithEntryCount(db: DatabaseClient) {
+  return db
+    .select({
+      ...dailyMacroTotalsSelectColumns(),
+      entryCount: sql<string>`count(${mealEntries.id})`,
+    })
+    .from(mealEntries);
+}
+
 async function getDailyTotalsForRange(
   userId: string,
   startDate: string,
@@ -418,15 +587,7 @@ async function getDailyTotalsForRange(
 ) {
   const database = await resolveDb(db);
 
-  const rows = await database
-    .select({
-      entryDate: mealEntries.entryDate,
-      proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-      carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-      fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
-      caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-    })
-    .from(mealEntries)
+  const rows = await selectDailyMacroTotals(database)
     .where(
       and(
         eatenEntryPredicate(userId),
@@ -570,6 +731,171 @@ export async function getUserById(userId: string, db?: DatabaseClient) {
     .limit(1);
 
   return user ? mapUserRow(user as UserSelectRow) : null;
+}
+
+export function getApiScopes(): ApiScope[] {
+  return [...API_SCOPE_VALUES];
+}
+
+function normalizeApiTokenExpiry(expiresAt: Date | string | null | undefined) {
+  if (expiresAt === undefined) {
+    return defaultApiTokenExpiry();
+  }
+
+  if (expiresAt === null) {
+    return null;
+  }
+
+  const date = expiresAt instanceof Date ? expiresAt : new Date(expiresAt);
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error("API token expiry is invalid.");
+  }
+
+  return date;
+}
+
+function apiTokenSelectColumns() {
+  return {
+    id: apiTokens.id,
+    userId: apiTokens.userId,
+    tokenPrefix: apiTokens.tokenPrefix,
+    name: apiTokens.name,
+    scopes: apiTokens.scopes,
+    createdAt: apiTokens.createdAt,
+    lastUsedAt: apiTokens.lastUsedAt,
+    expiresAt: apiTokens.expiresAt,
+    revokedAt: apiTokens.revokedAt,
+  };
+}
+
+export async function createApiToken(
+  userId: string,
+  input: {
+    name: string;
+    scopes: readonly string[];
+    expiresAt?: Date | string | null;
+  },
+  db?: DatabaseClient,
+): Promise<{ token: string; record: ApiTokenRecord }> {
+  const database = await resolveDb(db);
+  const name = input.name.trim();
+  if (!name) {
+    throw new Error("API token name is required.");
+  }
+
+  const scopes = normalizeApiTokenScopes(input.scopes);
+  const token = generateApiTokenSecret();
+  const [created] = await database
+    .insert(apiTokens)
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      tokenHash: hashApiToken(token),
+      tokenPrefix: token.slice(0, API_TOKEN_PREFIX_LENGTH),
+      name,
+      scopes,
+      expiresAt: normalizeApiTokenExpiry(input.expiresAt),
+    })
+    .returning();
+
+  return {
+    token,
+    record: mapApiTokenRow(created as ApiTokenSelectRow),
+  };
+}
+
+export async function listApiTokens(
+  userId: string,
+  db?: DatabaseClient,
+): Promise<ApiTokenRecord[]> {
+  const database = await resolveDb(db);
+  const rows = await database
+    .select(apiTokenSelectColumns())
+    .from(apiTokens)
+    .where(eq(apiTokens.userId, userId))
+    .orderBy(desc(apiTokens.createdAt));
+
+  return rows.map((row) => mapApiTokenRow(row as ApiTokenSelectRow));
+}
+
+export async function revokeApiToken(
+  userId: string,
+  tokenId: string,
+  db?: DatabaseClient,
+): Promise<boolean> {
+  const database = await resolveDb(db);
+  const [revoked] = await database
+    .update(apiTokens)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(apiTokens.id, tokenId),
+        eq(apiTokens.userId, userId),
+        isNull(apiTokens.revokedAt),
+      ),
+    )
+    .returning();
+
+  return Boolean(revoked);
+}
+
+export async function authenticateApiToken(
+  token: string | null | undefined,
+  db?: DatabaseClient,
+): Promise<ApiTokenAuthResult> {
+  if (!token) {
+    return { ok: false, reason: "missing" };
+  }
+
+  if (!token.startsWith(API_TOKEN_PREFIX) || token.length <= API_TOKEN_PREFIX.length) {
+    return { ok: false, reason: "malformed" };
+  }
+
+  const database = await resolveDb(db);
+  const tokenHash = hashApiToken(token);
+  const now = new Date();
+  const [row] = await database
+    .select(apiTokenSelectColumns())
+    .from(apiTokens)
+    .where(eq(apiTokens.tokenHash, tokenHash))
+    .limit(1);
+
+  if (!row) {
+    return { ok: false, reason: "invalid" };
+  }
+
+  const record = mapApiTokenRow(row as ApiTokenSelectRow);
+  if (record.revokedAt) {
+    return { ok: false, reason: "revoked" };
+  }
+
+  if (record.expiresAt && new Date(record.expiresAt).getTime() <= Date.now()) {
+    return { ok: false, reason: "expired" };
+  }
+
+  const staleLastUsedAt = new Date(now.getTime() - API_TOKEN_LAST_USED_THROTTLE_MS);
+  const lastUsedAt = record.lastUsedAt ? new Date(record.lastUsedAt) : null;
+  if (!lastUsedAt || lastUsedAt.getTime() < staleLastUsedAt.getTime()) {
+    const [updated] = await database
+      .update(apiTokens)
+      .set({ lastUsedAt: now })
+      .where(
+        and(
+          eq(apiTokens.id, record.id),
+          isNull(apiTokens.revokedAt),
+          or(isNull(apiTokens.expiresAt), gt(apiTokens.expiresAt, now)),
+          or(isNull(apiTokens.lastUsedAt), lt(apiTokens.lastUsedAt, staleLastUsedAt)),
+        ),
+      )
+      .returning();
+
+    return {
+      ok: true,
+      token: mapApiTokenRow((updated ?? row) as ApiTokenSelectRow),
+    };
+  }
+
+  return { ok: true, token: record };
 }
 
 const DEFAULT_MEAL_GROUP_LABELS = ["Breakfast", "Lunch", "Dinner", "Snack"] as const;
@@ -734,11 +1060,23 @@ export async function reorderMealGroups(
   db?: DatabaseClient,
 ): Promise<MealGroup[]> {
   const database = await resolveDb(db);
+  const groups = await getMealGroups(userId, database);
+  const activeGroupIds = new Set(groups.map((group) => group.id));
+  const orderedIdSet = new Set(orderedGroupIds);
+  if (
+    orderedGroupIds.length !== groups.length ||
+    orderedIdSet.size !== orderedGroupIds.length ||
+    orderedGroupIds.some((groupId) => !activeGroupIds.has(groupId))
+  ) {
+    throw new Error("orderedIds must include each active meal group exactly once.");
+  }
+
+  const now = new Date();
   await database.transaction(async (tx) => {
     for (const [index, groupId] of orderedGroupIds.entries()) {
       await tx
         .update(mealGroups)
-        .set({ sortOrder: index, updatedAt: new Date() })
+        .set({ sortOrder: index, updatedAt: now })
         .where(and(eq(mealGroups.id, groupId), eq(mealGroups.userId, userId)));
     }
   });
@@ -753,31 +1091,7 @@ export async function getDailySummary(
 ): Promise<DailySummary> {
   const database = await resolveDb(db);
   const [rows, groups] = await Promise.all([
-    database
-      .select({
-        id: mealEntries.id,
-        userId: mealEntries.userId,
-        date: mealEntries.entryDate,
-        mealGroupId: mealEntries.mealGroupId,
-        status: mealEntries.status,
-        productId: foodProducts.id,
-        label: mealEntries.label,
-        sortOrder: mealEntries.sortOrder,
-        quantity: mealEntries.quantity,
-        unit: mealEntries.unit,
-        servingMultiplier: mealEntries.servingMultiplier,
-        proteinG: mealEntries.proteinG,
-        carbsG: mealEntries.carbsG,
-        fatG: mealEntries.fatG,
-        caloriesKcal: mealEntries.caloriesKcal,
-        clientMutationId: mealEntries.clientMutationId,
-        sourceLabel: foodProducts.name,
-      })
-      .from(mealEntries)
-      .leftJoin(
-        foodProducts,
-        and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
-      )
+    selectMealEntriesWithAccessibleProduct(database, userId)
       .where(
         and(eq(mealEntries.userId, userId), eq(mealEntries.entryDate, selectedDate)),
       )
@@ -886,29 +1200,7 @@ export async function searchFoodProducts(
   });
 
   const rows = await database
-    .select({
-      id: foodProducts.id,
-      ownerUserId: foodProducts.ownerUserId,
-      scope: foodProducts.scope,
-      source: foodProducts.source,
-      barcode: foodProducts.barcode,
-      name: foodProducts.name,
-      brand: foodProducts.brand,
-      defaultServingQuantity: foodProducts.defaultServingQuantity,
-      defaultServingUnit: foodProducts.defaultServingUnit,
-      proteinPer100: foodProducts.proteinPer100,
-      carbsPer100: foodProducts.carbsPer100,
-      fatPer100: foodProducts.fatPer100,
-      caloriesPer100: foodProducts.caloriesPer100,
-      servingWeightG: foodProducts.servingWeightG,
-      servingVolumeMl: foodProducts.servingVolumeMl,
-      submittedByUserId: foodProducts.submittedByUserId,
-      deletedByUserId: foodProducts.deletedByUserId,
-      sourceProvider: foodProducts.sourceProvider,
-      sourceConfidence: foodProducts.sourceConfidence,
-      sourceMetadata: foodProducts.sourceMetadata,
-      correctedFromProductId: foodProducts.correctedFromProductId,
-    })
+    .select(foodProductSelectColumns)
     .from(foodProducts)
     .where(and(productAccessPredicate(userId), ...wordConditions))
     .orderBy(
@@ -943,28 +1235,9 @@ export async function createPersonalFoodProduct(
         id: crypto.randomUUID(),
         ownerUserId: userId,
         scope: normalized.scope,
-        source: normalized.source,
-        barcode: normalized.barcode,
-        name: normalized.name,
-        brand: normalized.brand ?? "",
-        defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
-        defaultServingUnit: normalized.defaultServingUnit,
-        proteinPer100: normalized.proteinPer100.toFixed(2),
-        carbsPer100: normalized.carbsPer100.toFixed(2),
-        fatPer100: normalized.fatPer100.toFixed(2),
-        caloriesPer100: normalized.caloriesPer100,
-        servingWeightG: normalized.servingWeightG?.toFixed(2) ?? null,
-        servingVolumeMl: normalized.servingVolumeMl?.toFixed(2) ?? null,
+        ...buildFoodProductInputValues(normalized),
         submittedByUserId: normalized.submittedByUserId ?? userId,
         deletedByUserId: normalized.deletedByUserId ?? null,
-        sourceProvider: normalized.sourceProvider ?? null,
-        sourceConfidence:
-          normalized.sourceConfidence != null
-            ? normalized.sourceConfidence.toFixed(2)
-            : null,
-        sourceMetadata: normalized.sourceMetadata ?? {},
-        correctedFromProductId: normalized.correctedFromProductId ?? null,
-        updatedAt: new Date(),
       })
       .returning();
 
@@ -978,36 +1251,14 @@ export async function createPersonalFoodProduct(
   });
 }
 
-async function getFoodProductByIdForUser(
+export async function getFoodProductByIdForUser(
   userId: string,
   productId: string,
   db?: DatabaseClient,
 ): Promise<FoodProduct | null> {
   const database = await resolveDb(db);
   const [row] = await database
-    .select({
-      id: foodProducts.id,
-      ownerUserId: foodProducts.ownerUserId,
-      scope: foodProducts.scope,
-      source: foodProducts.source,
-      barcode: foodProducts.barcode,
-      name: foodProducts.name,
-      brand: foodProducts.brand,
-      defaultServingQuantity: foodProducts.defaultServingQuantity,
-      defaultServingUnit: foodProducts.defaultServingUnit,
-      proteinPer100: foodProducts.proteinPer100,
-      carbsPer100: foodProducts.carbsPer100,
-      fatPer100: foodProducts.fatPer100,
-      caloriesPer100: foodProducts.caloriesPer100,
-      servingWeightG: foodProducts.servingWeightG,
-      servingVolumeMl: foodProducts.servingVolumeMl,
-      submittedByUserId: foodProducts.submittedByUserId,
-      deletedByUserId: foodProducts.deletedByUserId,
-      sourceProvider: foodProducts.sourceProvider,
-      sourceConfidence: foodProducts.sourceConfidence,
-      sourceMetadata: foodProducts.sourceMetadata,
-      correctedFromProductId: foodProducts.correctedFromProductId,
-    })
+    .select(foodProductSelectColumns)
     .from(foodProducts)
     .where(and(eq(foodProducts.id, productId), productAccessPredicate(userId)))
     .limit(1);
@@ -1062,6 +1313,39 @@ function productControlsMealMacros(product: FoodProduct) {
   return product.scope !== "legacy" && product.source !== "legacy";
 }
 
+async function resolveMealProductDefaults(
+  userId: string,
+  input: Pick<
+    MealEntryInput,
+    "productId" | "quantity" | "unit" | "servingMultiplier"
+  >,
+  db: DatabaseClient,
+  options: { recalculateProductMacros?: boolean } = {},
+) {
+  if (!input.productId) {
+    return { productLabel: null, productMacros: null };
+  }
+
+  const product = await getFoodProductByIdForUser(userId, input.productId, db);
+  if (!product) {
+    throw new Error("Food product not found.");
+  }
+
+  const productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
+  const shouldRecalculate =
+    options.recalculateProductMacros !== false && productControlsMealMacros(product);
+  const productMacros = shouldRecalculate
+    ? resolveProductNutritionForQuantity(
+        product,
+        input.quantity ?? product.defaultServingQuantity,
+        input.unit ?? product.defaultServingUnit,
+        input.servingMultiplier ?? 1,
+      )
+    : null;
+
+  return { productLabel, productMacros };
+}
+
 export async function updatePersonalFoodProduct(
   userId: string,
   productId: string,
@@ -1073,28 +1357,7 @@ export async function updatePersonalFoodProduct(
   return (database as any).transaction(async (tx: any) => {
     const [updated] = await tx
       .update(foodProducts)
-      .set({
-        source: normalized.source,
-        barcode: normalized.barcode,
-        name: normalized.name,
-        brand: normalized.brand ?? "",
-        defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
-        defaultServingUnit: normalized.defaultServingUnit,
-        proteinPer100: normalized.proteinPer100.toFixed(2),
-        carbsPer100: normalized.carbsPer100.toFixed(2),
-        fatPer100: normalized.fatPer100.toFixed(2),
-        caloriesPer100: normalized.caloriesPer100,
-        servingWeightG: normalized.servingWeightG?.toFixed(2) ?? null,
-        servingVolumeMl: normalized.servingVolumeMl?.toFixed(2) ?? null,
-        sourceProvider: normalized.sourceProvider ?? null,
-        sourceConfidence:
-          normalized.sourceConfidence != null
-            ? normalized.sourceConfidence.toFixed(2)
-            : null,
-        sourceMetadata: normalized.sourceMetadata ?? {},
-        correctedFromProductId: normalized.correctedFromProductId ?? null,
-        updatedAt: new Date(),
-      })
+      .set(buildFoodProductInputValues(normalized))
       .where(
         and(
           eq(foodProducts.id, productId),
@@ -1190,16 +1453,7 @@ export async function getRecentDailyOverviews(
 ): Promise<DailyOverview[]> {
   const database = await resolveDb(db);
 
-  const rows = await database
-    .select({
-      entryDate: mealEntries.entryDate,
-      proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-      carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-      fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
-      caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-      itemCount: sql<string>`count(${mealEntries.id})`,
-    })
-    .from(mealEntries)
+  const rows = await selectDailyMacroTotalsWithItemCount(database)
     .where(
       and(
         eq(mealEntries.userId, userId),
@@ -1245,37 +1499,26 @@ async function getMealEntryByClientMutationId(
   clientMutationId: string,
   db: DatabaseClient,
 ): Promise<MealEntryRecord | null> {
-  const [existing] = await db
-    .select({
-      id: mealEntries.id,
-      userId: mealEntries.userId,
-      date: mealEntries.entryDate,
-      mealGroupId: mealEntries.mealGroupId,
-      status: mealEntries.status,
-      productId: foodProducts.id,
-      label: mealEntries.label,
-      sortOrder: mealEntries.sortOrder,
-      quantity: mealEntries.quantity,
-      unit: mealEntries.unit,
-      servingMultiplier: mealEntries.servingMultiplier,
-      proteinG: mealEntries.proteinG,
-      carbsG: mealEntries.carbsG,
-      fatG: mealEntries.fatG,
-      caloriesKcal: mealEntries.caloriesKcal,
-      clientMutationId: mealEntries.clientMutationId,
-      sourceLabel: foodProducts.name,
-    })
-    .from(mealEntries)
-    .leftJoin(
-      foodProducts,
-      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
-    )
+  const [existing] = await selectMealEntriesWithAccessibleProduct(db, userId)
     .where(
       and(
         eq(mealEntries.userId, userId),
         eq(mealEntries.clientMutationId, clientMutationId),
       ),
     )
+    .limit(1);
+
+  return existing ? mapMealRow(existing) : null;
+}
+
+export async function getMealEntryById(
+  userId: string,
+  entryId: string,
+  db?: DatabaseClient,
+): Promise<MealEntryRecord | null> {
+  const database = await resolveDb(db);
+  const [existing] = await selectMealEntriesWithAccessibleProduct(database, userId)
+    .where(and(eq(mealEntries.id, entryId), eq(mealEntries.userId, userId)))
     .limit(1);
 
   return existing ? mapMealRow(existing) : null;
@@ -1304,24 +1547,11 @@ export async function createMealEntry(
 
   await assertMealGroupAccessibleForUser(userId, input.mealGroupId, database);
 
-  let productMacros: MacroNumbers | null = null;
-  let productLabel: string | null = null;
-  if (input.productId) {
-    const product = await getFoodProductByIdForUser(userId, input.productId, database);
-    if (!product) {
-      throw new Error("Food product not found.");
-    }
-
-    productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
-    if (productControlsMealMacros(product)) {
-      productMacros = resolveProductNutritionForQuantity(
-        product,
-        input.quantity ?? product.defaultServingQuantity,
-        input.unit ?? product.defaultServingUnit,
-        input.servingMultiplier ?? 1,
-      );
-    }
-  }
+  const { productLabel, productMacros } = await resolveMealProductDefaults(
+    userId,
+    input,
+    database,
+  );
 
   const normalized = validateMealEntryInput({
     ...input,
@@ -1330,25 +1560,7 @@ export async function createMealEntry(
     ...(productMacros ?? {}),
   });
 
-  const insertValues = {
-    id: crypto.randomUUID(),
-    userId,
-    entryDate: normalized.date,
-    mealGroupId: normalized.mealGroupId,
-    status: normalized.status,
-    productId: normalized.productId,
-    label: normalized.label,
-    sortOrder: normalized.sortOrder,
-    quantity: normalized.quantity?.toFixed(2) ?? "1.00",
-    unit: normalized.unit ?? "serving",
-    servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
-    proteinG: normalized.proteinG.toFixed(1),
-    carbsG: normalized.carbsG.toFixed(1),
-    fatG: normalized.fatG.toFixed(1),
-    caloriesKcal: normalized.caloriesKcal,
-    clientMutationId: normalized.clientMutationId,
-    updatedAt: new Date(),
-  };
+  const insertValues = buildMealEntryInsertValues(userId, normalized);
 
   const [created] = normalized.clientMutationId
     ? await database
@@ -1383,28 +1595,17 @@ export async function updateMealEntry(
   entryId: string,
   input: MealEntryInput,
   db?: DatabaseClient,
+  options?: { recalculateProductMacros?: boolean },
 ) {
   const database = await resolveDb(db);
   await assertMealGroupAccessibleForUser(userId, input.mealGroupId, database);
 
-  let productMacros: MacroNumbers | null = null;
-  let productLabel: string | null = null;
-  if (input.productId) {
-    const product = await getFoodProductByIdForUser(userId, input.productId, database);
-    if (!product) {
-      throw new Error("Food product not found.");
-    }
-
-    productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
-    if (productControlsMealMacros(product)) {
-      productMacros = resolveProductNutritionForQuantity(
-        product,
-        input.quantity ?? product.defaultServingQuantity,
-        input.unit ?? product.defaultServingUnit,
-        input.servingMultiplier ?? 1,
-      );
-    }
-  }
+  const { productLabel, productMacros } = await resolveMealProductDefaults(
+    userId,
+    input,
+    database,
+    { recalculateProductMacros: options?.recalculateProductMacros },
+  );
   const normalized = validateMealEntryInput({
     ...input,
     label: input.label || productLabel || "",
@@ -1413,23 +1614,7 @@ export async function updateMealEntry(
 
   const [updated] = await database
     .update(mealEntries)
-    .set({
-      entryDate: normalized.date,
-      mealGroupId: normalized.mealGroupId,
-      status: normalized.status,
-      productId: normalized.productId,
-      label: normalized.label,
-      sortOrder: normalized.sortOrder,
-      quantity: normalized.quantity?.toFixed(2) ?? "1.00",
-      unit: normalized.unit ?? "serving",
-      servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
-      proteinG: normalized.proteinG.toFixed(1),
-      carbsG: normalized.carbsG.toFixed(1),
-      fatG: normalized.fatG.toFixed(1),
-      caloriesKcal: normalized.caloriesKcal,
-      clientMutationId: normalized.clientMutationId,
-      updatedAt: new Date(),
-    })
+    .set(buildMealEntryValues(normalized))
     .where(and(eq(mealEntries.id, entryId), eq(mealEntries.userId, userId)))
     .returning();
 
@@ -1614,31 +1799,7 @@ export async function searchMealEntries(
   const wordConditions = words.map((word) =>
     ilike(mealEntries.label, `%${escapeLikePattern(word)}%`),
   );
-  const rows = await database
-    .select({
-      id: mealEntries.id,
-      userId: mealEntries.userId,
-      date: mealEntries.entryDate,
-      mealGroupId: mealEntries.mealGroupId,
-      status: mealEntries.status,
-      productId: foodProducts.id,
-      label: mealEntries.label,
-      sortOrder: mealEntries.sortOrder,
-      quantity: mealEntries.quantity,
-      unit: mealEntries.unit,
-      servingMultiplier: mealEntries.servingMultiplier,
-      proteinG: mealEntries.proteinG,
-      carbsG: mealEntries.carbsG,
-      fatG: mealEntries.fatG,
-      caloriesKcal: mealEntries.caloriesKcal,
-      clientMutationId: mealEntries.clientMutationId,
-      sourceLabel: foodProducts.name,
-    })
-    .from(mealEntries)
-    .leftJoin(
-      foodProducts,
-      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
-    )
+  const rows = await selectMealEntriesWithAccessibleProduct(database, userId)
     .where(and(eatenEntryPredicate(userId), ...wordConditions))
     .orderBy(desc(mealEntries.entryDate), asc(mealEntries.sortOrder))
     .limit(100);
@@ -1705,6 +1866,38 @@ function normalizeTemplateInput(input: MealTemplateInput): MealTemplateInput {
     notes: input.notes?.trim() || null,
     items,
   };
+}
+
+function buildTemplateItemValues(
+  templateId: string,
+  item: MealTemplateInput["items"][number],
+  index: number,
+) {
+  return {
+    id: crypto.randomUUID(),
+    templateId,
+    productId: item.productId,
+    mealGroupLabel: item.mealGroupLabel,
+    sortOrder: index,
+    label: item.label,
+    quantity: item.quantity?.toFixed(2) ?? "1.00",
+    unit: item.unit ?? "serving",
+    servingMultiplier: item.servingMultiplier?.toFixed(2) ?? "1.00",
+    proteinG: item.proteinG.toFixed(1),
+    carbsG: item.carbsG.toFixed(1),
+    fatG: item.fatG.toFixed(1),
+    caloriesKcal: item.caloriesKcal,
+  };
+}
+
+async function insertTemplateItems(
+  tx: any,
+  templateId: string,
+  items: MealTemplateInput["items"],
+) {
+  await tx.insert(mealTemplateItems).values(
+    items.map((item, index) => buildTemplateItemValues(templateId, item, index)),
+  );
 }
 
 async function getTemplateRows(
@@ -1812,23 +2005,7 @@ export async function createTemplate(
       notes: normalized.notes,
       updatedAt: now,
     });
-    await tx.insert(mealTemplateItems).values(
-      normalized.items.map((item, index) => ({
-        id: crypto.randomUUID(),
-        templateId,
-        productId: item.productId,
-        mealGroupLabel: item.mealGroupLabel,
-        sortOrder: index,
-        label: item.label,
-        quantity: item.quantity?.toFixed(2) ?? "1.00",
-        unit: item.unit ?? "serving",
-        servingMultiplier: item.servingMultiplier?.toFixed(2) ?? "1.00",
-        proteinG: item.proteinG.toFixed(1),
-        carbsG: item.carbsG.toFixed(1),
-        fatG: item.fatG.toFixed(1),
-        caloriesKcal: item.caloriesKcal,
-      })),
-    );
+    await insertTemplateItems(tx, templateId, normalized.items);
 
     const [created] = await getTemplateRows(userId, tx, templateId);
     if (!created) {
@@ -1879,23 +2056,7 @@ export async function updateTemplate(
     await tx
       .delete(mealTemplateItems)
       .where(eq(mealTemplateItems.templateId, templateId));
-    await tx.insert(mealTemplateItems).values(
-      normalized.items.map((item, index) => ({
-        id: crypto.randomUUID(),
-        templateId,
-        productId: item.productId,
-        mealGroupLabel: item.mealGroupLabel,
-        sortOrder: index,
-        label: item.label,
-        quantity: item.quantity?.toFixed(2) ?? "1.00",
-        unit: item.unit ?? "serving",
-        servingMultiplier: item.servingMultiplier?.toFixed(2) ?? "1.00",
-        proteinG: item.proteinG.toFixed(1),
-        carbsG: item.carbsG.toFixed(1),
-        fatG: item.fatG.toFixed(1),
-        caloriesKcal: item.caloriesKcal,
-      })),
-    );
+    await insertTemplateItems(tx, templateId, normalized.items);
 
     const [template] = await getTemplateRows(userId, tx, templateId);
     if (!template) {
@@ -2031,27 +2192,11 @@ export async function getStatsPageData(
   const database = await resolveDb(db);
 
   const [dailyRows, plannedTrendRows, labelRows, goals, weights, statusRows] = await Promise.all([
-    database
-      .select({
-        entryDate: mealEntries.entryDate,
-        proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-        carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-        fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
-        caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-      })
-      .from(mealEntries)
+    selectDailyMacroTotals(database)
       .where(eatenEntryPredicate(userId))
       .groupBy(mealEntries.entryDate)
       .orderBy(asc(mealEntries.entryDate)),
-    database
-      .select({
-        entryDate: mealEntries.entryDate,
-        proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-        carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-        fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
-        caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-      })
-      .from(mealEntries)
+    selectDailyMacroTotals(database)
       .where(
         and(
           eq(mealEntries.userId, userId),
@@ -2328,33 +2473,33 @@ export async function createWeightEntry(
 
   const [created] = await database
     .insert(weightEntries)
-    .values({
-      id: crypto.randomUUID(),
-      userId,
-      entryDate: normalized.date,
-      weightKg: normalized.weightKg.toFixed(2),
-      bodyFatPct:
-        normalized.bodyFatPct != null
-          ? normalized.bodyFatPct.toFixed(1)
-          : null,
-      notes: normalized.notes,
-      updatedAt: new Date(),
-    })
+    .values(buildWeightEntryValues(userId, normalized))
     .onConflictDoUpdate({
       target: [weightEntries.userId, weightEntries.entryDate],
-      set: {
-        weightKg: normalized.weightKg.toFixed(2),
-        bodyFatPct:
-          normalized.bodyFatPct != null
-            ? normalized.bodyFatPct.toFixed(1)
-            : null,
-        notes: normalized.notes,
-        updatedAt: new Date(),
-      },
+      set: buildWeightEntryUpdateValues(normalized),
     })
     .returning();
 
   return mapWeightRow(created);
+}
+
+export async function createWeightEntryNoOverwrite(
+  userId: string,
+  input: WeightEntryInput,
+  db?: DatabaseClient,
+): Promise<WeightEntryRecord | null> {
+  const database = await resolveDb(db);
+  const normalized = validateWeightEntryInput(input);
+
+  const [created] = await database
+    .insert(weightEntries)
+    .values(buildWeightEntryValues(userId, normalized))
+    .onConflictDoNothing({
+      target: [weightEntries.userId, weightEntries.entryDate],
+    })
+    .returning();
+
+  return created ? mapWeightRow(created) : null;
 }
 
 export async function updateWeightEntry(
@@ -2368,16 +2513,7 @@ export async function updateWeightEntry(
 
   const [updated] = await database
     .update(weightEntries)
-    .set({
-      entryDate: normalized.date,
-      weightKg: normalized.weightKg.toFixed(2),
-      bodyFatPct:
-        normalized.bodyFatPct != null
-          ? normalized.bodyFatPct.toFixed(1)
-          : null,
-      notes: normalized.notes,
-      updatedAt: new Date(),
-    })
+    .set(buildWeightEntryUpdateValues(normalized))
     .where(
       and(eq(weightEntries.id, entryId), eq(weightEntries.userId, userId)),
     )
@@ -2602,6 +2738,46 @@ function buildRecipeRecord(
   };
 }
 
+function buildRecipeIngredientValues(
+  recipeId: string,
+  ingredient: RecipeInput["ingredients"][number],
+  index: number,
+) {
+  return {
+    id: crypto.randomUUID(),
+    recipeId,
+    productId: ingredient.productId ?? null,
+    sortOrder: index,
+    label: ingredient.label,
+    quantity: ingredient.quantity?.toFixed(2) ?? "1.00",
+    unit: ingredient.unit ?? "serving",
+    servingMultiplier: ingredient.servingMultiplier?.toFixed(2) ?? "1.00",
+    proteinG: ingredient.proteinG.toFixed(1),
+    carbsG: ingredient.carbsG.toFixed(1),
+    fatG: ingredient.fatG.toFixed(1),
+    caloriesKcal: Math.round(ingredient.caloriesKcal),
+  };
+}
+
+async function insertRecipeIngredientRows(
+  tx: any,
+  recipeId: string,
+  ingredients: RecipeInput["ingredients"],
+) {
+  const ingredientRows = [];
+  for (let i = 0; i < ingredients.length; i++) {
+    const ingredient = ingredients[i]!;
+    const [row] = await tx
+      .insert(recipeIngredients)
+      .values(buildRecipeIngredientValues(recipeId, ingredient, i))
+      .returning();
+
+    ingredientRows.push(row!);
+  }
+
+  return ingredientRows;
+}
+
 export async function getRecipes(
   userId: string,
   db?: DatabaseClient,
@@ -2652,6 +2828,75 @@ export async function getRecipes(
   return recipeRows.map((recipe) =>
     buildRecipeRecord(recipe, ingredientsByRecipe.get(recipe.id) ?? []),
   );
+}
+
+const API_TOKEN_PREFIX = "mtk_v1_";
+const API_TOKEN_PREFIX_LENGTH = 19;
+const API_TOKEN_DEFAULT_EXPIRY_DAYS = 90;
+const API_TOKEN_LAST_USED_THROTTLE_MS = 5 * 60 * 1000;
+
+type ApiTokenSelectRow = {
+  id: string;
+  userId: string;
+  tokenPrefix: string;
+  name: string;
+  scopes: unknown;
+  createdAt: Date | string;
+  lastUsedAt: Date | string | null;
+  expiresAt: Date | string | null;
+  revokedAt: Date | string | null;
+};
+
+function normalizeStoredApiScopes(value: unknown): ApiScope[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const scopes = value.filter((scope): scope is ApiScope => (
+    typeof scope === "string" && isApiScope(scope)
+  ));
+  return Array.from(new Set(scopes));
+}
+
+function normalizeApiTokenScopes(scopes: readonly string[]): ApiScope[] {
+  const normalized = Array.from(new Set(scopes));
+  if (normalized.length === 0) {
+    throw new Error("At least one API scope is required.");
+  }
+
+  for (const scope of normalized) {
+    if (!isApiScope(scope)) {
+      throw new Error(`API scope is invalid: ${scope}`);
+    }
+  }
+
+  return normalized as ApiScope[];
+}
+
+function mapApiTokenRow(row: ApiTokenSelectRow): ApiTokenRecord {
+  return {
+    id: row.id,
+    userId: row.userId,
+    tokenPrefix: row.tokenPrefix,
+    name: row.name,
+    scopes: normalizeStoredApiScopes(row.scopes),
+    createdAt: toTimestampString(row.createdAt),
+    lastUsedAt: toTimestampString(row.lastUsedAt) || null,
+    expiresAt: toTimestampString(row.expiresAt) || null,
+    revokedAt: toTimestampString(row.revokedAt) || null,
+  };
+}
+
+function hashApiToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function generateApiTokenSecret() {
+  return `${API_TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
+}
+
+function defaultApiTokenExpiry() {
+  return new Date(Date.now() + API_TOKEN_DEFAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 }
 
 export async function getRecipeCount(
@@ -2745,29 +2990,11 @@ export async function createRecipe(
       throw new Error("Unable to create recipe.");
     }
 
-    const ingredientRows = [];
-    for (let i = 0; i < validated.ingredients.length; i++) {
-      const ing = validated.ingredients[i]!;
-      const [row] = await tx
-        .insert(recipeIngredients)
-        .values({
-          id: crypto.randomUUID(),
-          recipeId,
-          productId: ing.productId ?? null,
-          sortOrder: i,
-          label: ing.label,
-          quantity: ing.quantity?.toFixed(2) ?? "1.00",
-          unit: ing.unit ?? "serving",
-          servingMultiplier: ing.servingMultiplier?.toFixed(2) ?? "1.00",
-          proteinG: ing.proteinG.toFixed(1),
-          carbsG: ing.carbsG.toFixed(1),
-          fatG: ing.fatG.toFixed(1),
-          caloriesKcal: Math.round(ing.caloriesKcal),
-        })
-        .returning();
-
-      ingredientRows.push(row!);
-    }
+    const ingredientRows = await insertRecipeIngredientRows(
+      tx,
+      recipeId,
+      validated.ingredients,
+    );
 
     return buildRecipeRecord(created, ingredientRows);
   });
@@ -2827,29 +3054,11 @@ export async function updateRecipe(
       .delete(recipeIngredients)
       .where(eq(recipeIngredients.recipeId, recipeId));
 
-    const ingredientRows = [];
-    for (let i = 0; i < validated.ingredients.length; i++) {
-      const ing = validated.ingredients[i]!;
-      const [row] = await tx
-        .insert(recipeIngredients)
-        .values({
-          id: crypto.randomUUID(),
-          recipeId,
-          productId: ing.productId ?? null,
-          sortOrder: i,
-          label: ing.label,
-          quantity: ing.quantity?.toFixed(2) ?? "1.00",
-          unit: ing.unit ?? "serving",
-          servingMultiplier: ing.servingMultiplier?.toFixed(2) ?? "1.00",
-          proteinG: ing.proteinG.toFixed(1),
-          carbsG: ing.carbsG.toFixed(1),
-          fatG: ing.fatG.toFixed(1),
-          caloriesKcal: Math.round(ing.caloriesKcal),
-        })
-        .returning();
-
-      ingredientRows.push(row!);
-    }
+    const ingredientRows = await insertRecipeIngredientRows(
+      tx,
+      recipeId,
+      validated.ingredients,
+    );
 
     return buildRecipeRecord(updatedRecipe, ingredientRows);
   });
@@ -2890,15 +3099,7 @@ export async function getLeaderboardStats(
 ): Promise<LeaderboardStats> {
   const database = await resolveDb(db);
 
-  const rows = await database
-    .select({
-      entryDate: mealEntries.entryDate,
-      proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-      carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-      caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-      entryCount: sql<string>`count(${mealEntries.id})`,
-    })
-    .from(mealEntries)
+  const rows = await selectDailyMacroTotalsWithEntryCount(database)
     .where(eatenEntryPredicate(userId))
     .groupBy(mealEntries.entryDate)
     .orderBy(asc(mealEntries.entryDate));
@@ -3032,22 +3233,13 @@ async function insertBarcodeFoodProduct(
       id: crypto.randomUUID(),
       ownerUserId: null,
       scope: "global",
-      source: "barcode",
-      barcode: normalized.barcode,
-      name: normalized.name,
-      brand: normalized.brand ?? "",
-      defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
-      defaultServingUnit: normalized.defaultServingUnit,
-      proteinPer100: normalized.proteinPer100.toFixed(2),
-      carbsPer100: normalized.carbsPer100.toFixed(2),
-      fatPer100: normalized.fatPer100.toFixed(2),
-      caloriesPer100: normalized.caloriesPer100,
-      servingWeightG: normalized.servingWeightG?.toFixed(2) ?? "100.00",
-      servingVolumeMl: null,
+      ...buildFoodProductInputValues(normalized, {
+        servingWeightFallback: "100.00",
+        forceNullServingVolume: true,
+        sourceProviderFallback: "community",
+        updatedAt: now,
+      }),
       submittedByUserId,
-      sourceProvider: normalized.sourceProvider ?? "community",
-      sourceMetadata: normalized.sourceMetadata ?? {},
-      updatedAt: now,
     })
     .returning();
 
@@ -3341,6 +3533,49 @@ async function insertAdminAuditEvent(
     targetId: input.targetId,
     detailsJson: input.details,
   });
+}
+
+async function applyAdminBarcodeLifecycleChange(
+  tx: any,
+  input: {
+    actor: Pick<AppUser, "id" | "role">;
+    existing: FoodProduct;
+    barcodeProductId: string;
+    updateValues: Record<string, unknown>;
+    revisionAction: FoodProductRevisionAction;
+    auditAction: string;
+  },
+) {
+  const [updated] = await tx
+    .update(foodProducts)
+    .set(input.updateValues)
+    .where(eq(foodProducts.id, input.barcodeProductId))
+    .returning();
+
+  if (!updated) {
+    throw new Error("Barcode product not found.");
+  }
+
+  const product = mapFoodProductRow(updated);
+  await insertFoodProductRevision(tx, {
+    product,
+    actorUserId: input.actor.id,
+    action: input.revisionAction,
+  });
+
+  await insertAdminAuditEvent(tx, {
+    actorUserId: input.actor.id,
+    actorRole: input.actor.role,
+    action: input.auditAction,
+    targetType: "food_product",
+    targetId: input.barcodeProductId,
+    details: {
+      barcode: input.existing.barcode,
+      name: input.existing.name,
+    },
+  });
+
+  return product;
 }
 
 async function getOwnerCount(db: DatabaseClient | any) {
@@ -3900,22 +4135,13 @@ export async function updateAdminBarcodeProduct(
 
     const [updated] = await tx
       .update(foodProducts)
-      .set({
-        barcode: normalized.barcode,
-        name: normalized.name,
-        brand: normalized.brand ?? "",
-        defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
-        defaultServingUnit: normalized.defaultServingUnit,
-        proteinPer100: normalized.proteinPer100.toFixed(2),
-        carbsPer100: normalized.carbsPer100.toFixed(2),
-        fatPer100: normalized.fatPer100.toFixed(2),
-        caloriesPer100: normalized.caloriesPer100,
-        servingWeightG: normalized.servingWeightG?.toFixed(2) ?? "100.00",
-        servingVolumeMl: null,
-        sourceProvider: normalized.sourceProvider ?? "community",
-        sourceMetadata: normalized.sourceMetadata ?? {},
-        updatedAt: new Date(),
-      })
+      .set(
+        buildFoodProductInputValues(normalized, {
+          servingWeightFallback: "100.00",
+          forceNullServingVolume: true,
+          sourceProviderFallback: "community",
+        }),
+      )
       .where(eq(foodProducts.id, barcodeProductId))
       .returning();
 
@@ -3971,40 +4197,18 @@ export async function softDeleteAdminBarcodeProduct(
     }
 
     const deletedAt = new Date();
-    const [updated] = await tx
-      .update(foodProducts)
-      .set({
+    return applyAdminBarcodeLifecycleChange(tx, {
+      actor,
+      existing,
+      barcodeProductId,
+      updateValues: {
         deletedAt,
         deletedByUserId: actor.id,
         updatedAt: deletedAt,
-      })
-      .where(eq(foodProducts.id, barcodeProductId))
-      .returning();
-
-    if (!updated) {
-      throw new Error("Barcode product not found.");
-    }
-
-    const product = mapFoodProductRow(updated);
-    await insertFoodProductRevision(tx, {
-      product,
-      actorUserId: actor.id,
-      action: "deleted",
-    });
-
-    await insertAdminAuditEvent(tx, {
-      actorUserId: actor.id,
-      actorRole: actor.role,
-      action: "barcode.deleted",
-      targetType: "food_product",
-      targetId: barcodeProductId,
-      details: {
-        barcode: existing.barcode,
-        name: existing.name,
       },
+      revisionAction: "deleted",
+      auditAction: "barcode.deleted",
     });
-
-    return product;
   });
 }
 
@@ -4034,40 +4238,18 @@ export async function restoreAdminBarcodeProduct(
       }
     }
 
-    const [updated] = await tx
-      .update(foodProducts)
-      .set({
+    return applyAdminBarcodeLifecycleChange(tx, {
+      actor,
+      existing,
+      barcodeProductId,
+      updateValues: {
         deletedAt: null,
         deletedByUserId: null,
         updatedAt: new Date(),
-      })
-      .where(eq(foodProducts.id, barcodeProductId))
-      .returning();
-
-    if (!updated) {
-      throw new Error("Barcode product not found.");
-    }
-
-    const product = mapFoodProductRow(updated);
-    await insertFoodProductRevision(tx, {
-      product,
-      actorUserId: actor.id,
-      action: "restored",
-    });
-
-    await insertAdminAuditEvent(tx, {
-      actorUserId: actor.id,
-      actorRole: actor.role,
-      action: "barcode.restored",
-      targetType: "food_product",
-      targetId: barcodeProductId,
-      details: {
-        barcode: existing.barcode,
-        name: existing.name,
       },
+      revisionAction: "restored",
+      auditAction: "barcode.restored",
     });
-
-    return product;
   });
 }
 

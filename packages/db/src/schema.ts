@@ -14,6 +14,48 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
+function createdAtTimestamp() {
+  return timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull();
+}
+
+function updatedAtTimestamp() {
+  return timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull();
+}
+
+function createdUpdatedTimestamps() {
+  return {
+    createdAt: createdAtTimestamp(),
+    updatedAt: updatedAtTimestamp(),
+  };
+}
+
+function softDeleteTimestamps() {
+  return {
+    ...createdUpdatedTimestamps(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  };
+}
+
+function mealMacroColumns() {
+  return {
+    quantity: numeric("quantity", { precision: 8, scale: 2 })
+      .notNull()
+      .default("1"),
+    unit: text("unit").notNull().default("serving"),
+    servingMultiplier: numeric("serving_multiplier", { precision: 8, scale: 2 })
+      .notNull()
+      .default("1"),
+    proteinG: numeric("protein_g", { precision: 6, scale: 1 }).notNull(),
+    carbsG: numeric("carbs_g", { precision: 6, scale: 1 }).notNull(),
+    fatG: numeric("fat_g", { precision: 6, scale: 1 }).notNull(),
+    caloriesKcal: integer("calories_kcal").notNull(),
+  };
+}
+
 export const users = pgTable(
   "users",
   {
@@ -47,6 +89,29 @@ export const users = pgTable(
   ],
 );
 
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: uuid("id").primaryKey().notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    name: text("name").notNull(),
+    scopes: jsonb("scopes").notNull().default([]),
+    createdAt: createdAtTimestamp(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("api_tokens_token_hash_key").on(table.tokenHash),
+    index("api_tokens_user_created_idx").on(table.userId, table.createdAt),
+    index("api_tokens_user_revoked_idx").on(table.userId, table.revokedAt),
+  ],
+);
+
 export const adminAuditEvents = pgTable(
   "admin_audit_events",
   {
@@ -59,9 +124,7 @@ export const adminAuditEvents = pgTable(
     targetType: text("target_type").notNull(),
     targetId: text("target_id").notNull(),
     detailsJson: jsonb("details_json").notNull().default({}),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
+    createdAt: createdAtTimestamp(),
   },
   (table) => [
     index("admin_audit_events_created_at_idx").on(table.createdAt),
@@ -116,9 +179,7 @@ export const foodProducts = pgTable(
       (): AnyPgColumn => foodProducts.id,
       { onDelete: "set null" },
     ),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
+    createdAt: createdAtTimestamp(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -172,13 +233,7 @@ export const mealGroups = pgTable(
     label: text("label").notNull(),
     sortOrder: integer("sort_order").notNull(),
     isDefault: boolean("is_default").notNull().default(false),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...softDeleteTimestamps(),
   },
   (table) => [
     index("meal_groups_user_sort_idx").on(table.userId, table.sortOrder),
@@ -203,24 +258,9 @@ export const mealEntries = pgTable(
     }),
     label: text("label").notNull(),
     sortOrder: integer("sort_order").notNull(),
-    quantity: numeric("quantity", { precision: 8, scale: 2 })
-      .notNull()
-      .default("1"),
-    unit: text("unit").notNull().default("serving"),
-    servingMultiplier: numeric("serving_multiplier", { precision: 8, scale: 2 })
-      .notNull()
-      .default("1"),
-    proteinG: numeric("protein_g", { precision: 6, scale: 1 }).notNull(),
-    carbsG: numeric("carbs_g", { precision: 6, scale: 1 }).notNull(),
-    fatG: numeric("fat_g", { precision: 6, scale: 1 }).notNull(),
-    caloriesKcal: integer("calories_kcal").notNull(),
+    ...mealMacroColumns(),
     clientMutationId: text("client_mutation_id"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
+    ...createdUpdatedTimestamps(),
   },
   (table) => [
     index("meal_entries_user_date_idx").on(table.userId, table.entryDate),
@@ -245,6 +285,8 @@ export const mealEntries = pgTable(
 
 export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
+export type ApiTokenRow = typeof apiTokens.$inferSelect;
+export type NewApiTokenRow = typeof apiTokens.$inferInsert;
 export type MealEntryRow = typeof mealEntries.$inferSelect;
 export type NewMealEntryRow = typeof mealEntries.$inferInsert;
 export const weightEntries = pgTable(
@@ -258,12 +300,7 @@ export const weightEntries = pgTable(
     weightKg: numeric("weight_kg", { precision: 5, scale: 2 }).notNull(),
     bodyFatPct: numeric("body_fat_pct", { precision: 4, scale: 1 }),
     notes: text("notes"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
+    ...createdUpdatedTimestamps(),
   },
   (table) => [
     uniqueIndex("weight_entries_user_date_key").on(
@@ -287,12 +324,7 @@ export const recipes = pgTable(
       precision: 8,
       scale: 2,
     }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
+    ...createdUpdatedTimestamps(),
   },
   (table) => [
     index("recipes_user_idx").on(table.userId),
@@ -311,20 +343,8 @@ export const recipeIngredients = pgTable(
     }),
     sortOrder: integer("sort_order").notNull(),
     label: text("label").notNull(),
-    quantity: numeric("quantity", { precision: 8, scale: 2 })
-      .notNull()
-      .default("1"),
-    unit: text("unit").notNull().default("serving"),
-    servingMultiplier: numeric("serving_multiplier", { precision: 8, scale: 2 })
-      .notNull()
-      .default("1"),
-    proteinG: numeric("protein_g", { precision: 6, scale: 1 }).notNull(),
-    carbsG: numeric("carbs_g", { precision: 6, scale: 1 }).notNull(),
-    fatG: numeric("fat_g", { precision: 6, scale: 1 }).notNull(),
-    caloriesKcal: integer("calories_kcal").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
+    ...mealMacroColumns(),
+    createdAt: createdAtTimestamp(),
   },
   (table) => [
     index("recipe_ingredients_recipe_idx").on(table.recipeId),
@@ -342,13 +362,7 @@ export const mealTemplates = pgTable(
     type: text("type").notNull().default("meal"),
     label: text("label").notNull(),
     notes: text("notes"),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...softDeleteTimestamps(),
   },
   (table) => [
     index("meal_templates_user_type_idx").on(table.userId, table.type),
@@ -369,20 +383,8 @@ export const mealTemplateItems = pgTable(
     mealGroupLabel: text("meal_group_label"),
     sortOrder: integer("sort_order").notNull(),
     label: text("label").notNull(),
-    quantity: numeric("quantity", { precision: 8, scale: 2 })
-      .notNull()
-      .default("1"),
-    unit: text("unit").notNull().default("serving"),
-    servingMultiplier: numeric("serving_multiplier", { precision: 8, scale: 2 })
-      .notNull()
-      .default("1"),
-    proteinG: numeric("protein_g", { precision: 6, scale: 1 }).notNull(),
-    carbsG: numeric("carbs_g", { precision: 6, scale: 1 }).notNull(),
-    fatG: numeric("fat_g", { precision: 6, scale: 1 }).notNull(),
-    caloriesKcal: integer("calories_kcal").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
+    ...mealMacroColumns(),
+    createdAt: createdAtTimestamp(),
   },
   (table) => [
     index("meal_template_items_template_idx").on(table.templateId),

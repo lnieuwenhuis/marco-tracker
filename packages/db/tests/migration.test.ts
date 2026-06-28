@@ -20,6 +20,7 @@ const migrationFiles = [
   "0009_sync_barcode_food_products.sql",
   "0010_templates_food_product_cleanup.sql",
   "0011_active_global_barcode_unique.sql",
+  "0012_api_tokens.sql",
 ] as const;
 
 async function applyMigration(runtime: DatabaseRuntime, fileName: string) {
@@ -400,5 +401,29 @@ describe("database migrations", () => {
         dedupe_marker: null,
       },
     ]);
+  });
+
+  it("creates API token storage with a unique token hash index", async () => {
+    runtime = await createDatabaseRuntime("memory:");
+
+    for (const fileName of migrationFiles) {
+      await applyMigration(runtime, fileName);
+    }
+
+    const tableResult = await runtime.db.execute<{ table_name: string }>(sql.raw(`
+      SELECT "table_name"
+      FROM information_schema.tables
+      WHERE "table_schema" = 'public' AND "table_name" = 'api_tokens'
+    `));
+    expect(tableResult.rows).toEqual([{ table_name: "api_tokens" }]);
+
+    const indexResult = await runtime.db.execute<{ indexname: string }>(sql.raw(`
+      SELECT "indexname"
+      FROM pg_indexes
+      WHERE "schemaname" = 'public'
+        AND "tablename" = 'api_tokens'
+        AND "indexname" = 'api_tokens_token_hash_key'
+    `));
+    expect(indexResult.rows).toEqual([{ indexname: "api_tokens_token_hash_key" }]);
   });
 });

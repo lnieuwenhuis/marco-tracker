@@ -3,6 +3,9 @@ import Link from "next/link";
 import { listAdminUsers } from "@macro-tracker/db";
 
 import {
+  AdminFilterInput,
+  AdminFilterSelect,
+  AdminFilterSubmitButton,
   AdminPaginationLinks,
   AdminRoleBadge,
   AdminSection,
@@ -41,38 +44,30 @@ export default async function AdminUsersPage({
         description="Inspect accounts, login activity, and role assignments."
       >
         <form className="grid gap-3 md:grid-cols-[1.8fr_0.8fr_0.8fr_auto]">
-          <input
+          <AdminFilterInput
             type="search"
             name="q"
             placeholder="Search email or display name"
             defaultValue={q}
-            className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
           />
-          <select
+          <AdminFilterSelect
             name="role"
             defaultValue={role}
-            className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
           >
             <option value="all">All roles</option>
             <option value="user">Users</option>
             <option value="admin">Admins</option>
             <option value="owner">Owners</option>
-          </select>
-          <select
+          </AdminFilterSelect>
+          <AdminFilterSelect
             name="activity"
             defaultValue={activity}
-            className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
           >
             <option value="all">All activity</option>
             <option value="active7">Active in 7 days</option>
             <option value="inactive7">Inactive in 7 days</option>
-          </select>
-          <button
-            type="submit"
-            className="rounded-2xl bg-[var(--color-accent)] px-4 py-3 text-sm font-semibold text-white transition hover:opacity-90"
-          >
-            Apply
-          </button>
+          </AdminFilterSelect>
+          <AdminFilterSubmitButton />
         </form>
 
         <div className="mt-5 overflow-x-auto">

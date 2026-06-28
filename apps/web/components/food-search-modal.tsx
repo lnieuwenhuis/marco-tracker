@@ -13,7 +13,7 @@ import { formatSelectedDate } from "@/lib/formatting";
 import { buildMealEntryCopyInput } from "@/lib/meal-entry-copy";
 import { getLocalDateString } from "@/lib/startup-date";
 import { invalidateAppDataCache } from "./app-data-cache";
-import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
+import { CompactModal } from "./compact-modal";
 
 type FoodSearchModalProps = {
   onClose: () => void;
@@ -31,7 +31,6 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [copiedIds, setCopiedIds] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
-  useBodyScrollLock();
 
   const todayStr = useMemo(() => getLocalDateString(), []);
   const trimmedQuery = normalizeFoodSearchQuery(query);
@@ -50,16 +49,6 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
 
   useEffect(() => {
     if (!trimmedQuery) {
@@ -173,37 +162,11 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
   }
 
   return (
-    <OverlayPortal>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* Modal panel */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Search food history"
-        className="fixed inset-x-4 top-[8%] z-50 mx-auto max-h-[82vh] max-w-sm overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5 shadow-2xl"
-      >
-        {/* Header */}
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-bold text-[var(--color-ink)]">Search History</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
-            aria-label="Close"
-          >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="4" y1="4" x2="14" y2="14" />
-              <line x1="14" y1="4" x2="4" y2="14" />
-            </svg>
-          </button>
-        </div>
-
+    <CompactModal
+      ariaLabel="Search food history"
+      title="Search History"
+      onClose={onClose}
+    >
         {/* Search input */}
         <div className="relative mb-4">
           <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]">
@@ -330,7 +293,6 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
             })}
           </div>
         )}
-      </div>
-    </OverlayPortal>
+    </CompactModal>
   );
 }

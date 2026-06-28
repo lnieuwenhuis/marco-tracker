@@ -1,5 +1,7 @@
 import {
+  authenticateApiToken,
   computeStreaks,
+  createApiToken,
   createMealGroup,
   createRecipe,
   createMealEntry,
@@ -20,8 +22,10 @@ import {
   getUserGoals,
   getWeightPageData,
   lookupBarcodeFoodProduct,
+  listApiTokens,
   markMealEntryStatus,
   applyTemplateToDate,
+  revokeApiToken,
   resolveProductNutritionForQuantity,
   saveBarcodeFoodProduct,
   saveUserGoals,
@@ -33,6 +37,7 @@ import {
   type DatabaseRuntime,
 } from "../src";
 import {
+  apiTokens,
   foodProducts,
   mealEntries,
   mealTemplateItems,
@@ -97,22 +102,33 @@ describe("database queries", () => {
     return user.id;
   }
 
-  function createFailingRecipeDb(failOnIngredientInsertNumber: number) {
-    let ingredientInsertCount = 0;
+  async function createOtherUserProduct(
+    input: Parameters<typeof createPersonalFoodProduct>[1],
+  ) {
+    return createPersonalFoodProduct(await createOtherUser(), input, runtime.db);
+  }
+
+  function createFailingDbProxy(input: {
+    method: "insert" | "update";
+    table: unknown;
+    failOnCall?: number;
+    message: string;
+  }) {
+    let callCount = 0;
 
     function wrapClient(client: any) {
       return new Proxy(client, {
         get(target, prop, receiver) {
-          if (prop === "insert") {
+          if (prop === input.method) {
             return (table: unknown) => {
-              if (table === recipeIngredients) {
-                ingredientInsertCount += 1;
-                if (ingredientInsertCount === failOnIngredientInsertNumber) {
-                  throw new Error("Forced ingredient insert failure.");
+              if (table === input.table) {
+                callCount += 1;
+                if (callCount === (input.failOnCall ?? 1)) {
+                  throw new Error(input.message);
                 }
               }
 
-              return target.insert(table);
+              return target[input.method](table);
             };
           }
 
@@ -128,96 +144,204 @@ describe("database queries", () => {
     }
 
     return wrapClient(runtime.db as any);
+  }
+
+  function createFailingRecipeDb(failOnIngredientInsertNumber: number) {
+    return createFailingDbProxy({
+      method: "insert",
+      table: recipeIngredients,
+      failOnCall: failOnIngredientInsertNumber,
+      message: "Forced ingredient insert failure.",
+    });
   }
 
   function createFailingBarcodeFoodProductDb() {
-    function wrapClient(client: any) {
-      return new Proxy(client, {
-        get(target, prop, receiver) {
-          if (prop === "insert") {
-            return (table: unknown) => {
-              if (table === foodProducts) {
-                throw new Error("Forced barcode food product insert failure.");
-              }
-
-              return target.insert(table);
-            };
-          }
-
-          if (prop === "transaction") {
-            return async (callback: (tx: unknown) => unknown) =>
-              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
-          }
-
-          const value = Reflect.get(target, prop, receiver);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-    }
-
-    return wrapClient(runtime.db as any);
+    return createFailingDbProxy({
+      method: "insert",
+      table: foodProducts,
+      message: "Forced barcode food product insert failure.",
+    });
   }
 
   function createFailingMealEntryInsertDb(failOnMealEntryInsertNumber: number) {
-    let mealEntryInsertCount = 0;
-
-    function wrapClient(client: any) {
-      return new Proxy(client, {
-        get(target, prop, receiver) {
-          if (prop === "insert") {
-            return (table: unknown) => {
-              if (table === mealEntries) {
-                mealEntryInsertCount += 1;
-                if (mealEntryInsertCount === failOnMealEntryInsertNumber) {
-                  throw new Error("Forced meal entry insert failure.");
-                }
-              }
-
-              return target.insert(table);
-            };
-          }
-
-          if (prop === "transaction") {
-            return async (callback: (tx: unknown) => unknown) =>
-              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
-          }
-
-          const value = Reflect.get(target, prop, receiver);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-    }
-
-    return wrapClient(runtime.db as any);
+    return createFailingDbProxy({
+      method: "insert",
+      table: mealEntries,
+      failOnCall: failOnMealEntryInsertNumber,
+      message: "Forced meal entry insert failure.",
+    });
   }
 
   function createFailingMealGroupDeleteDb() {
-    function wrapClient(client: any) {
-      return new Proxy(client, {
-        get(target, prop, receiver) {
-          if (prop === "update") {
-            return (table: unknown) => {
-              if (table === mealEntries) {
-                throw new Error("Forced meal group unassign failure.");
-              }
+    return createFailingDbProxy({
+      method: "update",
+      table: mealEntries,
+      message: "Forced meal group unassign failure.",
+    });
+  }
 
-              return target.update(table);
-            };
-          }
+  it("creates API tokens as one-time-visible secrets with stored hashes", async () => {
+    const created = await createApiToken(
+      userId,
+      {
+        name: "Mobile app",
+        scopes: ["read:daily", "write:daily"],
+      },
+      runtime.db,
+    );
 
-          if (prop === "transaction") {
-            return async (callback: (tx: unknown) => unknown) =>
-              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
-          }
+    expect(created.token).toMatch(/^mtk_v1_/);
+    expect(created.record).toMatchObject({
+      userId,
+      tokenPrefix: created.token.slice(0, 19),
+      name: "Mobile app",
+      scopes: ["read:daily", "write:daily"],
+      lastUsedAt: null,
+      revokedAt: null,
+    });
+    expect(created.record.expiresAt).toBeTruthy();
 
-          const value = Reflect.get(target, prop, receiver);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
+    const [stored] = await runtime.db.select().from(apiTokens);
+    expect(stored?.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(stored?.tokenHash).not.toBe(created.token);
+
+    const listed = await listApiTokens(userId, runtime.db);
+    expect(listed).toHaveLength(1);
+    expect(JSON.stringify(listed)).not.toContain(stored!.tokenHash);
+    expect(JSON.stringify(listed)).not.toContain(created.token);
+  });
+
+  it("supports never-expiring API tokens explicitly", async () => {
+    const created = await createApiToken(
+      userId,
+      {
+        name: "No expiry",
+        scopes: ["read:stats"],
+        expiresAt: null,
+      },
+      runtime.db,
+    );
+
+    expect(created.record.expiresAt).toBeNull();
+  });
+
+  it("authenticates valid API tokens and updates last-used time", async () => {
+    const created = await createApiToken(
+      userId,
+      {
+        name: "Reader",
+        scopes: ["read:daily"],
+      },
+      runtime.db,
+    );
+
+    const result = await authenticateApiToken(created.token, runtime.db);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.token.userId).toBe(userId);
+      expect(result.token.scopes).toEqual(["read:daily"]);
+      expect(result.token.lastUsedAt).toBeTruthy();
     }
 
-    return wrapClient(runtime.db as any);
-  }
+    const listed = await listApiTokens(userId, runtime.db);
+    expect(listed[0]?.lastUsedAt).toBeTruthy();
+  });
+
+  it("throttles API token last-used updates within a short window", async () => {
+    const created = await createApiToken(
+      userId,
+      {
+        name: "Reader",
+        scopes: ["read:daily"],
+      },
+      runtime.db,
+    );
+
+    const first = await authenticateApiToken(created.token, runtime.db);
+    expect(first.ok).toBe(true);
+    const firstLastUsedAt = first.ok ? first.token.lastUsedAt : null;
+    expect(firstLastUsedAt).toBeTruthy();
+
+    const second = await authenticateApiToken(created.token, runtime.db);
+    expect(second.ok).toBe(true);
+    expect(second.ok ? second.token.lastUsedAt : null).toEqual(firstLastUsedAt);
+    const [storedAfterSecond] = await runtime.db.select().from(apiTokens);
+    expect(new Date(storedAfterSecond!.lastUsedAt!).getTime()).toBe(
+      new Date(firstLastUsedAt!).getTime(),
+    );
+
+    const staleLastUsedAt = new Date(Date.now() - 10 * 60 * 1000);
+    await runtime.db
+      .update(apiTokens)
+      .set({ lastUsedAt: staleLastUsedAt })
+      .where(eq(apiTokens.id, created.record.id));
+
+    const stale = await authenticateApiToken(created.token, runtime.db);
+    expect(stale.ok).toBe(true);
+    expect(stale.ok ? new Date(stale.token.lastUsedAt!).getTime() : 0).toBeGreaterThan(
+      staleLastUsedAt.getTime(),
+    );
+  });
+
+  it("rejects malformed, unknown, expired, and revoked API tokens", async () => {
+    await expect(authenticateApiToken(null, runtime.db)).resolves.toEqual({
+      ok: false,
+      reason: "missing",
+    });
+    await expect(authenticateApiToken("not-a-token", runtime.db)).resolves.toEqual({
+      ok: false,
+      reason: "malformed",
+    });
+    await expect(
+      authenticateApiToken("mtk_v1_unknown", runtime.db),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "invalid",
+    });
+
+    const expired = await createApiToken(
+      userId,
+      {
+        name: "Expired",
+        scopes: ["read:daily"],
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+      runtime.db,
+    );
+    await expect(authenticateApiToken(expired.token, runtime.db)).resolves.toEqual({
+      ok: false,
+      reason: "expired",
+    });
+    await expect(listApiTokens(userId, runtime.db)).resolves.toContainEqual(
+      expect.objectContaining({
+        id: expired.record.id,
+        lastUsedAt: null,
+      }),
+    );
+
+    const active = await createApiToken(
+      userId,
+      {
+        name: "Revoked",
+        scopes: ["read:daily"],
+      },
+      runtime.db,
+    );
+    await expect(
+      revokeApiToken(userId, active.record.id, runtime.db),
+    ).resolves.toBe(true);
+    await expect(authenticateApiToken(active.token, runtime.db)).resolves.toEqual({
+      ok: false,
+      reason: "revoked",
+    });
+    await expect(listApiTokens(userId, runtime.db)).resolves.toContainEqual(
+      expect.objectContaining({
+        id: active.record.id,
+        lastUsedAt: null,
+      }),
+    );
+  });
 
   it("calculates daily totals and logged-day-only averages", async () => {
     await createMealEntry(
@@ -711,19 +835,14 @@ describe("database queries", () => {
   });
 
   it("rejects inaccessible products and hides their labels from daily summaries", async () => {
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's yogurt",
-        source: "manual",
-        proteinPer100: 10,
-        carbsPer100: 4,
-        fatPer100: 2,
-        caloriesPer100: 74,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's yogurt",
+      source: "manual",
+      proteinPer100: 10,
+      carbsPer100: 4,
+      fatPer100: 2,
+      caloriesPer100: 74,
+    });
 
     await expect(
       createMealEntry(
@@ -826,19 +945,14 @@ describe("database queries", () => {
   });
 
   it("rejects inaccessible template item products on create", async () => {
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's shake",
-        source: "manual",
-        proteinPer100: 24,
-        carbsPer100: 12,
-        fatPer100: 3,
-        caloriesPer100: 171,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's shake",
+      source: "manual",
+      proteinPer100: 24,
+      carbsPer100: 12,
+      fatPer100: 3,
+      caloriesPer100: 171,
+    });
 
     await expect(
       createTemplate(
@@ -923,19 +1037,14 @@ describe("database queries", () => {
       },
       runtime.db,
     );
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's yogurt",
-        source: "manual",
-        proteinPer100: 10,
-        carbsPer100: 4,
-        fatPer100: 2,
-        caloriesPer100: 74,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's yogurt",
+      source: "manual",
+      proteinPer100: 10,
+      carbsPer100: 4,
+      fatPer100: 2,
+      caloriesPer100: 74,
+    });
 
     await expect(
       updateTemplate(
@@ -1090,19 +1199,14 @@ describe("database queries", () => {
   });
 
   it("prevalidates all template item product access before applying a template", async () => {
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's shake",
-        source: "manual",
-        proteinPer100: 24,
-        carbsPer100: 12,
-        fatPer100: 3,
-        caloriesPer100: 171,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's shake",
+      source: "manual",
+      proteinPer100: 24,
+      carbsPer100: 12,
+      fatPer100: 3,
+      caloriesPer100: 171,
+    });
     const templateId = randomUUID();
     await runtime.db.insert(mealTemplates).values({
       id: templateId,
@@ -1201,19 +1305,14 @@ describe("database queries", () => {
   });
 
   it("rejects inaccessible recipe ingredient products on create", async () => {
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's oats",
-        source: "manual",
-        proteinPer100: 12,
-        carbsPer100: 60,
-        fatPer100: 7,
-        caloriesPer100: 351,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's oats",
+      source: "manual",
+      proteinPer100: 12,
+      carbsPer100: 60,
+      fatPer100: 7,
+      caloriesPer100: 351,
+    });
 
     await expect(
       createRecipe(
@@ -1296,19 +1395,14 @@ describe("database queries", () => {
       },
       runtime.db,
     );
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's yogurt",
-        source: "manual",
-        proteinPer100: 10,
-        carbsPer100: 4,
-        fatPer100: 2,
-        caloriesPer100: 74,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's yogurt",
+      source: "manual",
+      proteinPer100: 10,
+      carbsPer100: 4,
+      fatPer100: 2,
+      caloriesPer100: 74,
+    });
 
     await expect(
       updateRecipe(

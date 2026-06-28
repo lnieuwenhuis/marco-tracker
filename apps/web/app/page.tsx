@@ -1,8 +1,8 @@
-import { canAccessAdmin, ensureDateString, getDailySummary, getRecentQuickAddCandidates, getRecipes, getTemplates, getUserById, getUserGoals } from "@macro-tracker/db";
+import { getDailySummary, getRecentQuickAddCandidates, getRecipes, getTemplates, getUserGoals } from "@macro-tracker/db";
 
 import { DashboardShell } from "@/components/dashboard-shell";
-import { requireOnboardedSessionUser } from "@/lib/auth";
 import { normalizeComposeAction } from "@/lib/compose";
+import { loadOnboardedPageContext } from "@/lib/page-context";
 import { normalizePresetTemplateKind } from "@/lib/preset-modal-state";
 
 type HomePageProps = {
@@ -14,16 +14,14 @@ type HomePageProps = {
 };
 
 export default async function HomePage({ searchParams }: HomePageProps) {
-  const sessionUser = await requireOnboardedSessionUser();
-  const params = await searchParams;
-  const selectedDate = ensureDateString(params.date);
+  const { params, sessionUser, selectedDate, userEmail, canAccessAdmin } =
+    await loadOnboardedPageContext(searchParams);
   const initialComposeAction = normalizeComposeAction(params.compose);
   const initialPresetTemplateKind = normalizePresetTemplateKind(params.templateKind);
 
-  const [dailySummary, goals, user, templates, recipes, recentCandidates] = await Promise.all([
+  const [dailySummary, goals, templates, recipes, recentCandidates] = await Promise.all([
     getDailySummary(sessionUser.userId, selectedDate),
     getUserGoals(sessionUser.userId),
-    getUserById(sessionUser.userId),
     getTemplates(sessionUser.userId),
     getRecipes(sessionUser.userId),
     getRecentQuickAddCandidates(sessionUser.userId),
@@ -33,8 +31,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   return (
     <DashboardShell
       key={dashboardKey}
-      userEmail={user?.email ?? sessionUser.email}
-      canAccessAdmin={user ? canAccessAdmin(user.role) : false}
+      userEmail={userEmail}
+      canAccessAdmin={canAccessAdmin}
       selectedDate={selectedDate}
       dailySummary={dailySummary}
       goals={goals}

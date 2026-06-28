@@ -24,18 +24,33 @@ const sessionUser = {
   email: "coach@example.com",
 };
 
-function proxyRequest(forwardedHost: string) {
-  const url = "http://127.0.0.1:3000/dashboard";
+function proxyRequest(
+  forwardedHost: string,
+  options: {
+    path?: string;
+    method?: string;
+    sessionToken?: string;
+    headers?: HeadersInit;
+  } = {},
+) {
+  const url = `http://127.0.0.1:3000${options.path ?? "/dashboard"}`;
+  const headers = new Headers({
+    "x-forwarded-proto": "https",
+    "x-forwarded-host": forwardedHost,
+    ...options.headers,
+  });
 
   return {
     nextUrl: new URL(url),
     url,
-    headers: new Headers({
-      "x-forwarded-proto": "https",
-      "x-forwarded-host": forwardedHost,
-    }),
+    method: options.method ?? "GET",
+    headers,
     cookies: {
-      get: vi.fn(() => ({ value: "session-token" })),
+      get: vi.fn(() =>
+        options.sessionToken === undefined
+          ? undefined
+          : { value: options.sessionToken },
+      ),
     },
   } as unknown as NextRequest;
 }
@@ -55,7 +70,7 @@ describe("proxy session refresh", () => {
   });
 
   it("refreshes secure cookies for trusted HTTPS request origins", async () => {
-    await proxy(proxyRequest("trusted.example"));
+    await proxy(proxyRequest("trusted.example", { sessionToken: "session-token" }));
 
     expect(mocked.verifySessionToken).toHaveBeenCalledWith("session-token");
     expect(mocked.applySessionCookie).toHaveBeenCalledWith(
@@ -68,7 +83,7 @@ describe("proxy session refresh", () => {
   });
 
   it("does not let untrusted forwarded HTTPS headers force secure refreshes", async () => {
-    await proxy(proxyRequest("evil.example"));
+    await proxy(proxyRequest("evil.example", { sessionToken: "session-token" }));
 
     expect(mocked.verifySessionToken).toHaveBeenCalledWith("session-token");
     expect(mocked.applySessionCookie).toHaveBeenCalledWith(
@@ -78,5 +93,57 @@ describe("proxy session refresh", () => {
         secure: false,
       },
     );
+  });
+
+  it("lets unauthenticated API v1 preflight requests reach the route handler", async () => {
+    mocked.verifySessionToken.mockResolvedValue(null);
+
+    const response = await proxy(
+      proxyRequest("trusted.example", {
+        path: "/api/v1/goals",
+        method: "OPTIONS",
+        headers: {
+          origin: "https://client.example",
+          "access-control-request-method": "GET",
+        },
+      }),
+    );
+
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("lets unauthenticated API v1 bearer requests reach the route handler", async () => {
+    mocked.verifySessionToken.mockResolvedValue(null);
+
+    const response = await proxy(
+      proxyRequest("trusted.example", {
+        path: "/api/v1/goals",
+        headers: {
+          authorization: "Bearer mtk_v1_token",
+        },
+      }),
+    );
+
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("lets unauthenticated OpenAPI JSON requests reach the route handler", async () => {
+    mocked.verifySessionToken.mockResolvedValue(null);
+
+    const response = await proxy(
+      proxyRequest("trusted.example", { path: "/api/v1/openapi.json" }),
+    );
+
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("lets unauthenticated API docs requests render the public docs page", async () => {
+    mocked.verifySessionToken.mockResolvedValue(null);
+
+    const response = await proxy(
+      proxyRequest("trusted.example", { path: "/docs/api" }),
+    );
+
+    expect(response.headers.get("location")).toBeNull();
   });
 });

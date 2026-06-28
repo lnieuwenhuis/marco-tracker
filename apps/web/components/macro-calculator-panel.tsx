@@ -12,6 +12,8 @@ import {
   type MacroCalculatorSex,
 } from "@/lib/macro-calculator";
 
+import { NumberInputField } from "./number-input-field";
+
 export type MacroTargetDraft = {
   caloriesKcal: number;
   proteinG: number;
@@ -50,45 +52,6 @@ function formatWeeklyChangeLabel(calorieAdjustmentKcal: number) {
   const estimateKg = getWeeklyWeightChangeEstimateKg(calorieAdjustmentKcal);
   const direction = calorieAdjustmentKcal < 0 ? "loss" : "gain";
   return `${estimateKg} kg/week ${direction}`;
-}
-
-function CalculatorField({
-  label,
-  value,
-  unit,
-  step,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-  step: string;
-  disabled?: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="block rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
-      <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
-        {label}
-      </span>
-      <div className="relative mt-2">
-        <input
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step={step}
-          value={value}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-3 pr-12 text-base font-semibold text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)] disabled:opacity-60"
-        />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-[var(--color-muted)]">
-          {unit}
-        </span>
-      </div>
-    </label>
-  );
 }
 
 function ChoiceButton({
@@ -237,28 +200,31 @@ export function MacroCalculatorPanel({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <CalculatorField
+        <NumberInputField
           label="Age"
           unit="yrs"
           step="1"
           value={age}
           disabled={disabled}
+          variant="card"
           onChange={updateCalculator(setAge)}
         />
-        <CalculatorField
+        <NumberInputField
           label="Height"
           unit="cm"
           step="0.1"
           value={heightCm}
           disabled={disabled}
+          variant="card"
           onChange={updateCalculator(setHeightCm)}
         />
-        <CalculatorField
+        <NumberInputField
           label="Weight"
           unit="kg"
           step="0.1"
           value={weightKg}
           disabled={disabled}
+          variant="card"
           onChange={updateCalculator(setWeightKg)}
         />
       </div>

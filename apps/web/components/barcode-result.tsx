@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { saveBarcodeFoodProductAction } from "@/lib/actions";
 import type { OpenFoodFactsProduct } from "@/lib/openfoodfacts";
+import { CloseButton } from "./close-button";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 
 type BarcodeResultProps = {
@@ -16,7 +17,7 @@ type BarcodeResultProps = {
   onClose: () => void;
 };
 
-type BarcodeFoodSelection = {
+export type BarcodeFoodSelection = {
   productId?: string | null;
   label: string;
   quantity: number;
@@ -201,25 +202,7 @@ function NotFoundForm({
               <span className="font-mono">{barcode}</span>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
-            aria-label="Close"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            >
-              <line x1="3" y1="3" x2="13" y2="13" />
-              <line x1="13" y1="3" x2="3" y2="13" />
-            </svg>
-          </button>
+          <CloseButton onClick={onClose} />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3 p-5">
@@ -532,25 +515,10 @@ export function BarcodeResult({
                 <path d="M9.5 2.5l2 2L4 12H2v-2L9.5 2.5z" />
               </svg>
             </button>
-            <button
-              type="button"
+            <CloseButton
               onClick={onClose}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
-              aria-label="Close"
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              >
-                <line x1="3" y1="3" x2="13" y2="13" />
-                <line x1="13" y1="3" x2="3" y2="13" />
-              </svg>
-            </button>
+            />
           </div>
 
           {/* Serving size — hidden while editing since scaling is paused */}

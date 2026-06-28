@@ -13,6 +13,9 @@ function isPublicPath(pathname: string) {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/test") ||
+    pathname === "/api/v1" ||
+    pathname.startsWith("/api/v1/") ||
+    pathname === "/docs/api" ||
     pathname === "/login" ||
     pathname === "/auth/callback" ||
     pathname === "/sw.js" ||

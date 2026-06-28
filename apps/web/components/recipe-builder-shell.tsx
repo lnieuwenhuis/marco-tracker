@@ -1,17 +1,13 @@
 "use client";
 
-import type { MealTemplate, QuantityUnit, RecipeRecord } from "@macro-tracker/db";
+import type { MealTemplate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import {
-  deleteTemplateAction,
-  saveTemplateAction,
   saveRecipeAction,
-  updateTemplateAction,
 } from "@/lib/actions";
 import {
-  getTemplateMutationCacheKeys,
   getRecipeMutationCacheKeys,
 } from "@/lib/app-warmup";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
@@ -19,12 +15,12 @@ import type { OpenFoodFactsProduct } from "@/lib/openfoodfacts";
 
 import { AddFoodButton } from "./add-food-button";
 import { invalidateAppDataCache } from "./app-data-cache";
-import { BarcodeResult } from "./barcode-result";
-import { BarcodeScanner } from "./barcode-scanner";
+import { BarcodeCaptureModals } from "./barcode-capture-modals";
 import { ExperimentalAppShell } from "./experimental-app-shell";
 import { IngredientCard, type IngredientDraft } from "./ingredient-card";
 import { PresetModal } from "./preset-modal";
 import { RecipeTotalsBar } from "./recipe-totals-bar";
+import { useTemplateMutations } from "./use-template-mutations";
 
 type PresetMutationState =
   | { type: "save" }
@@ -87,6 +83,16 @@ export function RecipeBuilderShell({
   const [localTemplates, setLocalTemplates] = useState<MealTemplate[]>(initialTemplates);
   const [presetMutation, setPresetMutation] = useState<PresetMutationState | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
+  const {
+    handleSavePreset,
+    handleDeletePreset,
+    handleUpdatePreset,
+  } = useTemplateMutations({
+    localTemplates,
+    setLocalTemplates,
+    setPresetError,
+    setPresetMutation,
+  });
 
   // Barcode state
   const [showScanner, setShowScanner] = useState(false);
@@ -205,84 +211,6 @@ export function RecipeBuilderShell({
       router.push(href);
       router.refresh();
     });
-  }
-
-  // Preset handlers
-  async function handleSavePreset(input: {
-    productId?: string | null;
-    label: string;
-    quantity?: number;
-    unit?: QuantityUnit;
-    servingMultiplier?: number;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }) {
-    setPresetError(null);
-    setPresetMutation({ type: "save" });
-    try {
-      const result = await saveTemplateAction(input);
-      const savedTemplate = result.template;
-      if (!result.ok || !savedTemplate) {
-        setPresetError(result.error ?? "Unable to save template.");
-        return false;
-      }
-      setLocalTemplates((prev) =>
-        [...prev, savedTemplate].sort((a, b) => a.label.localeCompare(b.label)),
-      );
-      invalidateAppDataCache(getTemplateMutationCacheKeys());
-      return true;
-    } finally {
-      setPresetMutation(null);
-    }
-  }
-
-  async function handleDeletePreset(presetId: string) {
-    const previousTemplates = localTemplates;
-    setPresetError(null);
-    setPresetMutation({ type: "delete", presetId });
-    setLocalTemplates((prev) => prev.filter((p) => p.id !== presetId));
-    try {
-      const result = await deleteTemplateAction({ id: presetId });
-      if (!result.ok) {
-        setLocalTemplates(previousTemplates);
-        setPresetError(result.error ?? "Unable to delete template.");
-        return false;
-      }
-      invalidateAppDataCache(getTemplateMutationCacheKeys());
-      return true;
-    } finally {
-      setPresetMutation(null);
-    }
-  }
-
-  async function handleUpdatePreset(id: string, input: {
-    label: string;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }) {
-    setPresetError(null);
-    setPresetMutation({ type: "update", presetId: id });
-    try {
-      const result = await updateTemplateAction({ id, ...input });
-      const updatedTemplate = result.template;
-      if (!result.ok || !updatedTemplate) {
-        setPresetError(result.error ?? "Unable to update template.");
-        return false;
-      }
-      setLocalTemplates((prev) =>
-        prev
-          .map((preset) => (preset.id === id ? updatedTemplate : preset))
-          .sort((a, b) => a.label.localeCompare(b.label)),
-      );
-      invalidateAppDataCache(getTemplateMutationCacheKeys());
-      return true;
-    } finally {
-      setPresetMutation(null);
-    }
   }
 
   const content = (
@@ -462,61 +390,34 @@ export function RecipeBuilderShell({
         />
       )}
 
-      {/* Barcode scanner */}
-      {showScanner && (
-        <BarcodeScanner
-          onScan={(product) => {
-            setShowScanner(false);
-            setScanResult(product);
-            setNotFoundBarcode(null);
-          }}
-          onNotFound={(barcode) => {
-            setShowScanner(false);
-            setScanResult(null);
-            setNotFoundBarcode(barcode);
-          }}
-          onClose={() => setShowScanner(false)}
-        />
-      )}
-
-      {/* Barcode result */}
-      {(scanResult || notFoundBarcode) && (
-        <BarcodeResult
-          product={scanResult}
-          notFoundBarcode={notFoundBarcode}
-          onAddToLog={(macros) => {
-            setIngredients((prev) => [
-              ...prev,
-              {
-                clientId: `ing-${crypto.randomUUID()}`,
-                productId: macros.productId ?? null,
-                label: macros.label,
-                quantity: String(macros.quantity),
-                unit: macros.unit,
-                servingMultiplier: String(macros.servingMultiplier),
-                proteinG: String(macros.proteinG),
-                carbsG: String(macros.carbsG),
-                fatG: String(macros.fatG),
-                caloriesKcal: String(macros.caloriesKcal),
-              },
-            ]);
-            setScanResult(null);
-            setNotFoundBarcode(null);
-          }}
-          onSaveAsPreset={(input) => {
-            handleSavePreset(input);
-          }}
-          onScanAnother={() => {
-            setScanResult(null);
-            setNotFoundBarcode(null);
-            setShowScanner(true);
-          }}
-          onClose={() => {
-            setScanResult(null);
-            setNotFoundBarcode(null);
-          }}
-        />
-      )}
+      <BarcodeCaptureModals
+        showScanner={showScanner}
+        scanResult={scanResult}
+        notFoundBarcode={notFoundBarcode}
+        setShowScanner={setShowScanner}
+        setScanResult={setScanResult}
+        setNotFoundBarcode={setNotFoundBarcode}
+        onAddToLog={(macros) => {
+          setIngredients((prev) => [
+            ...prev,
+            {
+              clientId: `ing-${crypto.randomUUID()}`,
+              productId: macros.productId ?? null,
+              label: macros.label,
+              quantity: String(macros.quantity),
+              unit: macros.unit,
+              servingMultiplier: String(macros.servingMultiplier),
+              proteinG: String(macros.proteinG),
+              carbsG: String(macros.carbsG),
+              fatG: String(macros.fatG),
+              caloriesKcal: String(macros.caloriesKcal),
+            },
+          ]);
+        }}
+        onSaveAsPreset={(input) => {
+          handleSavePreset(input);
+        }}
+      />
     </>
   );
 

@@ -1,15 +1,12 @@
-import { ensureDateString } from "@macro-tracker/db";
 import { redirect } from "next/navigation";
 
-import { requireOnboardedSessionUser } from "@/lib/auth";
+import { loadOnboardedDateParam } from "@/lib/page-context";
 
 type GoalsPageProps = {
   searchParams: Promise<{ date?: string }>;
 };
 
 export default async function GoalsPage({ searchParams }: GoalsPageProps) {
-  await requireOnboardedSessionUser();
-  const params = await searchParams;
-  const selectedDate = ensureDateString(params.date);
+  const { selectedDate } = await loadOnboardedDateParam(searchParams);
   redirect(`/progress?date=${selectedDate}&tab=goals`);
 }
