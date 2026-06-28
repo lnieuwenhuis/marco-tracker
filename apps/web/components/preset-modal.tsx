@@ -16,6 +16,7 @@ import {
 } from "@/lib/preset-modal-state";
 
 import { ConfirmDeleteButton } from "./confirm-delete-button";
+import { CloseButton } from "./close-button";
 import { NumberInputField } from "./number-input-field";
 import { OverlayPortal, useBodyScrollLock, useEscapeDismiss } from "./overlay-portal";
 
@@ -202,18 +203,12 @@ export function PresetModal({
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-bold text-[var(--color-ink)]">Meal Templates</h2>
-          <button
-            type="button"
+          <CloseButton
             onClick={onClose}
             disabled={mutationsDisabled}
             className="rounded-lg p-1.5 text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
-            aria-label="Close"
-          >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="4" y1="4" x2="14" y2="14" />
-              <line x1="14" y1="4" x2="4" y2="14" />
-            </svg>
-          </button>
+            iconSize={18}
+          />
         </div>
 
         {errorMessage ? (

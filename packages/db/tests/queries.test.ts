@@ -102,6 +102,12 @@ describe("database queries", () => {
     return user.id;
   }
 
+  async function createOtherUserProduct(
+    input: Parameters<typeof createPersonalFoodProduct>[1],
+  ) {
+    return createPersonalFoodProduct(await createOtherUser(), input, runtime.db);
+  }
+
   function createFailingDbProxy(input: {
     method: "insert" | "update";
     table: unknown;
@@ -829,19 +835,14 @@ describe("database queries", () => {
   });
 
   it("rejects inaccessible products and hides their labels from daily summaries", async () => {
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's yogurt",
-        source: "manual",
-        proteinPer100: 10,
-        carbsPer100: 4,
-        fatPer100: 2,
-        caloriesPer100: 74,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's yogurt",
+      source: "manual",
+      proteinPer100: 10,
+      carbsPer100: 4,
+      fatPer100: 2,
+      caloriesPer100: 74,
+    });
 
     await expect(
       createMealEntry(
@@ -944,19 +945,14 @@ describe("database queries", () => {
   });
 
   it("rejects inaccessible template item products on create", async () => {
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's shake",
-        source: "manual",
-        proteinPer100: 24,
-        carbsPer100: 12,
-        fatPer100: 3,
-        caloriesPer100: 171,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's shake",
+      source: "manual",
+      proteinPer100: 24,
+      carbsPer100: 12,
+      fatPer100: 3,
+      caloriesPer100: 171,
+    });
 
     await expect(
       createTemplate(
@@ -1041,19 +1037,14 @@ describe("database queries", () => {
       },
       runtime.db,
     );
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's yogurt",
-        source: "manual",
-        proteinPer100: 10,
-        carbsPer100: 4,
-        fatPer100: 2,
-        caloriesPer100: 74,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's yogurt",
+      source: "manual",
+      proteinPer100: 10,
+      carbsPer100: 4,
+      fatPer100: 2,
+      caloriesPer100: 74,
+    });
 
     await expect(
       updateTemplate(
@@ -1208,19 +1199,14 @@ describe("database queries", () => {
   });
 
   it("prevalidates all template item product access before applying a template", async () => {
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's shake",
-        source: "manual",
-        proteinPer100: 24,
-        carbsPer100: 12,
-        fatPer100: 3,
-        caloriesPer100: 171,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's shake",
+      source: "manual",
+      proteinPer100: 24,
+      carbsPer100: 12,
+      fatPer100: 3,
+      caloriesPer100: 171,
+    });
     const templateId = randomUUID();
     await runtime.db.insert(mealTemplates).values({
       id: templateId,
@@ -1319,19 +1305,14 @@ describe("database queries", () => {
   });
 
   it("rejects inaccessible recipe ingredient products on create", async () => {
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's oats",
-        source: "manual",
-        proteinPer100: 12,
-        carbsPer100: 60,
-        fatPer100: 7,
-        caloriesPer100: 351,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's oats",
+      source: "manual",
+      proteinPer100: 12,
+      carbsPer100: 60,
+      fatPer100: 7,
+      caloriesPer100: 351,
+    });
 
     await expect(
       createRecipe(
@@ -1414,19 +1395,14 @@ describe("database queries", () => {
       },
       runtime.db,
     );
-    const otherUserId = await createOtherUser();
-    const otherProduct = await createPersonalFoodProduct(
-      otherUserId,
-      {
-        name: "Other user's yogurt",
-        source: "manual",
-        proteinPer100: 10,
-        carbsPer100: 4,
-        fatPer100: 2,
-        caloriesPer100: 74,
-      },
-      runtime.db,
-    );
+    const otherProduct = await createOtherUserProduct({
+      name: "Other user's yogurt",
+      source: "manual",
+      proteinPer100: 10,
+      carbsPer100: 4,
+      fatPer100: 2,
+      caloriesPer100: 74,
+    });
 
     await expect(
       updateRecipe(

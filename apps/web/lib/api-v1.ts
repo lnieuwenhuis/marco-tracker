@@ -60,6 +60,7 @@ import {
   getApiV1OpenApi,
   isKnownApiV1Path,
 } from "./api-v1-openapi";
+import { buildRecipePortionMealEntryInput } from "./recipe-portion";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -474,35 +475,22 @@ async function logRecipePortion(
     }
     gramsConsumed = value;
   }
-  if (
-    gramsConsumed != null &&
-    (recipe.totalCookedWeightG == null || recipe.totalCookedWeightG <= 0)
-  ) {
-    throw new Error("Recipe cooked weight is required to log grams.");
-  }
-
   const status = "status" in body ? body.status : date > todayDateString() ? "planned" : "eaten";
   if (typeof status !== "string" || !isMealEntryStatus(status)) {
     throw new Error("Meal status is invalid.");
   }
-  const hasGramsConsumed = gramsConsumed != null;
-  const factor = hasGramsConsumed
-    ? (gramsConsumed! / recipe.totalCookedWeightG!) * recipe.portions
-    : portionCount;
 
-  return createMealEntry(userId, {
-    date,
-    status,
-    label: hasGramsConsumed
-      ? `${recipe.label} (${gramsConsumed}g)`
-      : `${recipe.label} (${portionCount} portion${portionCount === 1 ? "" : "s"})`,
-    quantity: gramsConsumed ?? portionCount,
-    unit: hasGramsConsumed ? "g" : "serving",
-    proteinG: Math.round(recipe.perPortionMacros.proteinG * factor * 10) / 10,
-    carbsG: Math.round(recipe.perPortionMacros.carbsG * factor * 10) / 10,
-    fatG: Math.round(recipe.perPortionMacros.fatG * factor * 10) / 10,
-    caloriesKcal: Math.round(recipe.perPortionMacros.caloriesKcal * factor),
-  });
+  return createMealEntry(
+    userId,
+    buildRecipePortionMealEntryInput({
+      date,
+      gramsConsumed,
+      portionCount,
+      recipe,
+      status,
+      today: todayDateString(),
+    }),
+  );
 }
 
 function mapAccount(user: Awaited<ReturnType<typeof getUserById>>) {

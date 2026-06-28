@@ -1,6 +1,6 @@
 "use client";
 
-import type { MealTemplate, QuantityUnit } from "@macro-tracker/db";
+import type { MacroFoodInput, MealTemplate } from "@macro-tracker/db";
 import type { Dispatch, SetStateAction } from "react";
 
 import {
@@ -16,17 +16,7 @@ export type TemplateMutationState =
   | { type: "save" }
   | { type: "update" | "delete"; presetId: string };
 
-export type TemplateMacroInput = {
-  productId?: string | null;
-  label: string;
-  quantity?: number;
-  unit?: QuantityUnit;
-  servingMultiplier?: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
-};
+export type TemplateMacroInput = MacroFoodInput;
 
 type TemplateMutationOptions = {
   localTemplates: MealTemplate[];

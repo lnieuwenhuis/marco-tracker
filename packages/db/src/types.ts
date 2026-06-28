@@ -5,6 +5,14 @@ export type MacroNumbers = {
   caloriesKcal: number;
 };
 
+export type MacroFoodInput = MacroNumbers & {
+  productId?: string | null;
+  label: string;
+  quantity?: number;
+  unit?: QuantityUnit;
+  servingMultiplier?: number;
+};
+
 export const API_SCOPE_VALUES = [
   "read:account",
   "read:daily",
@@ -183,18 +191,9 @@ export type MealEntryInput = {
   date: string;
   mealGroupId?: string | null;
   status?: MealEntryStatus;
-  productId?: string | null;
-  label: string;
   sortOrder: number;
-  quantity?: number;
-  unit?: QuantityUnit;
-  servingMultiplier?: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
   clientMutationId?: string | null;
-};
+} & MacroFoodInput;
 
 export type MealEntryRecord = MealEntryInput & {
   id: string;
@@ -312,17 +311,7 @@ export type WeightPageData = {
   };
 };
 
-export type RecipeIngredientInput = {
-  productId?: string | null;
-  label: string;
-  quantity?: number;
-  unit?: QuantityUnit;
-  servingMultiplier?: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
-};
+export type RecipeIngredientInput = MacroFoodInput;
 
 export type RecipeIngredientRecord = RecipeIngredientInput & {
   id: string;
@@ -349,17 +338,8 @@ export type RecipeRecord = {
 };
 
 export type MealTemplateItemInput = {
-  productId?: string | null;
   mealGroupLabel?: string | null;
-  label: string;
-  quantity?: number;
-  unit?: QuantityUnit;
-  servingMultiplier?: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
-};
+} & MacroFoodInput;
 
 export type MealTemplateInput = {
   type: MealTemplateType;

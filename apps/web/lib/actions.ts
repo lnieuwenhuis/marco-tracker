@@ -33,10 +33,23 @@ import {
   updateWeightEntry,
   isValidDateString,
 } from "@macro-tracker/db";
-import type { BarcodeFoodProductInput, FoodProduct, FoodProductInput, LeaderboardStats, MealEntryRecord, MealEntryStatus, MealGroup, MealTemplate, QuantityUnit, RecipeRecord, WeightUnit } from "@macro-tracker/db";
+import type {
+  BarcodeFoodProductInput,
+  FoodProduct,
+  FoodProductInput,
+  LeaderboardStats,
+  MacroFoodInput,
+  MealEntryRecord,
+  MealEntryStatus,
+  MealGroup,
+  MealTemplate,
+  RecipeRecord,
+  WeightUnit,
+} from "@macro-tracker/db";
 import { revalidatePath } from "next/cache";
 
 import { requireSessionUser } from "./auth";
+import { buildRecipePortionMealEntryInput } from "./recipe-portion";
 import { getLocalDateString } from "./startup-date";
 
 type ActionResult = {
@@ -49,18 +62,9 @@ type SaveMealEntryInput = {
   date: string;
   mealGroupId?: string | null;
   status?: MealEntryStatus;
-  productId?: string | null;
-  label: string;
   sortOrder?: number;
-  quantity?: number;
-  unit?: QuantityUnit;
-  servingMultiplier?: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
   clientMutationId?: string | null;
-};
+} & MacroFoodInput;
 
 function toActionError(error: unknown) {
   if (!(error instanceof Error)) {
@@ -282,17 +286,7 @@ export async function completeOnboardingAction(
   }, { revalidate: [["/", "layout"]] });
 }
 
-type SaveTemplateInput = {
-  productId?: string | null;
-  label: string;
-  quantity?: number;
-  unit?: QuantityUnit;
-  servingMultiplier?: number;
-  proteinG: number;
-  carbsG: number;
-  fatG: number;
-  caloriesKcal: number;
-};
+type SaveTemplateInput = MacroFoodInput;
 type SaveTemplateResult = ActionResult & { template?: MealTemplate };
 
 function singleFoodTemplateInput(
@@ -471,17 +465,7 @@ type SaveRecipeInput = {
   label: string;
   portions: number;
   totalCookedWeightG?: number | null;
-  ingredients: Array<{
-    productId?: string | null;
-    label: string;
-    quantity?: number;
-    unit?: QuantityUnit;
-    servingMultiplier?: number;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }>;
+  ingredients: MacroFoodInput[];
 };
 
 type SaveRecipeResult = ActionResult & { recipe?: RecipeRecord };
@@ -635,35 +619,18 @@ export async function logRecipePortionAction(
     ) {
       throw new Error("Grams consumed must be greater than 0.");
     }
-    if (
-      gramsConsumed != null &&
-      (recipe.totalCookedWeightG == null || recipe.totalCookedWeightG <= 0)
-    ) {
-      throw new Error("Recipe cooked weight is required to log grams.");
-    }
 
-    const hasGramsConsumed = gramsConsumed != null;
-    const factor =
-      hasGramsConsumed
-        ? (gramsConsumed / recipe.totalCookedWeightG!) * recipe.portions
-        : portionCount;
-
-    await createMealEntry(sessionUser.userId, {
-      date: input.date,
-      status:
-        input.status ??
-        (input.date > getLocalDateString() ? "planned" : "eaten"),
-      label:
-        hasGramsConsumed
-          ? `${recipe.label} (${gramsConsumed}g)`
-          : `${recipe.label} (${portionCount} portion${portionCount === 1 ? "" : "s"})`,
-      quantity: gramsConsumed ?? portionCount,
-      unit: hasGramsConsumed ? "g" : "serving",
-      proteinG: Math.round(recipe.perPortionMacros.proteinG * factor * 10) / 10,
-      carbsG: Math.round(recipe.perPortionMacros.carbsG * factor * 10) / 10,
-      fatG: Math.round(recipe.perPortionMacros.fatG * factor * 10) / 10,
-      caloriesKcal: Math.round(recipe.perPortionMacros.caloriesKcal * factor),
-    });
+    await createMealEntry(
+      sessionUser.userId,
+      buildRecipePortionMealEntryInput({
+        date: input.date,
+        gramsConsumed,
+        portionCount,
+        recipe,
+        status: input.status,
+        today: getLocalDateString(),
+      }),
+    );
 
     return { ok: true };
   }, { revalidate: [["/", "page"]] });

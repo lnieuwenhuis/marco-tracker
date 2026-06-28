@@ -9,6 +9,11 @@ import {
 } from "@/lib/ai-model-benchmark";
 
 type BenchmarkFixture = (typeof MACRO_BENCHMARK_FIXTURES)[number];
+type BenchmarkRunInput = Partial<Parameters<typeof runMacroBenchmark>[0]> & {
+  analyzeFoodPhotoImpl: Parameters<
+    typeof runMacroBenchmark
+  >[0]["analyzeFoodPhotoImpl"];
+};
 
 function readyEstimate(label: string) {
   return {
@@ -76,6 +81,18 @@ function failureBaselineResult(
   };
 }
 
+function runTestBenchmark(input: BenchmarkRunInput) {
+  return runMacroBenchmark({
+    candidateModel: "candidate/free",
+    currentModel: "current/free",
+    fixtureLimit: 4,
+    requestDelayMs: 0,
+    retryDelayMs: 0,
+    userId: "test-user",
+    ...input,
+  });
+}
+
 describe("calculateMacroBenchmarkError", () => {
   it("computes absolute macro errors and normalized average error", () => {
     expect(
@@ -122,14 +139,9 @@ describe("calculateMacroBenchmarkError", () => {
   it("deduplicates calls when candidate model equals current model", async () => {
     const analyzeFoodPhotoImpl = vi.fn(async () => readyEstimate("banana"));
 
-    const result = await runMacroBenchmark({
+    const result = await runTestBenchmark({
       analyzeFoodPhotoImpl,
       candidateModel: "current/free",
-      currentModel: "current/free",
-      fixtureLimit: 4,
-      requestDelayMs: 0,
-      retryDelayMs: 0,
-      userId: "test-user",
     });
 
     expect(result.comparedSameModel).toBe(true);
@@ -142,15 +154,9 @@ describe("calculateMacroBenchmarkError", () => {
   it("supports candidate-only mode without current model calls", async () => {
     const analyzeFoodPhotoImpl = vi.fn(async () => readyEstimate("candidate"));
 
-    const result = await runMacroBenchmark({
+    const result = await runTestBenchmark({
       analyzeFoodPhotoImpl,
-      candidateModel: "candidate/free",
-      currentModel: "current/free",
-      fixtureLimit: 4,
       mode: "candidate_only",
-      requestDelayMs: 0,
-      retryDelayMs: 0,
-      userId: "test-user",
     });
 
     expect(result.summaries.current).toBeNull();
@@ -163,7 +169,7 @@ describe("calculateMacroBenchmarkError", () => {
     const fixtures = MACRO_BENCHMARK_FIXTURES.slice(0, 4);
     const fixtureIds = fixtures.map((fixture) => fixture.id);
 
-    const result = await runMacroBenchmark({
+    const result = await runTestBenchmark({
       analyzeFoodPhotoImpl,
       baseline: {
         currentModel: "current/free",
@@ -171,12 +177,6 @@ describe("calculateMacroBenchmarkError", () => {
         fixtureIds,
         results: fixtures.map((fixture) => successfulBaselineResult(fixture)),
       },
-      candidateModel: "candidate/free",
-      currentModel: "current/free",
-      fixtureLimit: 4,
-      requestDelayMs: 0,
-      retryDelayMs: 0,
-      userId: "test-user",
     });
 
     expect(result.usedBaseline).toBe(true);
@@ -205,14 +205,8 @@ describe("calculateMacroBenchmarkError", () => {
       })
       .mockResolvedValue(readyEstimate("current"));
 
-    const result = await runMacroBenchmark({
+    const result = await runTestBenchmark({
       analyzeFoodPhotoImpl,
-      candidateModel: "candidate/free",
-      currentModel: "current/free",
-      fixtureLimit: 4,
-      requestDelayMs: 0,
-      retryDelayMs: 0,
-      userId: "test-user",
     });
 
     expect(result.cases[1]?.candidate.failureKind).toBe("provider_rate_limit");
@@ -223,15 +217,9 @@ describe("calculateMacroBenchmarkError", () => {
   it("skips provider calls when the runtime budget cannot safely start work", async () => {
     const analyzeFoodPhotoImpl = vi.fn(async () => readyEstimate("never"));
 
-    const result = await runMacroBenchmark({
+    const result = await runTestBenchmark({
       analyzeFoodPhotoImpl,
-      candidateModel: "candidate/free",
-      currentModel: "current/free",
-      fixtureLimit: 4,
-      requestDelayMs: 0,
-      retryDelayMs: 0,
       runtimeBudgetMs: 1,
-      userId: "test-user",
     });
 
     expect(analyzeFoodPhotoImpl).not.toHaveBeenCalled();
@@ -250,15 +238,9 @@ describe("calculateMacroBenchmarkError", () => {
       .mockRejectedValueOnce(new Error("transport exploded"))
       .mockResolvedValue(readyEstimate("candidate"));
 
-    const result = await runMacroBenchmark({
+    const result = await runTestBenchmark({
       analyzeFoodPhotoImpl,
-      candidateModel: "candidate/free",
-      currentModel: "current/free",
-      fixtureLimit: 4,
       mode: "candidate_only",
-      requestDelayMs: 0,
-      retryDelayMs: 0,
-      userId: "test-user",
     });
 
     expect(result.cases[0]?.candidate).toEqual(
@@ -285,15 +267,9 @@ describe("calculateMacroBenchmarkError", () => {
       .mockResolvedValueOnce(retryableProviderError)
       .mockResolvedValue(readyEstimate("candidate"));
 
-    const result = await runMacroBenchmark({
+    const result = await runTestBenchmark({
       analyzeFoodPhotoImpl,
-      candidateModel: "candidate/free",
-      currentModel: "current/free",
-      fixtureLimit: 4,
       mode: "candidate_only",
-      requestDelayMs: 0,
-      retryDelayMs: 0,
-      userId: "test-user",
     });
 
     expect(analyzeFoodPhotoImpl).toHaveBeenCalledTimes(5);

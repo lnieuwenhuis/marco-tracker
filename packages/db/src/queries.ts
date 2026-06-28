@@ -314,6 +314,36 @@ const foodProductSelectColumns = {
   deletedAt: foodProducts.deletedAt,
 };
 
+const mealEntryWithProductSelectColumns = {
+  id: mealEntries.id,
+  userId: mealEntries.userId,
+  date: mealEntries.entryDate,
+  mealGroupId: mealEntries.mealGroupId,
+  status: mealEntries.status,
+  productId: foodProducts.id,
+  label: mealEntries.label,
+  sortOrder: mealEntries.sortOrder,
+  quantity: mealEntries.quantity,
+  unit: mealEntries.unit,
+  servingMultiplier: mealEntries.servingMultiplier,
+  proteinG: mealEntries.proteinG,
+  carbsG: mealEntries.carbsG,
+  fatG: mealEntries.fatG,
+  caloriesKcal: mealEntries.caloriesKcal,
+  clientMutationId: mealEntries.clientMutationId,
+  sourceLabel: foodProducts.name,
+};
+
+function selectMealEntriesWithAccessibleProduct(db: DatabaseClient, userId: string) {
+  return db
+    .select(mealEntryWithProductSelectColumns)
+    .from(mealEntries)
+    .leftJoin(
+      foodProducts,
+      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
+    );
+}
+
 type ValidatedFoodProductInput = ReturnType<typeof validateFoodProductInput>;
 
 function buildFoodProductInputValues(
@@ -515,6 +545,40 @@ async function resolveDb(db?: DatabaseClient) {
   return db ?? (await getDb());
 }
 
+function dailyMacroTotalsSelectColumns() {
+  return {
+    entryDate: mealEntries.entryDate,
+    proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
+    carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
+    fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
+    caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
+  };
+}
+
+function selectDailyMacroTotals(db: DatabaseClient) {
+  return db
+    .select(dailyMacroTotalsSelectColumns())
+    .from(mealEntries);
+}
+
+function selectDailyMacroTotalsWithItemCount(db: DatabaseClient) {
+  return db
+    .select({
+      ...dailyMacroTotalsSelectColumns(),
+      itemCount: sql<string>`count(${mealEntries.id})`,
+    })
+    .from(mealEntries);
+}
+
+function selectDailyMacroTotalsWithEntryCount(db: DatabaseClient) {
+  return db
+    .select({
+      ...dailyMacroTotalsSelectColumns(),
+      entryCount: sql<string>`count(${mealEntries.id})`,
+    })
+    .from(mealEntries);
+}
+
 async function getDailyTotalsForRange(
   userId: string,
   startDate: string,
@@ -523,15 +587,7 @@ async function getDailyTotalsForRange(
 ) {
   const database = await resolveDb(db);
 
-  const rows = await database
-    .select({
-      entryDate: mealEntries.entryDate,
-      proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-      carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-      fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
-      caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-    })
-    .from(mealEntries)
+  const rows = await selectDailyMacroTotals(database)
     .where(
       and(
         eatenEntryPredicate(userId),
@@ -1035,31 +1091,7 @@ export async function getDailySummary(
 ): Promise<DailySummary> {
   const database = await resolveDb(db);
   const [rows, groups] = await Promise.all([
-    database
-      .select({
-        id: mealEntries.id,
-        userId: mealEntries.userId,
-        date: mealEntries.entryDate,
-        mealGroupId: mealEntries.mealGroupId,
-        status: mealEntries.status,
-        productId: foodProducts.id,
-        label: mealEntries.label,
-        sortOrder: mealEntries.sortOrder,
-        quantity: mealEntries.quantity,
-        unit: mealEntries.unit,
-        servingMultiplier: mealEntries.servingMultiplier,
-        proteinG: mealEntries.proteinG,
-        carbsG: mealEntries.carbsG,
-        fatG: mealEntries.fatG,
-        caloriesKcal: mealEntries.caloriesKcal,
-        clientMutationId: mealEntries.clientMutationId,
-        sourceLabel: foodProducts.name,
-      })
-      .from(mealEntries)
-      .leftJoin(
-        foodProducts,
-        and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
-      )
+    selectMealEntriesWithAccessibleProduct(database, userId)
       .where(
         and(eq(mealEntries.userId, userId), eq(mealEntries.entryDate, selectedDate)),
       )
@@ -1168,29 +1200,7 @@ export async function searchFoodProducts(
   });
 
   const rows = await database
-    .select({
-      id: foodProducts.id,
-      ownerUserId: foodProducts.ownerUserId,
-      scope: foodProducts.scope,
-      source: foodProducts.source,
-      barcode: foodProducts.barcode,
-      name: foodProducts.name,
-      brand: foodProducts.brand,
-      defaultServingQuantity: foodProducts.defaultServingQuantity,
-      defaultServingUnit: foodProducts.defaultServingUnit,
-      proteinPer100: foodProducts.proteinPer100,
-      carbsPer100: foodProducts.carbsPer100,
-      fatPer100: foodProducts.fatPer100,
-      caloriesPer100: foodProducts.caloriesPer100,
-      servingWeightG: foodProducts.servingWeightG,
-      servingVolumeMl: foodProducts.servingVolumeMl,
-      submittedByUserId: foodProducts.submittedByUserId,
-      deletedByUserId: foodProducts.deletedByUserId,
-      sourceProvider: foodProducts.sourceProvider,
-      sourceConfidence: foodProducts.sourceConfidence,
-      sourceMetadata: foodProducts.sourceMetadata,
-      correctedFromProductId: foodProducts.correctedFromProductId,
-    })
+    .select(foodProductSelectColumns)
     .from(foodProducts)
     .where(and(productAccessPredicate(userId), ...wordConditions))
     .orderBy(
@@ -1248,29 +1258,7 @@ export async function getFoodProductByIdForUser(
 ): Promise<FoodProduct | null> {
   const database = await resolveDb(db);
   const [row] = await database
-    .select({
-      id: foodProducts.id,
-      ownerUserId: foodProducts.ownerUserId,
-      scope: foodProducts.scope,
-      source: foodProducts.source,
-      barcode: foodProducts.barcode,
-      name: foodProducts.name,
-      brand: foodProducts.brand,
-      defaultServingQuantity: foodProducts.defaultServingQuantity,
-      defaultServingUnit: foodProducts.defaultServingUnit,
-      proteinPer100: foodProducts.proteinPer100,
-      carbsPer100: foodProducts.carbsPer100,
-      fatPer100: foodProducts.fatPer100,
-      caloriesPer100: foodProducts.caloriesPer100,
-      servingWeightG: foodProducts.servingWeightG,
-      servingVolumeMl: foodProducts.servingVolumeMl,
-      submittedByUserId: foodProducts.submittedByUserId,
-      deletedByUserId: foodProducts.deletedByUserId,
-      sourceProvider: foodProducts.sourceProvider,
-      sourceConfidence: foodProducts.sourceConfidence,
-      sourceMetadata: foodProducts.sourceMetadata,
-      correctedFromProductId: foodProducts.correctedFromProductId,
-    })
+    .select(foodProductSelectColumns)
     .from(foodProducts)
     .where(and(eq(foodProducts.id, productId), productAccessPredicate(userId)))
     .limit(1);
@@ -1465,16 +1453,7 @@ export async function getRecentDailyOverviews(
 ): Promise<DailyOverview[]> {
   const database = await resolveDb(db);
 
-  const rows = await database
-    .select({
-      entryDate: mealEntries.entryDate,
-      proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-      carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-      fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
-      caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-      itemCount: sql<string>`count(${mealEntries.id})`,
-    })
-    .from(mealEntries)
+  const rows = await selectDailyMacroTotalsWithItemCount(database)
     .where(
       and(
         eq(mealEntries.userId, userId),
@@ -1520,31 +1499,7 @@ async function getMealEntryByClientMutationId(
   clientMutationId: string,
   db: DatabaseClient,
 ): Promise<MealEntryRecord | null> {
-  const [existing] = await db
-    .select({
-      id: mealEntries.id,
-      userId: mealEntries.userId,
-      date: mealEntries.entryDate,
-      mealGroupId: mealEntries.mealGroupId,
-      status: mealEntries.status,
-      productId: foodProducts.id,
-      label: mealEntries.label,
-      sortOrder: mealEntries.sortOrder,
-      quantity: mealEntries.quantity,
-      unit: mealEntries.unit,
-      servingMultiplier: mealEntries.servingMultiplier,
-      proteinG: mealEntries.proteinG,
-      carbsG: mealEntries.carbsG,
-      fatG: mealEntries.fatG,
-      caloriesKcal: mealEntries.caloriesKcal,
-      clientMutationId: mealEntries.clientMutationId,
-      sourceLabel: foodProducts.name,
-    })
-    .from(mealEntries)
-    .leftJoin(
-      foodProducts,
-      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
-    )
+  const [existing] = await selectMealEntriesWithAccessibleProduct(db, userId)
     .where(
       and(
         eq(mealEntries.userId, userId),
@@ -1562,31 +1517,7 @@ export async function getMealEntryById(
   db?: DatabaseClient,
 ): Promise<MealEntryRecord | null> {
   const database = await resolveDb(db);
-  const [existing] = await database
-    .select({
-      id: mealEntries.id,
-      userId: mealEntries.userId,
-      date: mealEntries.entryDate,
-      mealGroupId: mealEntries.mealGroupId,
-      status: mealEntries.status,
-      productId: foodProducts.id,
-      label: mealEntries.label,
-      sortOrder: mealEntries.sortOrder,
-      quantity: mealEntries.quantity,
-      unit: mealEntries.unit,
-      servingMultiplier: mealEntries.servingMultiplier,
-      proteinG: mealEntries.proteinG,
-      carbsG: mealEntries.carbsG,
-      fatG: mealEntries.fatG,
-      caloriesKcal: mealEntries.caloriesKcal,
-      clientMutationId: mealEntries.clientMutationId,
-      sourceLabel: foodProducts.name,
-    })
-    .from(mealEntries)
-    .leftJoin(
-      foodProducts,
-      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
-    )
+  const [existing] = await selectMealEntriesWithAccessibleProduct(database, userId)
     .where(and(eq(mealEntries.id, entryId), eq(mealEntries.userId, userId)))
     .limit(1);
 
@@ -1868,31 +1799,7 @@ export async function searchMealEntries(
   const wordConditions = words.map((word) =>
     ilike(mealEntries.label, `%${escapeLikePattern(word)}%`),
   );
-  const rows = await database
-    .select({
-      id: mealEntries.id,
-      userId: mealEntries.userId,
-      date: mealEntries.entryDate,
-      mealGroupId: mealEntries.mealGroupId,
-      status: mealEntries.status,
-      productId: foodProducts.id,
-      label: mealEntries.label,
-      sortOrder: mealEntries.sortOrder,
-      quantity: mealEntries.quantity,
-      unit: mealEntries.unit,
-      servingMultiplier: mealEntries.servingMultiplier,
-      proteinG: mealEntries.proteinG,
-      carbsG: mealEntries.carbsG,
-      fatG: mealEntries.fatG,
-      caloriesKcal: mealEntries.caloriesKcal,
-      clientMutationId: mealEntries.clientMutationId,
-      sourceLabel: foodProducts.name,
-    })
-    .from(mealEntries)
-    .leftJoin(
-      foodProducts,
-      and(eq(mealEntries.productId, foodProducts.id), productAccessPredicate(userId)),
-    )
+  const rows = await selectMealEntriesWithAccessibleProduct(database, userId)
     .where(and(eatenEntryPredicate(userId), ...wordConditions))
     .orderBy(desc(mealEntries.entryDate), asc(mealEntries.sortOrder))
     .limit(100);
@@ -2285,27 +2192,11 @@ export async function getStatsPageData(
   const database = await resolveDb(db);
 
   const [dailyRows, plannedTrendRows, labelRows, goals, weights, statusRows] = await Promise.all([
-    database
-      .select({
-        entryDate: mealEntries.entryDate,
-        proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-        carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-        fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
-        caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-      })
-      .from(mealEntries)
+    selectDailyMacroTotals(database)
       .where(eatenEntryPredicate(userId))
       .groupBy(mealEntries.entryDate)
       .orderBy(asc(mealEntries.entryDate)),
-    database
-      .select({
-        entryDate: mealEntries.entryDate,
-        proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-        carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-        fatG: sql<string>`coalesce(sum(${mealEntries.fatG}), 0)`,
-        caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-      })
-      .from(mealEntries)
+    selectDailyMacroTotals(database)
       .where(
         and(
           eq(mealEntries.userId, userId),
@@ -3208,15 +3099,7 @@ export async function getLeaderboardStats(
 ): Promise<LeaderboardStats> {
   const database = await resolveDb(db);
 
-  const rows = await database
-    .select({
-      entryDate: mealEntries.entryDate,
-      proteinG: sql<string>`coalesce(sum(${mealEntries.proteinG}), 0)`,
-      carbsG: sql<string>`coalesce(sum(${mealEntries.carbsG}), 0)`,
-      caloriesKcal: sql<string>`coalesce(sum(${mealEntries.caloriesKcal}), 0)`,
-      entryCount: sql<string>`count(${mealEntries.id})`,
-    })
-    .from(mealEntries)
+  const rows = await selectDailyMacroTotalsWithEntryCount(database)
     .where(eatenEntryPredicate(userId))
     .groupBy(mealEntries.entryDate)
     .orderBy(asc(mealEntries.entryDate));

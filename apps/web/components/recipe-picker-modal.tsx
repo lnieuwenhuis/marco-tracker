@@ -2,8 +2,7 @@
 
 import type { RecipeRecord } from "@macro-tracker/db";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CloseButton } from "./close-button";
-import { OverlayPortal, useBodyScrollLock, useEscapeDismiss } from "./overlay-portal";
+import { CompactModal } from "./compact-modal";
 
 type RecipePickerModalProps = {
   recipes: RecipeRecord[];
@@ -18,8 +17,6 @@ export function RecipePickerModal({
 }: RecipePickerModalProps) {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  useBodyScrollLock();
-  useEscapeDismiss(true, onClose);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -37,33 +34,7 @@ export function RecipePickerModal({
   );
 
   return (
-    <OverlayPortal>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* Modal panel */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Pick a Recipe"
-        className="fixed inset-x-4 top-[8%] z-50 mx-auto max-h-[82vh] max-w-sm overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5 shadow-2xl"
-      >
-        {/* Header */}
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-bold text-[var(--color-ink)]">
-            Pick a Recipe
-          </h2>
-          <CloseButton
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
-            iconSize={18}
-          />
-        </div>
-
+    <CompactModal ariaLabel="Pick a Recipe" title="Pick a Recipe" onClose={onClose}>
         {recipes.length > 0 ? (
           <input
             ref={inputRef}
@@ -130,7 +101,6 @@ export function RecipePickerModal({
             ))}
           </div>
         )}
-      </div>
-    </OverlayPortal>
+    </CompactModal>
   );
 }

@@ -15,8 +15,7 @@ import type { OpenFoodFactsProduct } from "@/lib/openfoodfacts";
 
 import { AddFoodButton } from "./add-food-button";
 import { invalidateAppDataCache } from "./app-data-cache";
-import { BarcodeResult } from "./barcode-result";
-import { BarcodeScanner } from "./barcode-scanner";
+import { BarcodeCaptureModals } from "./barcode-capture-modals";
 import { ExperimentalAppShell } from "./experimental-app-shell";
 import { IngredientCard, type IngredientDraft } from "./ingredient-card";
 import { PresetModal } from "./preset-modal";
@@ -391,61 +390,34 @@ export function RecipeBuilderShell({
         />
       )}
 
-      {/* Barcode scanner */}
-      {showScanner && (
-        <BarcodeScanner
-          onScan={(product) => {
-            setShowScanner(false);
-            setScanResult(product);
-            setNotFoundBarcode(null);
-          }}
-          onNotFound={(barcode) => {
-            setShowScanner(false);
-            setScanResult(null);
-            setNotFoundBarcode(barcode);
-          }}
-          onClose={() => setShowScanner(false)}
-        />
-      )}
-
-      {/* Barcode result */}
-      {(scanResult || notFoundBarcode) && (
-        <BarcodeResult
-          product={scanResult}
-          notFoundBarcode={notFoundBarcode}
-          onAddToLog={(macros) => {
-            setIngredients((prev) => [
-              ...prev,
-              {
-                clientId: `ing-${crypto.randomUUID()}`,
-                productId: macros.productId ?? null,
-                label: macros.label,
-                quantity: String(macros.quantity),
-                unit: macros.unit,
-                servingMultiplier: String(macros.servingMultiplier),
-                proteinG: String(macros.proteinG),
-                carbsG: String(macros.carbsG),
-                fatG: String(macros.fatG),
-                caloriesKcal: String(macros.caloriesKcal),
-              },
-            ]);
-            setScanResult(null);
-            setNotFoundBarcode(null);
-          }}
-          onSaveAsPreset={(input) => {
-            handleSavePreset(input);
-          }}
-          onScanAnother={() => {
-            setScanResult(null);
-            setNotFoundBarcode(null);
-            setShowScanner(true);
-          }}
-          onClose={() => {
-            setScanResult(null);
-            setNotFoundBarcode(null);
-          }}
-        />
-      )}
+      <BarcodeCaptureModals
+        showScanner={showScanner}
+        scanResult={scanResult}
+        notFoundBarcode={notFoundBarcode}
+        setShowScanner={setShowScanner}
+        setScanResult={setScanResult}
+        setNotFoundBarcode={setNotFoundBarcode}
+        onAddToLog={(macros) => {
+          setIngredients((prev) => [
+            ...prev,
+            {
+              clientId: `ing-${crypto.randomUUID()}`,
+              productId: macros.productId ?? null,
+              label: macros.label,
+              quantity: String(macros.quantity),
+              unit: macros.unit,
+              servingMultiplier: String(macros.servingMultiplier),
+              proteinG: String(macros.proteinG),
+              carbsG: String(macros.carbsG),
+              fatG: String(macros.fatG),
+              caloriesKcal: String(macros.caloriesKcal),
+            },
+          ]);
+        }}
+        onSaveAsPreset={(input) => {
+          handleSavePreset(input);
+        }}
+      />
     </>
   );
 
