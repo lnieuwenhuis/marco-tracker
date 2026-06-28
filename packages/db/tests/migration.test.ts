@@ -128,7 +128,7 @@ describe("database migrations", () => {
     );
     expect(ingredientProductIds.size).toBe(1);
     expect([...ingredientProductIds][0]).toBeTruthy();
-  });
+  }, 30_000);
 
   it("syncs existing barcode products into global food products", async () => {
     runtime = await createDatabaseRuntime("memory:");

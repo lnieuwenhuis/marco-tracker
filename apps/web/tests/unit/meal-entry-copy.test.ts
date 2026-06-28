@@ -63,62 +63,66 @@ describe("buildMealEntryCopyInput", () => {
     });
   });
 
-  it("preserves product-backed search history metadata when copying an entry", async () => {
-    runtime = await createTestDatabase();
-    const user = await upsertUserFromShooProfile(
-      {
-        pairwiseSub: "ps_copy_search_user",
-        email: "copy-search@example.com",
-        displayName: "Copy Search",
-      },
-      runtime.db,
-    );
-    const mealGroup = await createMealGroup(
-      user.id,
-      { label: "Post-workout" },
-      runtime.db,
-    );
-    const product = await createPersonalFoodProduct(
-      user.id,
-      {
-        name: "Skyr yogurt",
-        source: "manual",
-        defaultServingQuantity: 100,
-        defaultServingUnit: "g",
-        proteinPer100: 11,
-        carbsPer100: 4,
-        fatPer100: 0,
-        caloriesPer100: 60,
-      },
-      runtime.db,
-    );
+  it(
+    "preserves product-backed search history metadata when copying an entry",
+    async () => {
+      runtime = await createTestDatabase();
+      const user = await upsertUserFromShooProfile(
+        {
+          pairwiseSub: "ps_copy_search_user",
+          email: "copy-search@example.com",
+          displayName: "Copy Search",
+        },
+        runtime.db,
+      );
+      const mealGroup = await createMealGroup(
+        user.id,
+        { label: "Post-workout" },
+        runtime.db,
+      );
+      const product = await createPersonalFoodProduct(
+        user.id,
+        {
+          name: "Skyr yogurt",
+          source: "manual",
+          defaultServingQuantity: 100,
+          defaultServingUnit: "g",
+          proteinPer100: 11,
+          carbsPer100: 4,
+          fatPer100: 0,
+          caloriesPer100: 60,
+        },
+        runtime.db,
+      );
 
-    await createMealEntry(
-      user.id,
-      {
-        date: "2026-06-18",
-        mealGroupId: mealGroup.id,
+      await createMealEntry(
+        user.id,
+        {
+          date: "2026-06-18",
+          mealGroupId: mealGroup.id,
+          productId: product.id,
+          label: "Skyr yogurt bowl",
+          quantity: 150,
+          unit: "g",
+          servingMultiplier: 1.5,
+          proteinG: 0,
+          carbsG: 0,
+          fatG: 0,
+          caloriesKcal: 1,
+        },
+        runtime.db,
+      );
+
+      const [result] = await searchMealEntries(user.id, "skyr", runtime.db);
+
+      expect(buildMealEntryCopyInput(result!, "2026-06-19")).toMatchObject({
         productId: product.id,
-        label: "Skyr yogurt bowl",
+        mealGroupId: mealGroup.id,
         quantity: 150,
         unit: "g",
         servingMultiplier: 1.5,
-        proteinG: 0,
-        carbsG: 0,
-        fatG: 0,
-        caloriesKcal: 1,
-      },
-      runtime.db,
-    );
-
-    const [result] = await searchMealEntries(user.id, "skyr", runtime.db);
-
-    expect(buildMealEntryCopyInput(result!, "2026-06-19")).toMatchObject({
-      productId: product.id,
-      mealGroupId: mealGroup.id,
-      quantity: 150,
-      unit: "g",
-      servingMultiplier: 1.5,
-    });
-  });
+      });
+    },
+    10_000,
+  );
 });

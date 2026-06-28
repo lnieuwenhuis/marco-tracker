@@ -1,6 +1,7 @@
 # Macro Tracker
 
 [![Try Macro Tracker](https://img.shields.io/badge/try-macro.safasfly.dev-1f7a4d?style=flat-square)](https://macro.safasfly.dev)
+[![CI](https://github.com/lnieuwenhuis/marco-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/lnieuwenhuis/marco-tracker/actions/workflows/ci.yml)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=nextdotjs)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript&logoColor=white)
 ![Drizzle](https://img.shields.io/badge/Drizzle-ORM-c5f74f?style=flat-square)
@@ -10,7 +11,7 @@
 
 Macro Tracker is a phone-first macro tracking app for the day-to-day work of eating like you meant to. It is built around the stuff I actually want when I am logging food: fast daily entries, planned meals, reusable meals and days, barcode scanning, recipes, weight tracking, and enough stats to see patterns without turning breakfast into a spreadsheet ceremony.
 
-Current app version: `v2.07`
+Current app version: `v2.09`
 
 ## Try It
 
@@ -111,8 +112,10 @@ Useful checks:
 pnpm --filter @macro-tracker/db test
 pnpm --filter @macro-tracker/web test
 pnpm --filter @macro-tracker/web lint
+pnpm typecheck
 pnpm --filter @macro-tracker/web exec tsc --noEmit
 pnpm --filter @macro-tracker/db exec tsc --noEmit
+pnpm test:e2e
 ```
 
 Database helpers:

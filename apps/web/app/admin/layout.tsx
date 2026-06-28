@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 
 import { AdminShell } from "@/components/admin-shell";
 import { requireAdminUser } from "@/lib/auth";
@@ -9,7 +10,9 @@ export const metadata: Metadata = {
 
 export default async function AdminLayout({
   children,
-}: LayoutProps<"/admin">) {
+}: {
+  children: ReactNode;
+}) {
   const adminUser = await requireAdminUser();
 
   return (

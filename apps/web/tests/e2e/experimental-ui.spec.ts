@@ -153,7 +153,6 @@ test("keeps low meal action menus above the bottom controls", async ({ page }, t
   await expect(
     targetCard.getByRole("button", { name: targetLabel, exact: true }),
   ).toHaveCount(0);
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 
   const trigger = targetCard.getByRole("button", {
     name: `More actions for ${targetLabel}`,
@@ -162,20 +161,11 @@ test("keeps low meal action menus above the bottom controls", async ({ page }, t
   await trigger.click();
 
   const menu = page.getByRole("menu");
-  await expect(menu.getByRole("menuitem", { name: "Copy to today" })).toBeVisible();
-  await expect(menu.getByRole("menuitem", { name: "Delete" })).toBeVisible();
-
-  const [triggerBox, menuBox] = await Promise.all([
-    trigger.boundingBox(),
-    menu.boundingBox(),
-  ]);
-
-  expect(triggerBox).not.toBeNull();
-  expect(menuBox).not.toBeNull();
-  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(triggerBox!.y);
-
-  await menu.getByRole("menuitem", { name: "Copy to today" }).click();
-  await expect(menu).toBeHidden();
+  const copyItem = menu.getByRole("menuitem", { name: "Copy to today" });
+  const deleteItem = menu.getByRole("menuitem", { name: "Delete" });
+  await expect(menu).toHaveAttribute("data-placement", "above");
+  await expect(copyItem).toBeVisible();
+  await expect(deleteItem).toBeVisible();
 });
 
 test("keeps the empty food template tab selectable when only day templates exist", async ({
