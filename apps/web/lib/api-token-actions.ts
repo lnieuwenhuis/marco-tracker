@@ -8,7 +8,7 @@ import {
 } from "@macro-tracker/db";
 import { revalidatePath } from "next/cache";
 
-import { requireSessionUser } from "./auth";
+import { requireOnboardedSessionUser } from "./auth";
 
 const CREATE_API_TOKEN_VALIDATION_MESSAGES = new Set([
   "API token name is required.",
@@ -55,7 +55,7 @@ export async function createApiTokenAction(
   _previousState: CreateApiTokenActionState,
   formData: FormData,
 ): Promise<CreateApiTokenActionState> {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const name = getStringValue(formData, "name");
   const scopes = getSelectedScopes(formData);
   const expires = getStringValue(formData, "expires");
@@ -81,7 +81,7 @@ export async function createApiTokenAction(
 }
 
 export async function revokeApiTokenAction(formData: FormData) {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const tokenId = getStringValue(formData, "tokenId");
 
   if (!tokenId) {

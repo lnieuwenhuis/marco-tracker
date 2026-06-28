@@ -1,7 +1,7 @@
-import { canAccessAdmin, ensureDateString, getUserById, getUserGoals, getWeightPageData } from "@macro-tracker/db";
+import { getUserGoals, getWeightPageData } from "@macro-tracker/db";
 
 import { ProgressShell } from "@/components/progress-shell";
-import { requireOnboardedSessionUser } from "@/lib/auth";
+import { loadOnboardedPageContext } from "@/lib/page-context";
 import { normalizeProgressTab } from "@/lib/ui-mode";
 
 type ProgressPageProps = {
@@ -12,21 +12,19 @@ type ProgressPageProps = {
 };
 
 export default async function ProgressPage({ searchParams }: ProgressPageProps) {
-  const sessionUser = await requireOnboardedSessionUser();
-  const params = await searchParams;
-  const selectedDate = ensureDateString(params.date);
+  const { params, sessionUser, selectedDate, userEmail, canAccessAdmin } =
+    await loadOnboardedPageContext(searchParams);
   const initialTab = normalizeProgressTab(params.tab);
 
-  const [goals, weightData, user] = await Promise.all([
+  const [goals, weightData] = await Promise.all([
     getUserGoals(sessionUser.userId),
     getWeightPageData(sessionUser.userId, selectedDate),
-    getUserById(sessionUser.userId),
   ]);
 
   return (
     <ProgressShell
-      userEmail={user?.email ?? sessionUser.email}
-      canAccessAdmin={user ? canAccessAdmin(user.role) : false}
+      userEmail={userEmail}
+      canAccessAdmin={canAccessAdmin}
       selectedDate={selectedDate}
       goals={goals}
       weightData={weightData}

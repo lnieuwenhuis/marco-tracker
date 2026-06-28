@@ -1,7 +1,7 @@
-import { canAccessAdmin, ensureDateString, getRecipes, getUserById } from "@macro-tracker/db";
+import { getRecipes } from "@macro-tracker/db";
 
 import { RecipesShell } from "@/components/recipes-shell";
-import { requireOnboardedSessionUser } from "@/lib/auth";
+import { loadOnboardedPageContext } from "@/lib/page-context";
 
 type RecipesPageProps = {
   searchParams: Promise<{
@@ -10,19 +10,14 @@ type RecipesPageProps = {
 };
 
 export default async function RecipesPage({ searchParams }: RecipesPageProps) {
-  const sessionUser = await requireOnboardedSessionUser();
-  const params = await searchParams;
-  const selectedDate = ensureDateString(params.date);
-
-  const [recipes, user] = await Promise.all([
-    getRecipes(sessionUser.userId),
-    getUserById(sessionUser.userId),
-  ]);
+  const { sessionUser, selectedDate, userEmail, canAccessAdmin } =
+    await loadOnboardedPageContext(searchParams);
+  const recipes = await getRecipes(sessionUser.userId);
 
   return (
     <RecipesShell
-      userEmail={user?.email ?? sessionUser.email}
-      canAccessAdmin={user ? canAccessAdmin(user.role) : false}
+      userEmail={userEmail}
+      canAccessAdmin={canAccessAdmin}
       selectedDate={selectedDate}
       recipes={recipes}
     />

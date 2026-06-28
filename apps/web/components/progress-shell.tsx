@@ -26,6 +26,7 @@ import {
   formatMacroInputValue,
   type MacroTargetDraft,
 } from "./macro-calculator-panel";
+import { NumberInputField } from "./number-input-field";
 
 type ProgressShellProps = {
   userEmail: string;
@@ -41,45 +42,6 @@ function toNullableNumber(value: string): number | null {
   if (!trimmed) return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function NumberField({
-  label,
-  value,
-  unit,
-  step,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-  step: string;
-  disabled?: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="block rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-4">
-      <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
-        {label}
-      </span>
-      <div className="relative mt-2">
-        <input
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step={step}
-          value={value}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-3 pr-12 text-base font-semibold text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)] disabled:opacity-60"
-        />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-[var(--color-muted)]">
-          {unit}
-        </span>
-      </div>
-    </label>
-  );
 }
 
 function GoalsPanel({
@@ -181,10 +143,10 @@ function GoalsPanel({
       </section>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <NumberField label="Calories" unit="kcal" step="1" value={calories} disabled={isPending} onChange={update(setCalories)} />
-        <NumberField label="Protein" unit="g" step="0.1" value={protein} disabled={isPending} onChange={update(setProtein)} />
-        <NumberField label="Carbs" unit="g" step="0.1" value={carbs} disabled={isPending} onChange={update(setCarbs)} />
-        <NumberField label="Fat" unit="g" step="0.1" value={fat} disabled={isPending} onChange={update(setFat)} />
+        <NumberInputField label="Calories" unit="kcal" step="1" value={calories} disabled={isPending} variant="card" onChange={update(setCalories)} />
+        <NumberInputField label="Protein" unit="g" step="0.1" value={protein} disabled={isPending} variant="card" onChange={update(setProtein)} />
+        <NumberInputField label="Carbs" unit="g" step="0.1" value={carbs} disabled={isPending} variant="card" onChange={update(setCarbs)} />
+        <NumberInputField label="Fat" unit="g" step="0.1" value={fat} disabled={isPending} variant="card" onChange={update(setFat)} />
       </div>
 
       {error ? <p className="text-sm text-[var(--color-danger)]">{error}</p> : null}

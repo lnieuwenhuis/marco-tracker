@@ -1,28 +1,26 @@
-import { canAccessAdmin, ensureDateString, getRecipes, getTemplates, getUserById, searchFoodProducts } from "@macro-tracker/db";
+import { getRecipes, getTemplates, searchFoodProducts } from "@macro-tracker/db";
 
 import { LibraryShell } from "@/components/library-shell";
-import { requireOnboardedSessionUser } from "@/lib/auth";
+import { loadOnboardedPageContext } from "@/lib/page-context";
 
 type LibraryPageProps = {
   searchParams: Promise<{ q?: string; date?: string }>;
 };
 
 export default async function LibraryPage({ searchParams }: LibraryPageProps) {
-  const sessionUser = await requireOnboardedSessionUser();
-  const params = await searchParams;
+  const { params, sessionUser, selectedDate, userEmail, canAccessAdmin } =
+    await loadOnboardedPageContext(searchParams);
   const query = params.q ?? "";
-  const selectedDate = ensureDateString(params.date);
-  const [templates, recipes, products, user] = await Promise.all([
+  const [templates, recipes, products] = await Promise.all([
     getTemplates(sessionUser.userId),
     getRecipes(sessionUser.userId),
     query.trim() ? searchFoodProducts(sessionUser.userId, query) : Promise.resolve([]),
-    getUserById(sessionUser.userId),
   ]);
 
   return (
     <LibraryShell
-      userEmail={user?.email ?? sessionUser.email}
-      canAccessAdmin={user ? canAccessAdmin(user.role) : false}
+      userEmail={userEmail}
+      canAccessAdmin={canAccessAdmin}
       selectedDate={selectedDate}
       query={query}
       products={products}

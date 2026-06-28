@@ -1,7 +1,7 @@
-import { canAccessAdmin, ensureDateString, getTemplates, getUserById } from "@macro-tracker/db";
+import { getTemplates } from "@macro-tracker/db";
 
 import { RecipeBuilderShell } from "@/components/recipe-builder-shell";
-import { requireOnboardedSessionUser } from "@/lib/auth";
+import { loadOnboardedPageContext } from "@/lib/page-context";
 
 type NewRecipePageProps = {
   searchParams: Promise<{
@@ -10,19 +10,14 @@ type NewRecipePageProps = {
 };
 
 export default async function NewRecipePage({ searchParams }: NewRecipePageProps) {
-  const sessionUser = await requireOnboardedSessionUser();
-  const params = await searchParams;
-  const selectedDate = ensureDateString(params.date);
-
-  const [templates, user] = await Promise.all([
-    getTemplates(sessionUser.userId),
-    getUserById(sessionUser.userId),
-  ]);
+  const { sessionUser, selectedDate, userEmail, canAccessAdmin } =
+    await loadOnboardedPageContext(searchParams);
+  const templates = await getTemplates(sessionUser.userId);
 
   return (
     <RecipeBuilderShell
-      userEmail={user?.email ?? sessionUser.email}
-      canAccessAdmin={user ? canAccessAdmin(user.role) : false}
+      userEmail={userEmail}
+      canAccessAdmin={canAccessAdmin}
       selectedDate={selectedDate}
       templates={templates}
       mode="create"

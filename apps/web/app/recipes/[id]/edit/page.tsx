@@ -1,8 +1,8 @@
-import { canAccessAdmin, ensureDateString, getRecipeById, getTemplates, getUserById } from "@macro-tracker/db";
+import { getRecipeById, getTemplates } from "@macro-tracker/db";
 import { notFound } from "next/navigation";
 
 import { RecipeBuilderShell } from "@/components/recipe-builder-shell";
-import { requireOnboardedSessionUser } from "@/lib/auth";
+import { loadOnboardedPageContext } from "@/lib/page-context";
 
 type EditRecipePageProps = {
   params: Promise<{ id: string }>;
@@ -15,14 +15,15 @@ export default async function EditRecipePage({
   params,
   searchParams,
 }: EditRecipePageProps) {
-  const sessionUser = await requireOnboardedSessionUser();
-  const [routeParams, queryParams] = await Promise.all([params, searchParams]);
-  const selectedDate = ensureDateString(queryParams.date);
+  const [routeParams, pageContext] = await Promise.all([
+    params,
+    loadOnboardedPageContext(searchParams),
+  ]);
+  const { sessionUser, selectedDate, userEmail, canAccessAdmin } = pageContext;
 
-  const [recipe, templates, user] = await Promise.all([
+  const [recipe, templates] = await Promise.all([
     getRecipeById(sessionUser.userId, routeParams.id),
     getTemplates(sessionUser.userId),
-    getUserById(sessionUser.userId),
   ]);
 
   if (!recipe) {
@@ -32,8 +33,8 @@ export default async function EditRecipePage({
   return (
     <RecipeBuilderShell
       key={recipe.id}
-      userEmail={user?.email ?? sessionUser.email}
-      canAccessAdmin={user ? canAccessAdmin(user.role) : false}
+      userEmail={userEmail}
+      canAccessAdmin={canAccessAdmin}
       selectedDate={selectedDate}
       templates={templates}
       mode="edit"

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { getAdminBarcodeProductById, listAdminAuditEvents } from "@macro-tracker/db";
 
+import { AdminFormField } from "@/components/admin-form-field";
 import {
   AdminNotice,
   AdminSection,
@@ -20,38 +21,6 @@ type AdminBarcodeDetailPageProps = {
     error?: string;
   }>;
 };
-
-function EditField({
-  label,
-  name,
-  defaultValue,
-  type = "text",
-  step,
-  required = false,
-}: {
-  label: string;
-  name: string;
-  defaultValue: string | number;
-  type?: string;
-  step?: string;
-  required?: boolean;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
-        {label}
-      </span>
-      <input
-        type={type}
-        name={name}
-        defaultValue={defaultValue}
-        step={step}
-        required={required}
-        className="w-full rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
-      />
-    </label>
-  );
-}
 
 export default async function AdminBarcodeDetailPage({
   params,
@@ -94,17 +63,17 @@ export default async function AdminBarcodeDetailPage({
       >
         <form action={updateAdminBarcodeProductAction} className="grid gap-4 lg:grid-cols-2">
           <input type="hidden" name="id" value={barcode.id} />
-          <EditField label="Barcode" name="barcode" defaultValue={barcode.barcode ?? ""} required />
-          <EditField label="Name" name="name" defaultValue={barcode.name} required />
-          <EditField label="Brand" name="brands" defaultValue={barcode.brand} />
-          <EditField
+          <AdminFormField label="Barcode" name="barcode" defaultValue={barcode.barcode ?? ""} required />
+          <AdminFormField label="Name" name="name" defaultValue={barcode.name} required />
+          <AdminFormField label="Brand" name="brands" defaultValue={barcode.brand} />
+          <AdminFormField
             label="Serving size (g)"
             name="servingSizeG"
             defaultValue={barcode.servingWeightG ?? ""}
             type="number"
             step="0.1"
           />
-          <EditField
+          <AdminFormField
             label="Protein (g)"
             name="proteinG"
             defaultValue={barcode.proteinPer100}
@@ -112,7 +81,7 @@ export default async function AdminBarcodeDetailPage({
             step="0.1"
             required
           />
-          <EditField
+          <AdminFormField
             label="Carbs (g)"
             name="carbsG"
             defaultValue={barcode.carbsPer100}
@@ -120,7 +89,7 @@ export default async function AdminBarcodeDetailPage({
             step="0.1"
             required
           />
-          <EditField
+          <AdminFormField
             label="Fat (g)"
             name="fatG"
             defaultValue={barcode.fatPer100}
@@ -128,7 +97,7 @@ export default async function AdminBarcodeDetailPage({
             step="0.1"
             required
           />
-          <EditField
+          <AdminFormField
             label="Calories"
             name="caloriesKcal"
             defaultValue={barcode.caloriesPer100}

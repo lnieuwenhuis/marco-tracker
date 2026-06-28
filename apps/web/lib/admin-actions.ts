@@ -54,6 +54,19 @@ function getNullableNumber(formData: FormData, key: string) {
   return value;
 }
 
+function getBarcodeProductInput(formData: FormData) {
+  return {
+    barcode: getRequiredText(formData, "barcode"),
+    name: getRequiredText(formData, "name"),
+    brands: getOptionalText(formData, "brands"),
+    proteinG: getNumber(formData, "proteinG"),
+    carbsG: getNumber(formData, "carbsG"),
+    fatG: getNumber(formData, "fatG"),
+    caloriesKcal: Math.round(getNumber(formData, "caloriesKcal")),
+    servingSizeG: getNullableNumber(formData, "servingSizeG"),
+  };
+}
+
 function toActionError(error: unknown) {
   if (!(error instanceof Error)) {
     return "Something went wrong.";
@@ -78,107 +91,107 @@ function toActionError(error: unknown) {
   return error.message;
 }
 
-export async function changeUserRoleAction(formData: FormData) {
-  const owner = await requireOwnerUser();
-  const userId = getRequiredText(formData, "userId");
-  const role = getRequiredText(formData, "role") as AdminRole;
-  let destination = `/admin/users/${userId}?saved=role`;
+async function redirectAfterAdminAction(input: {
+  successDestination: string;
+  errorDestination: (error: unknown) => string;
+  action: () => Promise<string | void>;
+}) {
+  let destination = input.successDestination;
 
   try {
-    await setUserRole(owner.id, userId, role);
-    revalidatePath("/admin");
-    revalidatePath("/admin/users");
-    revalidatePath(`/admin/users/${userId}`);
+    destination = (await input.action()) ?? destination;
   } catch (error) {
-    destination = `/admin/users/${userId}?error=${encodeURIComponent(toActionError(error))}`;
+    destination = input.errorDestination(error);
   }
 
   redirect(destination);
 }
 
+function revalidateAdminPaths(detailPath?: string) {
+  revalidatePath("/admin");
+  revalidatePath("/admin/barcodes");
+  if (detailPath) {
+    revalidatePath(detailPath);
+  }
+}
+
+export async function changeUserRoleAction(formData: FormData) {
+  const owner = await requireOwnerUser();
+  const userId = getRequiredText(formData, "userId");
+  const role = getRequiredText(formData, "role") as AdminRole;
+
+  await redirectAfterAdminAction({
+    successDestination: `/admin/users/${userId}?saved=role`,
+    errorDestination: (error) =>
+      `/admin/users/${userId}?error=${encodeURIComponent(toActionError(error))}`,
+    action: async () => {
+      await setUserRole(owner.id, userId, role);
+      revalidatePath("/admin");
+      revalidatePath("/admin/users");
+      revalidatePath(`/admin/users/${userId}`);
+    },
+  });
+}
+
 export async function createAdminBarcodeProductAction(formData: FormData) {
   const admin = await requireAdminUser();
-  let destination = "/admin/barcodes?saved=created";
 
-  try {
-    const product = await createAdminBarcodeProduct(admin.id, {
-      barcode: getRequiredText(formData, "barcode"),
-      name: getRequiredText(formData, "name"),
-      brands: getOptionalText(formData, "brands"),
-      proteinG: getNumber(formData, "proteinG"),
-      carbsG: getNumber(formData, "carbsG"),
-      fatG: getNumber(formData, "fatG"),
-      caloriesKcal: Math.round(getNumber(formData, "caloriesKcal")),
-      servingSizeG: getNullableNumber(formData, "servingSizeG"),
-    });
-
-    revalidatePath("/admin");
-    revalidatePath("/admin/barcodes");
-    destination = `/admin/barcodes/${product.id}?saved=created`;
-  } catch (error) {
-    destination = `/admin/barcodes?error=${encodeURIComponent(toActionError(error))}`;
-  }
-
-  redirect(destination);
+  await redirectAfterAdminAction({
+    successDestination: "/admin/barcodes?saved=created",
+    errorDestination: (error) =>
+      `/admin/barcodes?error=${encodeURIComponent(toActionError(error))}`,
+    action: async () => {
+      const product = await createAdminBarcodeProduct(
+        admin.id,
+        getBarcodeProductInput(formData),
+      );
+      revalidateAdminPaths();
+      return `/admin/barcodes/${product.id}?saved=created`;
+    },
+  });
 }
 
 export async function updateAdminBarcodeProductAction(formData: FormData) {
   const admin = await requireAdminUser();
   const id = getRequiredText(formData, "id");
-  let destination = `/admin/barcodes/${id}?saved=updated`;
 
-  try {
-    await updateAdminBarcodeProduct(admin.id, id, {
-      barcode: getRequiredText(formData, "barcode"),
-      name: getRequiredText(formData, "name"),
-      brands: getOptionalText(formData, "brands"),
-      proteinG: getNumber(formData, "proteinG"),
-      carbsG: getNumber(formData, "carbsG"),
-      fatG: getNumber(formData, "fatG"),
-      caloriesKcal: Math.round(getNumber(formData, "caloriesKcal")),
-      servingSizeG: getNullableNumber(formData, "servingSizeG"),
-    });
-
-    revalidatePath("/admin");
-    revalidatePath("/admin/barcodes");
-    revalidatePath(`/admin/barcodes/${id}`);
-  } catch (error) {
-    destination = `/admin/barcodes/${id}?error=${encodeURIComponent(toActionError(error))}`;
-  }
-
-  redirect(destination);
+  await redirectAfterAdminAction({
+    successDestination: `/admin/barcodes/${id}?saved=updated`,
+    errorDestination: (error) =>
+      `/admin/barcodes/${id}?error=${encodeURIComponent(toActionError(error))}`,
+    action: async () => {
+      await updateAdminBarcodeProduct(admin.id, id, getBarcodeProductInput(formData));
+      revalidateAdminPaths(`/admin/barcodes/${id}`);
+    },
+  });
 }
 
 export async function softDeleteAdminBarcodeProductAction(formData: FormData) {
   const admin = await requireAdminUser();
   const id = getRequiredText(formData, "id");
-  let destination = `/admin/barcodes/${id}?saved=deleted`;
 
-  try {
-    await softDeleteAdminBarcodeProduct(admin.id, id);
-    revalidatePath("/admin");
-    revalidatePath("/admin/barcodes");
-    revalidatePath(`/admin/barcodes/${id}`);
-  } catch (error) {
-    destination = `/admin/barcodes/${id}?error=${encodeURIComponent(toActionError(error))}`;
-  }
-
-  redirect(destination);
+  await redirectAfterAdminAction({
+    successDestination: `/admin/barcodes/${id}?saved=deleted`,
+    errorDestination: (error) =>
+      `/admin/barcodes/${id}?error=${encodeURIComponent(toActionError(error))}`,
+    action: async () => {
+      await softDeleteAdminBarcodeProduct(admin.id, id);
+      revalidateAdminPaths(`/admin/barcodes/${id}`);
+    },
+  });
 }
 
 export async function restoreAdminBarcodeProductAction(formData: FormData) {
   const admin = await requireAdminUser();
   const id = getRequiredText(formData, "id");
-  let destination = `/admin/barcodes/${id}?saved=restored`;
 
-  try {
-    await restoreAdminBarcodeProduct(admin.id, id);
-    revalidatePath("/admin");
-    revalidatePath("/admin/barcodes");
-    revalidatePath(`/admin/barcodes/${id}`);
-  } catch (error) {
-    destination = `/admin/barcodes/${id}?error=${encodeURIComponent(toActionError(error))}`;
-  }
-
-  redirect(destination);
+  await redirectAfterAdminAction({
+    successDestination: `/admin/barcodes/${id}?saved=restored`,
+    errorDestination: (error) =>
+      `/admin/barcodes/${id}?error=${encodeURIComponent(toActionError(error))}`,
+    action: async () => {
+      await restoreAdminBarcodeProduct(admin.id, id);
+      revalidateAdminPaths(`/admin/barcodes/${id}`);
+    },
+  });
 }

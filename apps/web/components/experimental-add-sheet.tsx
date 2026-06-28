@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 
 import type { ComposeAction } from "@/lib/compose";
 
-import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
+import { CloseButton } from "./close-button";
+import { OverlayPortal, useBodyScrollLock, useDismissableLayer } from "./overlay-portal";
 
 type ExperimentalAddSheetProps = {
   open: boolean;
@@ -91,46 +92,19 @@ export function ExperimentalAddSheet({
 }: ExperimentalAddSheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   useBodyScrollLock(open);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onClose();
-        return;
-      }
-
+  useDismissableLayer({
+    active: open,
+    layerRef: panelRef,
+    onDismiss: onClose,
+    onKeyDown: (event) => {
       const actionIndex = Number(event.key) - 1;
       const action = ACTIONS[actionIndex]?.action;
       if (action) {
         event.preventDefault();
         onSelect(action);
       }
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        return;
-      }
-
-      if (panelRef.current?.contains(target)) {
-        return;
-      }
-
-      onClose();
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("pointerdown", handlePointerDown);
-    };
-  }, [onClose, onSelect, open]);
+    },
+  });
 
   if (!open) {
     return null;
@@ -154,17 +128,11 @@ export function ExperimentalAddSheet({
                   Pick how you want to add the next item.
                 </p>
               </div>
-              <button
-                type="button"
+              <CloseButton
                 onClick={onClose}
                 className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--color-muted)] transition hover:bg-[var(--color-card-muted)] hover:text-[var(--color-ink)]"
-                aria-label="Close add menu"
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                  <line x1="3.5" y1="3.5" x2="12.5" y2="12.5" />
-                  <line x1="12.5" y1="3.5" x2="3.5" y2="12.5" />
-                </svg>
-              </button>
+                label="Close add menu"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

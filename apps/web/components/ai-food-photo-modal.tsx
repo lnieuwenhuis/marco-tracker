@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { FoodPhotoEstimate } from "@/lib/ai-food-photo";
 
+import { CloseButton } from "./close-button";
 import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
 
 type AiFoodPhotoModalProps = {
@@ -186,30 +187,14 @@ export function AiFoodPhotoModal({
                 Take a picture now or choose one from your library.
               </p>
             </div>
-            <button
-              type="button"
+            <CloseButton
               onClick={() => {
                 if (!isAnalyzing) {
                   onClose();
                 }
               }}
               disabled={isAnalyzing}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
-              aria-label="Close"
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              >
-                <line x1="3" y1="3" x2="13" y2="13" />
-                <line x1="13" y1="3" x2="3" y2="13" />
-              </svg>
-            </button>
+            />
           </div>
 
           <div className="space-y-4 p-5">

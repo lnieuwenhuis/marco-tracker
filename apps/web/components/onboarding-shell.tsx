@@ -15,6 +15,7 @@ import {
   formatMacroInputValue,
   type MacroTargetDraft,
 } from "./macro-calculator-panel";
+import { NumberInputField } from "./number-input-field";
 import { ThemePicker } from "./theme-toggle";
 
 type OnboardingShellProps = {
@@ -23,7 +24,10 @@ type OnboardingShellProps = {
   preferredWeightUnit: WeightUnit;
 };
 
-function MacroInput({
+const ONBOARDING_NUMBER_INPUT_CLASS =
+  "w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-14 text-sm font-semibold text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]";
+
+function OnboardingNumberInput({
   label,
   value,
   unit,
@@ -35,25 +39,16 @@ function MacroInput({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
-        {label}
-      </span>
-      <div className="relative">
-        <input
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step={unit === "kcal" ? "1" : "0.1"}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-14 text-sm font-semibold text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
-        />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--color-muted)]">
-          {unit}
-        </span>
-      </div>
-    </label>
+    <NumberInputField
+      label={label}
+      value={value}
+      unit={unit}
+      step={unit === "kcal" ? "1" : "0.1"}
+      fieldClassName="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]"
+      inputClassName={ONBOARDING_NUMBER_INPUT_CLASS}
+      unitClassName="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[var(--color-muted)]"
+      onChange={onChange}
+    />
   );
 }
 
@@ -144,10 +139,10 @@ export function OnboardingShell({
           <section className="rounded-[1.75rem] border border-[var(--color-border)] bg-[var(--color-surface-strong)] p-5">
             <h2 className="text-sm font-bold text-[var(--color-ink)]">Daily goals</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <MacroInput label="Calories" unit="kcal" value={calories} onChange={setCalories} />
-              <MacroInput label="Protein" unit="g" value={protein} onChange={setProtein} />
-              <MacroInput label="Carbs" unit="g" value={carbs} onChange={setCarbs} />
-              <MacroInput label="Fat" unit="g" value={fat} onChange={setFat} />
+              <OnboardingNumberInput label="Calories" unit="kcal" value={calories} onChange={setCalories} />
+              <OnboardingNumberInput label="Protein" unit="g" value={protein} onChange={setProtein} />
+              <OnboardingNumberInput label="Carbs" unit="g" value={carbs} onChange={setCarbs} />
+              <OnboardingNumberInput label="Fat" unit="g" value={fat} onChange={setFat} />
             </div>
           </section>
 
@@ -167,8 +162,8 @@ export function OnboardingShell({
                   <option value="lb">lb</option>
                 </select>
               </label>
-              <MacroInput label="Current" unit={unit} value={currentWeight} onChange={setCurrentWeight} />
-              <MacroInput label="Goal" unit={unit} value={goalWeight} onChange={setGoalWeight} />
+              <OnboardingNumberInput label="Current" unit={unit} value={currentWeight} onChange={setCurrentWeight} />
+              <OnboardingNumberInput label="Goal" unit={unit} value={goalWeight} onChange={setGoalWeight} />
             </div>
           </section>
 
@@ -182,10 +177,10 @@ export function OnboardingShell({
               className="mt-4 w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 text-sm text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
             />
             <div className="mt-3 grid gap-3 sm:grid-cols-4">
-              <MacroInput label="Protein" unit="g" value={templateProtein} onChange={setTemplateProtein} />
-              <MacroInput label="Carbs" unit="g" value={templateCarbs} onChange={setTemplateCarbs} />
-              <MacroInput label="Fat" unit="g" value={templateFat} onChange={setTemplateFat} />
-              <MacroInput label="Calories" unit="kcal" value={templateCalories} onChange={setTemplateCalories} />
+              <OnboardingNumberInput label="Protein" unit="g" value={templateProtein} onChange={setTemplateProtein} />
+              <OnboardingNumberInput label="Carbs" unit="g" value={templateCarbs} onChange={setTemplateCarbs} />
+              <OnboardingNumberInput label="Fat" unit="g" value={templateFat} onChange={setTemplateFat} />
+              <OnboardingNumberInput label="Calories" unit="kcal" value={templateCalories} onChange={setTemplateCalories} />
             </div>
           </section>
 

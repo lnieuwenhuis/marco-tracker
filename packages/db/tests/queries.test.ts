@@ -102,22 +102,27 @@ describe("database queries", () => {
     return user.id;
   }
 
-  function createFailingRecipeDb(failOnIngredientInsertNumber: number) {
-    let ingredientInsertCount = 0;
+  function createFailingDbProxy(input: {
+    method: "insert" | "update";
+    table: unknown;
+    failOnCall?: number;
+    message: string;
+  }) {
+    let callCount = 0;
 
     function wrapClient(client: any) {
       return new Proxy(client, {
         get(target, prop, receiver) {
-          if (prop === "insert") {
+          if (prop === input.method) {
             return (table: unknown) => {
-              if (table === recipeIngredients) {
-                ingredientInsertCount += 1;
-                if (ingredientInsertCount === failOnIngredientInsertNumber) {
-                  throw new Error("Forced ingredient insert failure.");
+              if (table === input.table) {
+                callCount += 1;
+                if (callCount === (input.failOnCall ?? 1)) {
+                  throw new Error(input.message);
                 }
               }
 
-              return target.insert(table);
+              return target[input.method](table);
             };
           }
 
@@ -133,95 +138,40 @@ describe("database queries", () => {
     }
 
     return wrapClient(runtime.db as any);
+  }
+
+  function createFailingRecipeDb(failOnIngredientInsertNumber: number) {
+    return createFailingDbProxy({
+      method: "insert",
+      table: recipeIngredients,
+      failOnCall: failOnIngredientInsertNumber,
+      message: "Forced ingredient insert failure.",
+    });
   }
 
   function createFailingBarcodeFoodProductDb() {
-    function wrapClient(client: any) {
-      return new Proxy(client, {
-        get(target, prop, receiver) {
-          if (prop === "insert") {
-            return (table: unknown) => {
-              if (table === foodProducts) {
-                throw new Error("Forced barcode food product insert failure.");
-              }
-
-              return target.insert(table);
-            };
-          }
-
-          if (prop === "transaction") {
-            return async (callback: (tx: unknown) => unknown) =>
-              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
-          }
-
-          const value = Reflect.get(target, prop, receiver);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-    }
-
-    return wrapClient(runtime.db as any);
+    return createFailingDbProxy({
+      method: "insert",
+      table: foodProducts,
+      message: "Forced barcode food product insert failure.",
+    });
   }
 
   function createFailingMealEntryInsertDb(failOnMealEntryInsertNumber: number) {
-    let mealEntryInsertCount = 0;
-
-    function wrapClient(client: any) {
-      return new Proxy(client, {
-        get(target, prop, receiver) {
-          if (prop === "insert") {
-            return (table: unknown) => {
-              if (table === mealEntries) {
-                mealEntryInsertCount += 1;
-                if (mealEntryInsertCount === failOnMealEntryInsertNumber) {
-                  throw new Error("Forced meal entry insert failure.");
-                }
-              }
-
-              return target.insert(table);
-            };
-          }
-
-          if (prop === "transaction") {
-            return async (callback: (tx: unknown) => unknown) =>
-              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
-          }
-
-          const value = Reflect.get(target, prop, receiver);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-    }
-
-    return wrapClient(runtime.db as any);
+    return createFailingDbProxy({
+      method: "insert",
+      table: mealEntries,
+      failOnCall: failOnMealEntryInsertNumber,
+      message: "Forced meal entry insert failure.",
+    });
   }
 
   function createFailingMealGroupDeleteDb() {
-    function wrapClient(client: any) {
-      return new Proxy(client, {
-        get(target, prop, receiver) {
-          if (prop === "update") {
-            return (table: unknown) => {
-              if (table === mealEntries) {
-                throw new Error("Forced meal group unassign failure.");
-              }
-
-              return target.update(table);
-            };
-          }
-
-          if (prop === "transaction") {
-            return async (callback: (tx: unknown) => unknown) =>
-              target.transaction(async (tx: unknown) => callback(wrapClient(tx)));
-          }
-
-          const value = Reflect.get(target, prop, receiver);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-    }
-
-    return wrapClient(runtime.db as any);
+    return createFailingDbProxy({
+      method: "update",
+      table: mealEntries,
+      message: "Forced meal group unassign failure.",
+    });
   }
 
   it("creates API tokens as one-time-visible secrets with stored hashes", async () => {

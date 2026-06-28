@@ -1,10 +1,29 @@
 import { API_SCOPE_VALUES, type ApiScope } from "@macro-tracker/db";
 
+type ApiRequestBodyKey =
+  | "date"
+  | "foodMutation"
+  | "foodPatch"
+  | "goalPatch"
+  | "mealEntryCreate"
+  | "mealEntryPatch"
+  | "mealEntryStatus"
+  | "mealGroup"
+  | "recipeLog"
+  | "recipeMutation"
+  | "reorderMealGroups"
+  | "templateFromDay"
+  | "templateMutation"
+  | "weightEntry"
+  | "weightEntryPatch"
+  | "weightGoal";
+
 type ApiEndpointMethod = {
   method: "get" | "post" | "patch" | "delete";
   summary: string;
   scopes: ApiScope[];
   successStatus?: 200 | 201;
+  requestBody?: ApiRequestBodyKey;
 };
 
 type ApiEndpoint = {
@@ -21,7 +40,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     path: "/goals",
     methods: [
       { method: "get", summary: "Read macro goals", scopes: ["read:goals"] },
-      { method: "patch", summary: "Update macro goals", scopes: ["write:goals", "read:goals"] },
+      { method: "patch", summary: "Update macro goals", scopes: ["write:goals", "read:goals"], requestBody: "goalPatch" },
     ],
   },
   {
@@ -30,36 +49,36 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/days/{date}/entries",
-    methods: [{ method: "post", summary: "Create a meal entry on a date", scopes: ["write:daily"], successStatus: 201 }],
+    methods: [{ method: "post", summary: "Create a meal entry on a date", scopes: ["write:daily"], successStatus: 201, requestBody: "mealEntryCreate" }],
   },
   {
     path: "/meal-entries/{id}",
     methods: [
-      { method: "patch", summary: "Update a meal entry", scopes: ["write:daily", "read:daily"] },
+      { method: "patch", summary: "Update a meal entry", scopes: ["write:daily", "read:daily"], requestBody: "mealEntryPatch" },
       { method: "delete", summary: "Delete a meal entry", scopes: ["write:daily"] },
     ],
   },
   {
     path: "/meal-entries/{id}/status",
-    methods: [{ method: "patch", summary: "Update a meal entry status", scopes: ["write:daily", "read:daily"] }],
+    methods: [{ method: "patch", summary: "Update a meal entry status", scopes: ["write:daily", "read:daily"], requestBody: "mealEntryStatus" }],
   },
   {
     path: "/meal-groups",
     methods: [
       { method: "get", summary: "List meal groups", scopes: ["read:daily"] },
-      { method: "post", summary: "Create a meal group", scopes: ["write:daily"], successStatus: 201 },
+      { method: "post", summary: "Create a meal group", scopes: ["write:daily"], successStatus: 201, requestBody: "mealGroup" },
     ],
   },
   {
     path: "/meal-groups/{id}",
     methods: [
-      { method: "patch", summary: "Update a meal group", scopes: ["write:daily"] },
+      { method: "patch", summary: "Update a meal group", scopes: ["write:daily"], requestBody: "mealGroup" },
       { method: "delete", summary: "Delete a meal group", scopes: ["write:daily"] },
     ],
   },
   {
     path: "/meal-groups/reorder",
-    methods: [{ method: "post", summary: "Reorder meal groups", scopes: ["write:daily"] }],
+    methods: [{ method: "post", summary: "Reorder meal groups", scopes: ["write:daily"], requestBody: "reorderMealGroups" }],
   },
   {
     path: "/foods/search",
@@ -67,11 +86,11 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
   },
   {
     path: "/foods",
-    methods: [{ method: "post", summary: "Create a personal food product", scopes: ["write:foods"], successStatus: 201 }],
+    methods: [{ method: "post", summary: "Create a personal food product", scopes: ["write:foods"], successStatus: 201, requestBody: "foodMutation" }],
   },
   {
     path: "/foods/{id}",
-    methods: [{ method: "patch", summary: "Update a personal food product", scopes: ["write:foods", "read:foods"] }],
+    methods: [{ method: "patch", summary: "Update a personal food product", scopes: ["write:foods", "read:foods"], requestBody: "foodPatch" }],
   },
   {
     path: "/barcodes/{barcode}",
@@ -81,43 +100,43 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     path: "/templates",
     methods: [
       { method: "get", summary: "List meal templates", scopes: ["read:templates"] },
-      { method: "post", summary: "Create a meal template", scopes: ["write:templates"], successStatus: 201 },
+      { method: "post", summary: "Create a meal template", scopes: ["write:templates"], successStatus: 201, requestBody: "templateMutation" },
     ],
   },
   {
     path: "/templates/{id}",
     methods: [
       { method: "get", summary: "Read a meal template", scopes: ["read:templates"] },
-      { method: "patch", summary: "Update a meal template", scopes: ["write:templates"] },
+      { method: "patch", summary: "Update a meal template", scopes: ["write:templates"], requestBody: "templateMutation" },
       { method: "delete", summary: "Delete a meal template", scopes: ["write:templates"] },
     ],
   },
   {
     path: "/templates/{id}/apply",
-    methods: [{ method: "post", summary: "Apply a template to a date", scopes: ["read:templates", "write:daily"], successStatus: 201 }],
+    methods: [{ method: "post", summary: "Apply a template to a date", scopes: ["read:templates", "write:daily"], successStatus: 201, requestBody: "date" }],
   },
   {
     path: "/templates/from-day",
-    methods: [{ method: "post", summary: "Create a template from a day", scopes: ["read:daily", "write:templates"], successStatus: 201 }],
+    methods: [{ method: "post", summary: "Create a template from a day", scopes: ["read:daily", "write:templates"], successStatus: 201, requestBody: "templateFromDay" }],
   },
   {
     path: "/recipes",
     methods: [
       { method: "get", summary: "List recipes", scopes: ["read:recipes"] },
-      { method: "post", summary: "Create a recipe", scopes: ["write:recipes"], successStatus: 201 },
+      { method: "post", summary: "Create a recipe", scopes: ["write:recipes"], successStatus: 201, requestBody: "recipeMutation" },
     ],
   },
   {
     path: "/recipes/{id}",
     methods: [
       { method: "get", summary: "Read a recipe", scopes: ["read:recipes"] },
-      { method: "patch", summary: "Update a recipe", scopes: ["write:recipes"] },
+      { method: "patch", summary: "Update a recipe", scopes: ["write:recipes"], requestBody: "recipeMutation" },
       { method: "delete", summary: "Delete a recipe", scopes: ["write:recipes"] },
     ],
   },
   {
     path: "/recipes/{id}/log",
-    methods: [{ method: "post", summary: "Log a recipe portion", scopes: ["read:recipes", "write:daily"], successStatus: 201 }],
+    methods: [{ method: "post", summary: "Log a recipe portion", scopes: ["read:recipes", "write:daily"], successStatus: 201, requestBody: "recipeLog" }],
   },
   {
     path: "/weight",
@@ -127,13 +146,13 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     path: "/weight/entries",
     methods: [
       { method: "get", summary: "List weight entries", scopes: ["read:weight"] },
-      { method: "post", summary: "Create a weight entry", scopes: ["write:weight"], successStatus: 201 },
+      { method: "post", summary: "Create a weight entry", scopes: ["write:weight"], successStatus: 201, requestBody: "weightEntry" },
     ],
   },
   {
     path: "/weight/entries/{id}",
     methods: [
-      { method: "patch", summary: "Update a weight entry", scopes: ["write:weight", "read:weight"] },
+      { method: "patch", summary: "Update a weight entry", scopes: ["write:weight", "read:weight"], requestBody: "weightEntryPatch" },
       { method: "delete", summary: "Delete a weight entry", scopes: ["write:weight"] },
     ],
   },
@@ -141,7 +160,7 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     path: "/weight/goal",
     methods: [
       { method: "get", summary: "Read the weight goal", scopes: ["read:weight"] },
-      { method: "patch", summary: "Update the weight goal", scopes: ["write:weight"] },
+      { method: "patch", summary: "Update the weight goal", scopes: ["write:weight"], requestBody: "weightGoal" },
     ],
   },
   {
@@ -167,6 +186,77 @@ export const API_V1_ENDPOINTS: ApiEndpoint[] = [
     methods: [{ method: "get", summary: "Read the OpenAPI document", scopes: [] }],
   },
 ];
+
+export type ApiV1RouterMethod = Uppercase<ApiEndpointMethod["method"]>;
+
+export type ApiV1EndpointMatch = {
+  endpoint: ApiEndpoint;
+  method: ApiEndpointMethod;
+};
+
+function apiMethodToRouterMethod(method: ApiEndpointMethod["method"]): ApiV1RouterMethod {
+  return method.toUpperCase() as ApiV1RouterMethod;
+}
+
+function splitEndpointPath(path: string) {
+  return path.replace(/^\//, "").split("/").filter(Boolean);
+}
+
+function endpointPathMatches(endpointPath: string, path: string[]) {
+  const endpointSegments = splitEndpointPath(endpointPath);
+  if (endpointSegments.length !== path.length) {
+    return false;
+  }
+
+  return endpointSegments.every((segment, index) => {
+    return segment.startsWith("{") && segment.endsWith("}")
+      ? Boolean(path[index])
+      : segment === path[index];
+  });
+}
+
+function endpointPathSpecificity(endpointPath: string) {
+  return splitEndpointPath(endpointPath).filter(
+    (segment) => !(segment.startsWith("{") && segment.endsWith("}")),
+  ).length;
+}
+
+function getMatchingEndpoint(path: string[]) {
+  return API_V1_ENDPOINTS
+    .filter((candidate) => endpointPathMatches(candidate.path, path))
+    .sort(
+      (a, b) =>
+        endpointPathSpecificity(b.path) - endpointPathSpecificity(a.path),
+    )[0] ?? null;
+}
+
+export function getApiV1EndpointMatch(
+  method: ApiV1RouterMethod,
+  path: string[],
+): ApiV1EndpointMatch | null {
+  const endpoint = getMatchingEndpoint(path);
+  if (!endpoint) {
+    return null;
+  }
+
+  const endpointMethod = endpoint.methods.find(
+    (candidate) => apiMethodToRouterMethod(candidate.method) === method,
+  );
+  return endpointMethod ? { endpoint, method: endpointMethod } : null;
+}
+
+export function getApiV1AllowedMethods(path: string[]): ApiV1RouterMethod[] {
+  const endpoint = getMatchingEndpoint(path);
+  if (!endpoint) {
+    return [];
+  }
+
+  return endpoint.methods.map((method) => apiMethodToRouterMethod(method.method));
+}
+
+export function isKnownApiV1Path(path: string[]) {
+  return API_V1_ENDPOINTS.some((endpoint) => endpointPathMatches(endpoint.path, path));
+}
 
 function responseSchema() {
   return {
@@ -441,29 +531,27 @@ const weightGoalSchema = {
   additionalProperties: true,
 };
 
-function requestBodyFor(path: string, method: ApiEndpointMethod["method"]) {
-  if (path === "/goals" && method === "patch") return jsonRequestBody(goalPatchSchema);
-  if (path === "/days/{date}/entries" && method === "post") return jsonRequestBody(mealEntryCreateSchema);
-  if (path === "/meal-entries/{id}" && method === "patch") return jsonRequestBody(mealEntryPatchSchema);
-  if (path === "/meal-entries/{id}/status" && method === "patch") return jsonRequestBody(mealEntryStatusSchema);
-  if (path === "/meal-groups" && method === "post") return jsonRequestBody(mealGroupSchema);
-  if (path === "/meal-groups/{id}" && method === "patch") return jsonRequestBody(mealGroupSchema);
-  if (path === "/meal-groups/reorder" && method === "post") return jsonRequestBody(reorderMealGroupsSchema);
-  if (path === "/foods" && method === "post") return jsonRequestBody(foodMutationSchema);
-  if (path === "/foods/{id}" && method === "patch") return jsonRequestBody(foodPatchSchema);
-  if (path === "/templates" && method === "post") return jsonRequestBody(templateMutationSchema);
-  if (path === "/templates/{id}" && method === "patch") return jsonRequestBody(templateMutationSchema);
-  if (path === "/templates/{id}/apply" && method === "post") return jsonRequestBody(dateSchema);
-  if (path === "/templates/from-day" && method === "post") return jsonRequestBody(templateFromDaySchema);
-  if (path === "/recipes" && method === "post") return jsonRequestBody(recipeMutationSchema);
-  if (path === "/recipes/{id}" && method === "patch") return jsonRequestBody(recipeMutationSchema);
-  if (path === "/recipes/{id}/log" && method === "post") {
-    return jsonRequestBody(recipeLogSchema);
-  }
-  if (path === "/weight/entries" && method === "post") return jsonRequestBody(weightEntrySchema);
-  if (path === "/weight/entries/{id}" && method === "patch") return jsonRequestBody(weightEntryPatchSchema);
-  if (path === "/weight/goal" && method === "patch") return jsonRequestBody(weightGoalSchema);
-  return undefined;
+const REQUEST_BODY_SCHEMAS = {
+  date: dateSchema,
+  foodMutation: foodMutationSchema,
+  foodPatch: foodPatchSchema,
+  goalPatch: goalPatchSchema,
+  mealEntryCreate: mealEntryCreateSchema,
+  mealEntryPatch: mealEntryPatchSchema,
+  mealEntryStatus: mealEntryStatusSchema,
+  mealGroup: mealGroupSchema,
+  recipeLog: recipeLogSchema,
+  recipeMutation: recipeMutationSchema,
+  reorderMealGroups: reorderMealGroupsSchema,
+  templateFromDay: templateFromDaySchema,
+  templateMutation: templateMutationSchema,
+  weightEntry: weightEntrySchema,
+  weightEntryPatch: weightEntryPatchSchema,
+  weightGoal: weightGoalSchema,
+} satisfies Record<ApiRequestBodyKey, Record<string, unknown>>;
+
+function requestBodyFor(requestBody: ApiRequestBodyKey | undefined) {
+  return requestBody ? jsonRequestBody(REQUEST_BODY_SCHEMAS[requestBody]) : undefined;
 }
 
 function parametersFor(path: string) {
@@ -491,7 +579,7 @@ export function getApiV1OpenApi() {
             : [],
           "x-required-scopes": method.scopes.length ? method.scopes : undefined,
           parameters: parametersFor(endpoint.path),
-          requestBody: requestBodyFor(endpoint.path, method.method),
+          requestBody: requestBodyFor(method.requestBody),
           responses: {
             [String(method.successStatus ?? 200)]: {
               description: "Successful response",

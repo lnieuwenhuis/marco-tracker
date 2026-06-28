@@ -1,7 +1,7 @@
 "use client";
 
 import type { MealTemplate } from "@macro-tracker/db";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   canEditAsSingleFoodTemplate,
@@ -16,7 +16,8 @@ import {
 } from "@/lib/preset-modal-state";
 
 import { ConfirmDeleteButton } from "./confirm-delete-button";
-import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
+import { NumberInputField } from "./number-input-field";
+import { OverlayPortal, useBodyScrollLock, useEscapeDismiss } from "./overlay-portal";
 
 type PresetMutationState =
   | { type: "save" }
@@ -66,44 +67,8 @@ function presetToDraft(preset: MealTemplate): PresetDraft {
   };
 }
 
-function SmallInput({
-  label,
-  value,
-  unit,
-  step,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-  step: string;
-  disabled?: boolean;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
-        {label}
-      </span>
-      <div className="relative">
-        <input
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step={step}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2 pr-9 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[var(--color-muted)]">
-          {unit}
-        </span>
-      </div>
-    </label>
-  );
-}
+const PRESET_NUMBER_INPUT_CLASS =
+  "w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2 pr-9 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60";
 
 export function PresetModal({
   presets,
@@ -170,23 +135,7 @@ export function PresetModal({
     }
   }
 
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (mutation) {
-        return;
-      }
-
-      if (e.key === "Escape") {
-        if (editingId) {
-          setEditingId(null);
-        } else {
-          onClose();
-        }
-      }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [editingId, mutation, onClose]);
+  useEscapeDismiss(!mutation, dismissModal);
 
   async function handleSave() {
     if (!draft.label.trim()) return;
@@ -333,10 +282,10 @@ export function PresetModal({
                     />
                   </label>
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    <SmallInput label="Protein" value={editDraft.proteinG} unit="g" step="0.1" disabled={mutationsDisabled} onChange={(v) => setEditDraft({ ...editDraft, proteinG: v })} />
-                    <SmallInput label="Carbs" value={editDraft.carbsG} unit="g" step="0.1" disabled={mutationsDisabled} onChange={(v) => setEditDraft({ ...editDraft, carbsG: v })} />
-                    <SmallInput label="Fat" value={editDraft.fatG} unit="g" step="0.1" disabled={mutationsDisabled} onChange={(v) => setEditDraft({ ...editDraft, fatG: v })} />
-                    <SmallInput label="Calories" value={editDraft.caloriesKcal} unit="kcal" step="1" disabled={mutationsDisabled} onChange={(v) => setEditDraft({ ...editDraft, caloriesKcal: v })} />
+                    <NumberInputField label="Protein" value={editDraft.proteinG} unit="g" step="0.1" disabled={mutationsDisabled} inputClassName={PRESET_NUMBER_INPUT_CLASS} onChange={(v) => setEditDraft({ ...editDraft, proteinG: v })} />
+                    <NumberInputField label="Carbs" value={editDraft.carbsG} unit="g" step="0.1" disabled={mutationsDisabled} inputClassName={PRESET_NUMBER_INPUT_CLASS} onChange={(v) => setEditDraft({ ...editDraft, carbsG: v })} />
+                    <NumberInputField label="Fat" value={editDraft.fatG} unit="g" step="0.1" disabled={mutationsDisabled} inputClassName={PRESET_NUMBER_INPUT_CLASS} onChange={(v) => setEditDraft({ ...editDraft, fatG: v })} />
+                    <NumberInputField label="Calories" value={editDraft.caloriesKcal} unit="kcal" step="1" disabled={mutationsDisabled} inputClassName={PRESET_NUMBER_INPUT_CLASS} onChange={(v) => setEditDraft({ ...editDraft, caloriesKcal: v })} />
                   </div>
                   <div className="mt-3 flex gap-2">
                     <button
@@ -460,10 +409,10 @@ export function PresetModal({
             </label>
 
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <SmallInput label="Protein" value={draft.proteinG} unit="g" step="0.1" disabled={mutationsDisabled} onChange={(v) => setDraft({ ...draft, proteinG: v })} />
-              <SmallInput label="Carbs" value={draft.carbsG} unit="g" step="0.1" disabled={mutationsDisabled} onChange={(v) => setDraft({ ...draft, carbsG: v })} />
-              <SmallInput label="Fat" value={draft.fatG} unit="g" step="0.1" disabled={mutationsDisabled} onChange={(v) => setDraft({ ...draft, fatG: v })} />
-              <SmallInput label="Calories" value={draft.caloriesKcal} unit="kcal" step="1" disabled={mutationsDisabled} onChange={(v) => setDraft({ ...draft, caloriesKcal: v })} />
+              <NumberInputField label="Protein" value={draft.proteinG} unit="g" step="0.1" disabled={mutationsDisabled} inputClassName={PRESET_NUMBER_INPUT_CLASS} onChange={(v) => setDraft({ ...draft, proteinG: v })} />
+              <NumberInputField label="Carbs" value={draft.carbsG} unit="g" step="0.1" disabled={mutationsDisabled} inputClassName={PRESET_NUMBER_INPUT_CLASS} onChange={(v) => setDraft({ ...draft, carbsG: v })} />
+              <NumberInputField label="Fat" value={draft.fatG} unit="g" step="0.1" disabled={mutationsDisabled} inputClassName={PRESET_NUMBER_INPUT_CLASS} onChange={(v) => setDraft({ ...draft, fatG: v })} />
+              <NumberInputField label="Calories" value={draft.caloriesKcal} unit="kcal" step="1" disabled={mutationsDisabled} inputClassName={PRESET_NUMBER_INPUT_CLASS} onChange={(v) => setDraft({ ...draft, caloriesKcal: v })} />
             </div>
 
             <button

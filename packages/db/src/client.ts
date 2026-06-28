@@ -9,6 +9,16 @@ import { Pool } from "pg";
 import { dirname, resolve } from "node:path";
 
 import * as schema from "./schema";
+import {
+  getPostgresConnectionConfig,
+  isPgliteConnectionString,
+} from "./postgres-config.js";
+
+export {
+  getPostgresConnectionConfig,
+  getSslConfig,
+  isPgliteConnectionString,
+} from "./postgres-config.js";
 
 export type DatabaseClient =
   | NodePgDatabase<typeof schema>
@@ -80,6 +90,16 @@ function getMigrationsFolder() {
   return resolve(dbPackageRoot, "drizzle");
 }
 
+function deterministicUuidSql(seedExpression: string) {
+  return `(
+        substr(md5(${seedExpression}), 1, 8) || '-' ||
+        substr(md5(${seedExpression}), 9, 4) || '-' ||
+        substr(md5(${seedExpression}), 13, 4) || '-' ||
+        substr(md5(${seedExpression}), 17, 4) || '-' ||
+        substr(md5(${seedExpression}), 21, 12)
+      )::uuid`;
+}
+
 async function loadPgliteAssets(): Promise<PgliteAssets> {
   const [fsBundleBuffer, pgliteWasmBuffer, initdbWasmBuffer] = await Promise.all([
     readFile(getPgliteAssetPath("pglite.data")),
@@ -107,10 +127,6 @@ async function getPgliteAssets() {
   return globalDatabaseState.__macroTrackerPgliteAssets;
 }
 
-function isPgliteConnectionString(connectionString: string) {
-  return connectionString === "memory:" || connectionString.startsWith("file:");
-}
-
 function getPglitePath(connectionString: string) {
   if (connectionString === "memory:") {
     return undefined;
@@ -120,67 +136,6 @@ function getPglitePath(connectionString: string) {
     /* turbopackIgnore: true */ process.cwd(),
     connectionString.slice("file:".length),
   );
-}
-
-function isLocalDatabaseHost(hostname: string) {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
-}
-
-const INSECURE_REMOTE_SSL_MODES = new Set([
-  "allow",
-  "disable",
-  "no-verify",
-  "prefer",
-]);
-const REMOTE_SSL_MODES = new Set(["require", "verify-full"]);
-const VERIFY_REMOTE_SSL_MODES = new Set(["verify-full"]);
-
-function validateRemoteSslMode(url: URL) {
-  const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
-
-  if (!sslMode || isLocalDatabaseHost(url.hostname.toLowerCase())) {
-    return;
-  }
-
-  if (INSECURE_REMOTE_SSL_MODES.has(sslMode)) {
-    throw new Error(
-      `Remote PostgreSQL DATABASE_URL cannot use insecure sslmode=${sslMode}.`,
-    );
-  }
-
-  if (!REMOTE_SSL_MODES.has(sslMode)) {
-    throw new Error(
-      `Remote PostgreSQL DATABASE_URL has unsupported sslmode=${sslMode}.`,
-    );
-  }
-}
-
-export function getSslConfig(connectionString: string) {
-  const url = new URL(connectionString);
-
-  if (isLocalDatabaseHost(url.hostname.toLowerCase())) {
-    return false;
-  }
-
-  validateRemoteSslMode(url);
-
-  const sslMode = url.searchParams.get("sslmode")?.toLowerCase();
-  const shouldVerifyRemoteCertificate =
-    sslMode === undefined || VERIFY_REMOTE_SSL_MODES.has(sslMode);
-
-  return { rejectUnauthorized: shouldVerifyRemoteCertificate };
-}
-
-export function getPostgresConnectionConfig(connectionString: string) {
-  const url = new URL(connectionString);
-  const ssl = getSslConfig(connectionString);
-
-  url.searchParams.delete("sslmode");
-
-  return {
-    connectionString: url.toString(),
-    ssl,
-  };
 }
 
 async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
@@ -511,13 +466,7 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "created_at"
     )
     SELECT
-      (
-        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 1, 8) || '-' ||
-        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 9, 4) || '-' ||
-        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 13, 4) || '-' ||
-        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 17, 4) || '-' ||
-        substr(md5('meal-template-item:preset:' || "food_presets"."id"::text), 21, 12)
-      )::uuid,
+      ${deterministicUuidSql(`'meal-template-item:preset:' || "food_presets"."id"::text`)},
       "food_presets"."id",
       NULL,
       NULL,
@@ -674,13 +623,7 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
   await db.execute(sql.raw(`
     WITH source_barcode_products AS (
       SELECT
-        (
-          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 1, 8) || '-' ||
-          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 9, 4) || '-' ||
-          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 13, 4) || '-' ||
-          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 17, 4) || '-' ||
-          substr(md5('global-barcode-food:' || "barcode_products"."barcode"), 21, 12)
-        )::uuid AS "id",
+        ${deterministicUuidSql(`'global-barcode-food:' || "barcode_products"."barcode"`)} AS "id",
         "barcode_products"."barcode",
         "barcode_products"."name",
         "barcode_products"."brands",
@@ -793,13 +736,7 @@ async function bootstrapLocalSchema(db: PgliteDatabase<typeof schema>) {
       "created_at"
     )
     SELECT
-      (
-        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 1, 8) || '-' ||
-        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 9, 4) || '-' ||
-        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 13, 4) || '-' ||
-        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 17, 4) || '-' ||
-        substr(md5('food-product-revision:imported:' || "food_products"."id"::text), 21, 12)
-      )::uuid,
+      ${deterministicUuidSql(`'food-product-revision:imported:' || "food_products"."id"::text`)},
       "food_products"."id",
       "food_products"."submitted_by_user_id",
       'imported',

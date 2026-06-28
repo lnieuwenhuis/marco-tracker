@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import { ensureDateString } from "@macro-tracker/db";
 import { redirect } from "next/navigation";
 
-import { requireOnboardedSessionUser } from "@/lib/auth";
+import { loadOnboardedDateParam } from "@/lib/page-context";
 
 export const metadata: Metadata = {
   title: "Weight | Macro Tracker",
@@ -13,8 +12,6 @@ type WeightPageProps = {
 };
 
 export default async function WeightPage({ searchParams }: WeightPageProps) {
-  await requireOnboardedSessionUser();
-  const params = await searchParams;
-  const selectedDate = ensureDateString(params.date);
+  const { selectedDate } = await loadOnboardedDateParam(searchParams);
   redirect(`/progress?date=${selectedDate}&tab=weight`);
 }
