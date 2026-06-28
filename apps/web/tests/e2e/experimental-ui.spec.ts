@@ -159,18 +159,16 @@ test("keeps low meal action menus above the bottom controls", async ({ page }, t
     name: `More actions for ${targetLabel}`,
   });
   await expect(trigger).toBeVisible();
+  const triggerBox = await trigger.boundingBox();
+  expect(triggerBox).not.toBeNull();
   await trigger.click();
 
   const menu = page.getByRole("menu");
   await expect(menu.getByRole("menuitem", { name: "Copy to today" })).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "Delete" })).toBeVisible();
 
-  const [triggerBox, menuBox] = await Promise.all([
-    trigger.boundingBox(),
-    menu.boundingBox(),
-  ]);
+  const menuBox = await menu.boundingBox();
 
-  expect(triggerBox).not.toBeNull();
   expect(menuBox).not.toBeNull();
   expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(triggerBox!.y);
 });
