@@ -2,6 +2,8 @@
 
 import type { QuantityUnit } from "@macro-tracker/db";
 
+import { NumberInputField } from "./number-input-field";
+
 type IngredientDraft = {
   clientId: string;
   productId?: string | null;
@@ -22,45 +24,6 @@ type IngredientCardProps = {
   onDelete: (clientId: string) => void;
   onDuplicate: (clientId: string) => void;
 };
-
-function NumericInput({
-  label,
-  value,
-  unit,
-  step,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  unit: string;
-  step: string;
-  disabled?: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
-        {label}
-      </span>
-      <div className="relative">
-        <input
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step={step}
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2 pr-16 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[var(--color-muted)]">
-          {unit}
-        </span>
-      </div>
-    </label>
-  );
-}
 
 export function IngredientCard({
   draft,
@@ -143,7 +106,7 @@ export function IngredientCard({
         </div>
 
         <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-          <NumericInput
+          <NumberInputField
             label="Quantity"
             value={draft.quantity ?? "1"}
             unit={draft.unit ?? "serving"}
@@ -171,7 +134,7 @@ export function IngredientCard({
 
         {/* Macro inputs */}
         <div className="mt-2 grid grid-cols-2 gap-2">
-          <NumericInput
+          <NumberInputField
             label="Protein"
             value={draft.proteinG}
             unit="g"
@@ -179,7 +142,7 @@ export function IngredientCard({
             disabled={disabled}
             onChange={(v) => update("proteinG", v)}
           />
-          <NumericInput
+          <NumberInputField
             label="Carbs"
             value={draft.carbsG}
             unit="g"
@@ -187,7 +150,7 @@ export function IngredientCard({
             disabled={disabled}
             onChange={(v) => update("carbsG", v)}
           />
-          <NumericInput
+          <NumberInputField
             label="Fat"
             value={draft.fatG}
             unit="g"
@@ -195,7 +158,7 @@ export function IngredientCard({
             disabled={disabled}
             onChange={(v) => update("fatG", v)}
           />
-          <NumericInput
+          <NumberInputField
             label="Calories"
             value={draft.caloriesKcal}
             unit="kcal"

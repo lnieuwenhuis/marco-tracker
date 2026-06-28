@@ -1,7 +1,6 @@
 import {
   completeUserOnboarding,
   ensureUserRole,
-  getDb,
   upsertUserFromShooProfile,
 } from "@macro-tracker/db";
 import { sql } from "drizzle-orm";
@@ -10,6 +9,7 @@ import { NextResponse } from "next/server";
 import { getServerEnv } from "@/lib/env";
 import { applySessionCookie, isSecureRequest } from "@/lib/session";
 import { ensureTestRouteRequest } from "@/lib/test-routes";
+import { ensureTestSessionSchema } from "@/lib/test-session-schema";
 
 const TEST_LOGIN_BASES = new Set(["coach", "owner", "admin", "user", "setup"]);
 
@@ -18,65 +18,6 @@ function getTestLoginBase(email: string) {
   const base = match?.[1]?.toLowerCase();
 
   return base && TEST_LOGIN_BASES.has(base) ? base : null;
-}
-
-async function ensureTestSchema() {
-  const db = await getDb();
-
-  await db.execute(sql.raw(`
-    CREATE TABLE IF NOT EXISTS "users" (
-      "id" uuid PRIMARY KEY NOT NULL,
-      "shoo_pairwise_sub" text NOT NULL,
-      "email" text NOT NULL,
-      "display_name" text,
-      "picture_url" text,
-      "role" text DEFAULT 'user' NOT NULL,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "last_login_at" timestamp with time zone DEFAULT now() NOT NULL
-    )
-  `));
-  await db.execute(
-    sql.raw(
-      `CREATE UNIQUE INDEX IF NOT EXISTS "users_shoo_pairwise_sub_key" ON "users" USING btree ("shoo_pairwise_sub")`,
-    ),
-  );
-  await db.execute(
-    sql.raw(
-      `CREATE UNIQUE INDEX IF NOT EXISTS "users_email_key" ON "users" USING btree ("email")`,
-    ),
-  );
-  await db.execute(
-    sql.raw(
-      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "role" text DEFAULT 'user' NOT NULL`,
-    ),
-  );
-  await db.execute(sql.raw(`
-    CREATE TABLE IF NOT EXISTS "meal_entries" (
-      "id" uuid PRIMARY KEY NOT NULL,
-      "user_id" uuid NOT NULL,
-      "entry_date" date NOT NULL,
-      "label" text NOT NULL,
-      "sort_order" integer NOT NULL,
-      "protein_g" numeric(6, 1) NOT NULL,
-      "carbs_g" numeric(6, 1) NOT NULL,
-      "fat_g" numeric(6, 1) NOT NULL,
-      "calories_kcal" integer NOT NULL,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
-    )
-  `));
-  await db.execute(
-    sql.raw(
-      `CREATE INDEX IF NOT EXISTS "meal_entries_user_date_idx" ON "meal_entries" USING btree ("user_id","entry_date")`,
-    ),
-  );
-  await db.execute(
-    sql.raw(
-      `CREATE INDEX IF NOT EXISTS "meal_entries_user_date_sort_idx" ON "meal_entries" USING btree ("user_id","entry_date","sort_order")`,
-    ),
-  );
-
-  return db;
 }
 
 async function createTestSessionResponse(
@@ -103,7 +44,7 @@ async function createTestSessionResponse(
     );
   }
 
-  const db = await ensureTestSchema();
+  const db = await ensureTestSessionSchema();
   const user = await upsertUserFromShooProfile(
     {
       pairwiseSub: `test:${email}`,

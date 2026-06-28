@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { listAdminBarcodeProducts } from "@macro-tracker/db";
 
+import { AdminFormField } from "@/components/admin-form-field";
 import {
   AdminNotice,
   AdminPaginationLinks,
@@ -19,35 +20,6 @@ type AdminBarcodesPageProps = {
     error?: string;
   }>;
 };
-
-function BarcodeField({
-  label,
-  name,
-  type = "text",
-  step,
-  required = false,
-}: {
-  label: string;
-  name: string;
-  type?: string;
-  step?: string;
-  required?: boolean;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-muted-strong)]">
-        {label}
-      </span>
-      <input
-        type={type}
-        name={name}
-        step={step}
-        required={required}
-        className="w-full rounded-2xl border border-[var(--color-border)] bg-[var(--color-app-bg)] px-4 py-3 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
-      />
-    </label>
-  );
-}
 
 export default async function AdminBarcodesPage({
   searchParams,
@@ -76,14 +48,14 @@ export default async function AdminBarcodesPage({
           action={createAdminBarcodeProductAction}
           className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
         >
-          <BarcodeField label="Barcode" name="barcode" required />
-          <BarcodeField label="Name" name="name" required />
-          <BarcodeField label="Brand" name="brands" />
-          <BarcodeField label="Serving size (g)" name="servingSizeG" type="number" step="0.1" />
-          <BarcodeField label="Protein (g)" name="proteinG" type="number" step="0.1" required />
-          <BarcodeField label="Carbs (g)" name="carbsG" type="number" step="0.1" required />
-          <BarcodeField label="Fat (g)" name="fatG" type="number" step="0.1" required />
-          <BarcodeField label="Calories" name="caloriesKcal" type="number" step="1" required />
+          <AdminFormField label="Barcode" name="barcode" required />
+          <AdminFormField label="Name" name="name" required />
+          <AdminFormField label="Brand" name="brands" />
+          <AdminFormField label="Serving size (g)" name="servingSizeG" type="number" step="0.1" />
+          <AdminFormField label="Protein (g)" name="proteinG" type="number" step="0.1" required />
+          <AdminFormField label="Carbs (g)" name="carbsG" type="number" step="0.1" required />
+          <AdminFormField label="Fat (g)" name="fatG" type="number" step="0.1" required />
+          <AdminFormField label="Calories" name="caloriesKcal" type="number" step="1" required />
           <div className="md:col-span-2 xl:col-span-4">
             <button
               type="submit"

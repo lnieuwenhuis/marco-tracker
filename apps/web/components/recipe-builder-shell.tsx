@@ -1,17 +1,13 @@
 "use client";
 
-import type { MealTemplate, QuantityUnit, RecipeRecord } from "@macro-tracker/db";
+import type { MealTemplate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import {
-  deleteTemplateAction,
-  saveTemplateAction,
   saveRecipeAction,
-  updateTemplateAction,
 } from "@/lib/actions";
 import {
-  getTemplateMutationCacheKeys,
   getRecipeMutationCacheKeys,
 } from "@/lib/app-warmup";
 import { prepareNavigationMotion } from "@/lib/navigation-motion";
@@ -25,6 +21,7 @@ import { ExperimentalAppShell } from "./experimental-app-shell";
 import { IngredientCard, type IngredientDraft } from "./ingredient-card";
 import { PresetModal } from "./preset-modal";
 import { RecipeTotalsBar } from "./recipe-totals-bar";
+import { useTemplateMutations } from "./use-template-mutations";
 
 type PresetMutationState =
   | { type: "save" }
@@ -87,6 +84,16 @@ export function RecipeBuilderShell({
   const [localTemplates, setLocalTemplates] = useState<MealTemplate[]>(initialTemplates);
   const [presetMutation, setPresetMutation] = useState<PresetMutationState | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
+  const {
+    handleSavePreset,
+    handleDeletePreset,
+    handleUpdatePreset,
+  } = useTemplateMutations({
+    localTemplates,
+    setLocalTemplates,
+    setPresetError,
+    setPresetMutation,
+  });
 
   // Barcode state
   const [showScanner, setShowScanner] = useState(false);
@@ -205,84 +212,6 @@ export function RecipeBuilderShell({
       router.push(href);
       router.refresh();
     });
-  }
-
-  // Preset handlers
-  async function handleSavePreset(input: {
-    productId?: string | null;
-    label: string;
-    quantity?: number;
-    unit?: QuantityUnit;
-    servingMultiplier?: number;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }) {
-    setPresetError(null);
-    setPresetMutation({ type: "save" });
-    try {
-      const result = await saveTemplateAction(input);
-      const savedTemplate = result.template;
-      if (!result.ok || !savedTemplate) {
-        setPresetError(result.error ?? "Unable to save template.");
-        return false;
-      }
-      setLocalTemplates((prev) =>
-        [...prev, savedTemplate].sort((a, b) => a.label.localeCompare(b.label)),
-      );
-      invalidateAppDataCache(getTemplateMutationCacheKeys());
-      return true;
-    } finally {
-      setPresetMutation(null);
-    }
-  }
-
-  async function handleDeletePreset(presetId: string) {
-    const previousTemplates = localTemplates;
-    setPresetError(null);
-    setPresetMutation({ type: "delete", presetId });
-    setLocalTemplates((prev) => prev.filter((p) => p.id !== presetId));
-    try {
-      const result = await deleteTemplateAction({ id: presetId });
-      if (!result.ok) {
-        setLocalTemplates(previousTemplates);
-        setPresetError(result.error ?? "Unable to delete template.");
-        return false;
-      }
-      invalidateAppDataCache(getTemplateMutationCacheKeys());
-      return true;
-    } finally {
-      setPresetMutation(null);
-    }
-  }
-
-  async function handleUpdatePreset(id: string, input: {
-    label: string;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }) {
-    setPresetError(null);
-    setPresetMutation({ type: "update", presetId: id });
-    try {
-      const result = await updateTemplateAction({ id, ...input });
-      const updatedTemplate = result.template;
-      if (!result.ok || !updatedTemplate) {
-        setPresetError(result.error ?? "Unable to update template.");
-        return false;
-      }
-      setLocalTemplates((prev) =>
-        prev
-          .map((preset) => (preset.id === id ? updatedTemplate : preset))
-          .sort((a, b) => a.label.localeCompare(b.label)),
-      );
-      invalidateAppDataCache(getTemplateMutationCacheKeys());
-      return true;
-    } finally {
-      setPresetMutation(null);
-    }
   }
 
   const content = (

@@ -47,6 +47,52 @@ async function addCustomFood(
   await expect(unsavedCards).toHaveCount(unsavedBefore);
 }
 
+type DayTemplateSeedItem = {
+  label: string;
+  mealGroupLabel?: string;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  caloriesKcal: number;
+};
+
+async function seedDayTemplate(
+  page: Page,
+  input: { label: string; items: DayTemplateSeedItem[] },
+) {
+  const seedResult = await page.evaluate(
+    async ({ headers, input }) => {
+      const response = await fetch("/api/test/templates", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "day",
+          label: input.label,
+          items: input.items,
+        }),
+      });
+      return { ok: response.ok, status: response.status };
+    },
+    { headers: testRouteHeaders(), input },
+  );
+
+  expect(seedResult).toEqual({ ok: true, status: 200 });
+}
+
+async function applyDayTemplate(page: Page, input: { date: string; label: string }) {
+  await page.goto(`/?date=${input.date}`);
+  await page.getByRole("button", { name: "From template" }).click();
+  const modal = page.getByRole("dialog", { name: "Meal Templates" });
+  await expect(modal).toBeVisible();
+  await modal.getByRole("button", { name: /Days/ }).click();
+  await expect(modal.getByText(input.label)).toBeVisible();
+  const templateRow = modal
+    .getByText(input.label)
+    .locator("xpath=ancestor::div[contains(@class,'flex items-center gap-2')][1]");
+  await templateRow.getByRole("button", { name: "Add" }).click();
+  await expect(modal).toBeHidden();
+}
+
 test("redirects unauthenticated users to login", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
@@ -208,52 +254,28 @@ test("applies a saved day template as collapsed planned entries", async ({
 
   await createTestSession(page, uniqueTestEmail("user", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
-  const seedResult = await page.evaluate(
-    async ({ firstItem, headers, secondItem, templateLabel }) => {
-      const response = await fetch("/api/test/templates", {
-        method: "POST",
-        headers: { ...headers, "content-type": "application/json" },
-        body: JSON.stringify({
-          type: "day",
-          label: templateLabel,
-          items: [
-            {
-              label: firstItem,
-              mealGroupLabel: "Breakfast",
-              proteinG: 20,
-              carbsG: 40,
-              fatG: 8,
-              caloriesKcal: 312,
-            },
-            {
-              label: secondItem,
-              mealGroupLabel: "Lunch",
-              proteinG: 25,
-              carbsG: 12,
-              fatG: 2,
-              caloriesKcal: 166,
-            },
-          ],
-        }),
-      });
-      return { ok: response.ok, status: response.status };
-    },
-    { firstItem, headers: testRouteHeaders(), secondItem, templateLabel },
-  );
-  expect(seedResult).toEqual({ ok: true, status: 200 });
-
-  await page.goto("/?date=2026-04-02");
-  await page.getByRole("button", { name: "From template" }).click();
-  const modal = page.getByRole("dialog", { name: "Meal Templates" });
-  await expect(modal).toBeVisible();
-  await modal.getByRole("button", { name: /Days/ }).click();
-  await expect(modal.getByText(templateLabel)).toBeVisible();
-  const templateRow = modal
-    .getByText(templateLabel)
-    .locator("xpath=ancestor::div[contains(@class,'flex items-center gap-2')][1]");
-  await templateRow.getByRole("button", { name: "Add" }).click();
-
-  await expect(modal).toBeHidden();
+  await seedDayTemplate(page, {
+    label: templateLabel,
+    items: [
+      {
+        label: firstItem,
+        mealGroupLabel: "Breakfast",
+        proteinG: 20,
+        carbsG: 40,
+        fatG: 8,
+        caloriesKcal: 312,
+      },
+      {
+        label: secondItem,
+        mealGroupLabel: "Lunch",
+        proteinG: 25,
+        carbsG: 12,
+        fatG: 2,
+        caloriesKcal: 166,
+      },
+    ],
+  });
+  await applyDayTemplate(page, { date: "2026-04-02", label: templateLabel });
   const firstCard = page.locator("article").filter({
     has: page.getByRole("heading", { name: firstItem }),
   });
@@ -316,49 +338,26 @@ test("macro trend chart shows planned intake as a translucent projection", async
 
   await createTestSession(page, uniqueTestEmail("user", testInfo));
   await expect(page.getByRole("button", { name: "Open settings" })).toBeVisible();
-  const seedResult = await page.evaluate(
-    async ({ eatenLabel, headers, plannedLabel, templateLabel }) => {
-      const response = await fetch("/api/test/templates", {
-        method: "POST",
-        headers: { ...headers, "content-type": "application/json" },
-        body: JSON.stringify({
-          type: "day",
-          label: templateLabel,
-          items: [
-            {
-              label: eatenLabel,
-              proteinG: 30,
-              carbsG: 40,
-              fatG: 10,
-              caloriesKcal: 370,
-            },
-            {
-              label: plannedLabel,
-              proteinG: 25,
-              carbsG: 50,
-              fatG: 15,
-              caloriesKcal: 435,
-            },
-          ],
-        }),
-      });
-      return { ok: response.ok, status: response.status };
-    },
-    { eatenLabel, headers: testRouteHeaders(), plannedLabel, templateLabel },
-  );
-  expect(seedResult).toEqual({ ok: true, status: 200 });
-
-  await page.goto(`/?date=${plannedDate}`);
-  await page.getByRole("button", { name: "From template" }).click();
-  const modal = page.getByRole("dialog", { name: "Meal Templates" });
-  await expect(modal).toBeVisible();
-  await modal.getByRole("button", { name: /Days/ }).click();
-  await expect(modal.getByText(templateLabel)).toBeVisible();
-  const templateRow = modal
-    .getByText(templateLabel)
-    .locator("xpath=ancestor::div[contains(@class,'flex items-center gap-2')][1]");
-  await templateRow.getByRole("button", { name: "Add" }).click();
-  await expect(modal).toBeHidden();
+  await seedDayTemplate(page, {
+    label: templateLabel,
+    items: [
+      {
+        label: eatenLabel,
+        proteinG: 30,
+        carbsG: 40,
+        fatG: 10,
+        caloriesKcal: 370,
+      },
+      {
+        label: plannedLabel,
+        proteinG: 25,
+        carbsG: 50,
+        fatG: 15,
+        caloriesKcal: 435,
+      },
+    ],
+  });
+  await applyDayTemplate(page, { date: plannedDate, label: templateLabel });
 
   const eatenCard = page.locator("article").filter({
     has: page.getByRole("heading", { name: eatenLabel }),

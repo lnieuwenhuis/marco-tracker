@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import { ensureDateString } from "@macro-tracker/db";
 import { redirect } from "next/navigation";
 
-import { requireOnboardedSessionUser } from "@/lib/auth";
+import { loadOnboardedDateParam } from "@/lib/page-context";
 
 export const metadata: Metadata = {
   title: "Stats | Macro Tracker",
@@ -13,8 +12,6 @@ type StatsPageProps = {
 };
 
 export default async function StatsPage({ searchParams }: StatsPageProps) {
-  await requireOnboardedSessionUser();
-  const params = await searchParams;
-  const selectedDate = ensureDateString(params.date);
+  const { selectedDate } = await loadOnboardedDateParam(searchParams);
   redirect(`/summary?date=${selectedDate}`);
 }

@@ -8,6 +8,8 @@ import {
   type FloatingMenuLayout,
 } from "@/lib/floating-menu";
 
+import { NumberInputField } from "./number-input-field";
+
 type MealDraft = {
   clientId: string;
   id?: string;
@@ -45,45 +47,6 @@ type MealCardProps = {
   onCopyToToday?: (clientId: string) => void;
   onDiscardChanges?: (clientId: string) => void;
 };
-
-function NumericInput({
-  label,
-  value,
-  busy,
-  step,
-  unit,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  busy: boolean;
-  step: string;
-  unit: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted-strong)]">
-        {label}
-      </span>
-      <div className="relative">
-        <input
-          type="number"
-          inputMode="decimal"
-          min="0"
-          step={step}
-          value={value}
-          disabled={busy}
-          onChange={(event) => onChange(event.target.value)}
-          className="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-16 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
-        />
-        <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-[var(--color-muted)]">
-          {unit}
-        </span>
-      </div>
-    </label>
-  );
-}
 
 const MENU_BOTTOM_INSET_PX = 112;
 const MENU_VIEWPORT_MARGIN_PX = 8;
@@ -456,12 +419,13 @@ export function MealCard({ draft, busy, error, isCopied = false, mealGroups = []
           </label>
 
           <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
-            <NumericInput
+            <NumberInputField
               label="Quantity"
               value={draft.quantity}
-              busy={busy}
+              disabled={busy}
               step="0.01"
               unit={draft.unit}
+              inputClassName="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-16 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
               onChange={(value) => onChange(draft.clientId, "quantity", value)}
             />
             <label className="block min-w-28">
@@ -510,36 +474,40 @@ export function MealCard({ draft, busy, error, isCopied = false, mealGroups = []
 
           {/* Macro inputs — 2×2 grid */}
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <NumericInput
+            <NumberInputField
               label="Protein"
               value={draft.proteinG}
-              busy={busy}
+              disabled={busy}
               step="0.1"
               unit="g"
+              inputClassName="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-16 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
               onChange={(value) => onChange(draft.clientId, "proteinG", value)}
             />
-            <NumericInput
+            <NumberInputField
               label="Carbs"
               value={draft.carbsG}
-              busy={busy}
+              disabled={busy}
               step="0.1"
               unit="g"
+              inputClassName="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-16 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
               onChange={(value) => onChange(draft.clientId, "carbsG", value)}
             />
-            <NumericInput
+            <NumberInputField
               label="Fat"
               value={draft.fatG}
-              busy={busy}
+              disabled={busy}
               step="0.1"
               unit="g"
+              inputClassName="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-16 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
               onChange={(value) => onChange(draft.clientId, "fatG", value)}
             />
-            <NumericInput
+            <NumberInputField
               label="Calories"
               value={draft.caloriesKcal}
-              busy={busy}
+              disabled={busy}
               step="1"
               unit="kcal"
+              inputClassName="w-full rounded-xl border border-[var(--color-border-strong)] bg-[var(--color-card-muted)] px-3 py-2.5 pr-16 text-sm text-[var(--color-ink)] outline-none transition focus:border-[var(--color-accent)]"
               onChange={(value) => onChange(draft.clientId, "caloriesKcal", value)}
             />
           </div>

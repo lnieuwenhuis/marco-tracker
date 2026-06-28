@@ -1,14 +1,11 @@
 import {
-  canAccessAdmin,
-  ensureDateString,
   getPeriodAverages,
   getStatsPageData,
-  getUserById,
   getUserGoals,
 } from "@macro-tracker/db";
 
 import { SummaryShell } from "@/components/summary-shell";
-import { requireOnboardedSessionUser } from "@/lib/auth";
+import { loadOnboardedPageContext } from "@/lib/page-context";
 
 type SummaryPageProps = {
   searchParams: Promise<{
@@ -17,21 +14,19 @@ type SummaryPageProps = {
 };
 
 export default async function SummaryPage({ searchParams }: SummaryPageProps) {
-  const sessionUser = await requireOnboardedSessionUser();
-  const params = await searchParams;
-  const selectedDate = ensureDateString(params.date);
+  const { sessionUser, selectedDate, userEmail, canAccessAdmin } =
+    await loadOnboardedPageContext(searchParams);
 
-  const [periodAverages, goals, user, statsData] = await Promise.all([
+  const [periodAverages, goals, statsData] = await Promise.all([
     getPeriodAverages(sessionUser.userId, selectedDate),
     getUserGoals(sessionUser.userId),
-    getUserById(sessionUser.userId),
     getStatsPageData(sessionUser.userId, selectedDate),
   ]);
 
   return (
     <SummaryShell
-      userEmail={user?.email ?? sessionUser.email}
-      canAccessAdmin={user ? canAccessAdmin(user.role) : false}
+      userEmail={userEmail}
+      canAccessAdmin={canAccessAdmin}
       selectedDate={selectedDate}
       periodAverages={periodAverages}
       goals={goals}

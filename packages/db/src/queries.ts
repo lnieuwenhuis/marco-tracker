@@ -101,6 +101,10 @@ function roundToTwoDecimals(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+function fixed(value: number, digits: number) {
+  return value.toFixed(digits);
+}
+
 function toTimestampString(value: Date | string | null | undefined) {
   if (!value) {
     return "";
@@ -309,6 +313,104 @@ const foodProductSelectColumns = {
   updatedAt: foodProducts.updatedAt,
   deletedAt: foodProducts.deletedAt,
 };
+
+type ValidatedFoodProductInput = ReturnType<typeof validateFoodProductInput>;
+
+function buildFoodProductInputValues(
+  normalized: ValidatedFoodProductInput,
+  options: {
+    servingWeightFallback?: string | null;
+    forceNullServingVolume?: boolean;
+    sourceProviderFallback?: string | null;
+    updatedAt?: Date;
+  } = {},
+) {
+  return {
+    source: normalized.source,
+    barcode: normalized.barcode,
+    name: normalized.name,
+    brand: normalized.brand ?? "",
+    defaultServingQuantity: fixed(normalized.defaultServingQuantity, 2),
+    defaultServingUnit: normalized.defaultServingUnit,
+    proteinPer100: fixed(normalized.proteinPer100, 2),
+    carbsPer100: fixed(normalized.carbsPer100, 2),
+    fatPer100: fixed(normalized.fatPer100, 2),
+    caloriesPer100: normalized.caloriesPer100,
+    servingWeightG:
+      normalized.servingWeightG != null
+        ? fixed(normalized.servingWeightG, 2)
+        : options.servingWeightFallback ?? null,
+    servingVolumeMl: options.forceNullServingVolume
+      ? null
+      : normalized.servingVolumeMl != null
+        ? fixed(normalized.servingVolumeMl, 2)
+        : null,
+    sourceProvider: normalized.sourceProvider ?? options.sourceProviderFallback ?? null,
+    sourceConfidence:
+      normalized.sourceConfidence != null
+        ? fixed(normalized.sourceConfidence, 2)
+        : null,
+    sourceMetadata: normalized.sourceMetadata ?? {},
+    correctedFromProductId: normalized.correctedFromProductId ?? null,
+    updatedAt: options.updatedAt ?? new Date(),
+  };
+}
+
+function buildMealEntryValues(normalized: MealEntryInput) {
+  return {
+    entryDate: normalized.date,
+    mealGroupId: normalized.mealGroupId,
+    status: normalized.status ?? "eaten",
+    productId: normalized.productId,
+    label: normalized.label,
+    sortOrder: normalized.sortOrder,
+    quantity: normalized.quantity?.toFixed(2) ?? "1.00",
+    unit: normalized.unit ?? "serving",
+    servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
+    proteinG: normalized.proteinG.toFixed(1),
+    carbsG: normalized.carbsG.toFixed(1),
+    fatG: normalized.fatG.toFixed(1),
+    caloriesKcal: normalized.caloriesKcal,
+    clientMutationId: normalized.clientMutationId,
+    updatedAt: new Date(),
+  };
+}
+
+function buildMealEntryInsertValues(userId: string, normalized: MealEntryInput) {
+  return {
+    id: crypto.randomUUID(),
+    userId,
+    ...buildMealEntryValues(normalized),
+  };
+}
+
+function buildWeightEntryValues(userId: string, normalized: WeightEntryInput) {
+  return {
+    id: crypto.randomUUID(),
+    userId,
+    entryDate: normalized.date,
+    weightKg: normalized.weightKg.toFixed(2),
+    bodyFatPct:
+      normalized.bodyFatPct != null
+        ? normalized.bodyFatPct.toFixed(1)
+        : null,
+    notes: normalized.notes,
+    updatedAt: new Date(),
+  };
+}
+
+function buildWeightEntryUpdateValues(normalized: WeightEntryInput) {
+  return {
+    entryDate: normalized.date,
+    weightKg: normalized.weightKg.toFixed(2),
+    bodyFatPct:
+      normalized.bodyFatPct != null
+        ? normalized.bodyFatPct.toFixed(1)
+        : null,
+    notes: normalized.notes,
+    updatedAt: new Date(),
+  };
+}
 
 function mapFoodProductRevisionRow(row: {
   id: string;
@@ -1123,28 +1225,9 @@ export async function createPersonalFoodProduct(
         id: crypto.randomUUID(),
         ownerUserId: userId,
         scope: normalized.scope,
-        source: normalized.source,
-        barcode: normalized.barcode,
-        name: normalized.name,
-        brand: normalized.brand ?? "",
-        defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
-        defaultServingUnit: normalized.defaultServingUnit,
-        proteinPer100: normalized.proteinPer100.toFixed(2),
-        carbsPer100: normalized.carbsPer100.toFixed(2),
-        fatPer100: normalized.fatPer100.toFixed(2),
-        caloriesPer100: normalized.caloriesPer100,
-        servingWeightG: normalized.servingWeightG?.toFixed(2) ?? null,
-        servingVolumeMl: normalized.servingVolumeMl?.toFixed(2) ?? null,
+        ...buildFoodProductInputValues(normalized),
         submittedByUserId: normalized.submittedByUserId ?? userId,
         deletedByUserId: normalized.deletedByUserId ?? null,
-        sourceProvider: normalized.sourceProvider ?? null,
-        sourceConfidence:
-          normalized.sourceConfidence != null
-            ? normalized.sourceConfidence.toFixed(2)
-            : null,
-        sourceMetadata: normalized.sourceMetadata ?? {},
-        correctedFromProductId: normalized.correctedFromProductId ?? null,
-        updatedAt: new Date(),
       })
       .returning();
 
@@ -1242,6 +1325,39 @@ function productControlsMealMacros(product: FoodProduct) {
   return product.scope !== "legacy" && product.source !== "legacy";
 }
 
+async function resolveMealProductDefaults(
+  userId: string,
+  input: Pick<
+    MealEntryInput,
+    "productId" | "quantity" | "unit" | "servingMultiplier"
+  >,
+  db: DatabaseClient,
+  options: { recalculateProductMacros?: boolean } = {},
+) {
+  if (!input.productId) {
+    return { productLabel: null, productMacros: null };
+  }
+
+  const product = await getFoodProductByIdForUser(userId, input.productId, db);
+  if (!product) {
+    throw new Error("Food product not found.");
+  }
+
+  const productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
+  const shouldRecalculate =
+    options.recalculateProductMacros !== false && productControlsMealMacros(product);
+  const productMacros = shouldRecalculate
+    ? resolveProductNutritionForQuantity(
+        product,
+        input.quantity ?? product.defaultServingQuantity,
+        input.unit ?? product.defaultServingUnit,
+        input.servingMultiplier ?? 1,
+      )
+    : null;
+
+  return { productLabel, productMacros };
+}
+
 export async function updatePersonalFoodProduct(
   userId: string,
   productId: string,
@@ -1253,28 +1369,7 @@ export async function updatePersonalFoodProduct(
   return (database as any).transaction(async (tx: any) => {
     const [updated] = await tx
       .update(foodProducts)
-      .set({
-        source: normalized.source,
-        barcode: normalized.barcode,
-        name: normalized.name,
-        brand: normalized.brand ?? "",
-        defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
-        defaultServingUnit: normalized.defaultServingUnit,
-        proteinPer100: normalized.proteinPer100.toFixed(2),
-        carbsPer100: normalized.carbsPer100.toFixed(2),
-        fatPer100: normalized.fatPer100.toFixed(2),
-        caloriesPer100: normalized.caloriesPer100,
-        servingWeightG: normalized.servingWeightG?.toFixed(2) ?? null,
-        servingVolumeMl: normalized.servingVolumeMl?.toFixed(2) ?? null,
-        sourceProvider: normalized.sourceProvider ?? null,
-        sourceConfidence:
-          normalized.sourceConfidence != null
-            ? normalized.sourceConfidence.toFixed(2)
-            : null,
-        sourceMetadata: normalized.sourceMetadata ?? {},
-        correctedFromProductId: normalized.correctedFromProductId ?? null,
-        updatedAt: new Date(),
-      })
+      .set(buildFoodProductInputValues(normalized))
       .where(
         and(
           eq(foodProducts.id, productId),
@@ -1521,24 +1616,11 @@ export async function createMealEntry(
 
   await assertMealGroupAccessibleForUser(userId, input.mealGroupId, database);
 
-  let productMacros: MacroNumbers | null = null;
-  let productLabel: string | null = null;
-  if (input.productId) {
-    const product = await getFoodProductByIdForUser(userId, input.productId, database);
-    if (!product) {
-      throw new Error("Food product not found.");
-    }
-
-    productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
-    if (productControlsMealMacros(product)) {
-      productMacros = resolveProductNutritionForQuantity(
-        product,
-        input.quantity ?? product.defaultServingQuantity,
-        input.unit ?? product.defaultServingUnit,
-        input.servingMultiplier ?? 1,
-      );
-    }
-  }
+  const { productLabel, productMacros } = await resolveMealProductDefaults(
+    userId,
+    input,
+    database,
+  );
 
   const normalized = validateMealEntryInput({
     ...input,
@@ -1547,25 +1629,7 @@ export async function createMealEntry(
     ...(productMacros ?? {}),
   });
 
-  const insertValues = {
-    id: crypto.randomUUID(),
-    userId,
-    entryDate: normalized.date,
-    mealGroupId: normalized.mealGroupId,
-    status: normalized.status,
-    productId: normalized.productId,
-    label: normalized.label,
-    sortOrder: normalized.sortOrder,
-    quantity: normalized.quantity?.toFixed(2) ?? "1.00",
-    unit: normalized.unit ?? "serving",
-    servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
-    proteinG: normalized.proteinG.toFixed(1),
-    carbsG: normalized.carbsG.toFixed(1),
-    fatG: normalized.fatG.toFixed(1),
-    caloriesKcal: normalized.caloriesKcal,
-    clientMutationId: normalized.clientMutationId,
-    updatedAt: new Date(),
-  };
+  const insertValues = buildMealEntryInsertValues(userId, normalized);
 
   const [created] = normalized.clientMutationId
     ? await database
@@ -1605,24 +1669,12 @@ export async function updateMealEntry(
   const database = await resolveDb(db);
   await assertMealGroupAccessibleForUser(userId, input.mealGroupId, database);
 
-  let productMacros: MacroNumbers | null = null;
-  let productLabel: string | null = null;
-  if (input.productId) {
-    const product = await getFoodProductByIdForUser(userId, input.productId, database);
-    if (!product) {
-      throw new Error("Food product not found.");
-    }
-
-    productLabel = product.brand ? `${product.name} (${product.brand})` : product.name;
-    if (options?.recalculateProductMacros !== false && productControlsMealMacros(product)) {
-      productMacros = resolveProductNutritionForQuantity(
-        product,
-        input.quantity ?? product.defaultServingQuantity,
-        input.unit ?? product.defaultServingUnit,
-        input.servingMultiplier ?? 1,
-      );
-    }
-  }
+  const { productLabel, productMacros } = await resolveMealProductDefaults(
+    userId,
+    input,
+    database,
+    { recalculateProductMacros: options?.recalculateProductMacros },
+  );
   const normalized = validateMealEntryInput({
     ...input,
     label: input.label || productLabel || "",
@@ -1631,23 +1683,7 @@ export async function updateMealEntry(
 
   const [updated] = await database
     .update(mealEntries)
-    .set({
-      entryDate: normalized.date,
-      mealGroupId: normalized.mealGroupId,
-      status: normalized.status,
-      productId: normalized.productId,
-      label: normalized.label,
-      sortOrder: normalized.sortOrder,
-      quantity: normalized.quantity?.toFixed(2) ?? "1.00",
-      unit: normalized.unit ?? "serving",
-      servingMultiplier: normalized.servingMultiplier?.toFixed(2) ?? "1.00",
-      proteinG: normalized.proteinG.toFixed(1),
-      carbsG: normalized.carbsG.toFixed(1),
-      fatG: normalized.fatG.toFixed(1),
-      caloriesKcal: normalized.caloriesKcal,
-      clientMutationId: normalized.clientMutationId,
-      updatedAt: new Date(),
-    })
+    .set(buildMealEntryValues(normalized))
     .where(and(eq(mealEntries.id, entryId), eq(mealEntries.userId, userId)))
     .returning();
 
@@ -1925,6 +1961,38 @@ function normalizeTemplateInput(input: MealTemplateInput): MealTemplateInput {
   };
 }
 
+function buildTemplateItemValues(
+  templateId: string,
+  item: MealTemplateInput["items"][number],
+  index: number,
+) {
+  return {
+    id: crypto.randomUUID(),
+    templateId,
+    productId: item.productId,
+    mealGroupLabel: item.mealGroupLabel,
+    sortOrder: index,
+    label: item.label,
+    quantity: item.quantity?.toFixed(2) ?? "1.00",
+    unit: item.unit ?? "serving",
+    servingMultiplier: item.servingMultiplier?.toFixed(2) ?? "1.00",
+    proteinG: item.proteinG.toFixed(1),
+    carbsG: item.carbsG.toFixed(1),
+    fatG: item.fatG.toFixed(1),
+    caloriesKcal: item.caloriesKcal,
+  };
+}
+
+async function insertTemplateItems(
+  tx: any,
+  templateId: string,
+  items: MealTemplateInput["items"],
+) {
+  await tx.insert(mealTemplateItems).values(
+    items.map((item, index) => buildTemplateItemValues(templateId, item, index)),
+  );
+}
+
 async function getTemplateRows(
   userId: string,
   db: DatabaseClient,
@@ -2030,23 +2098,7 @@ export async function createTemplate(
       notes: normalized.notes,
       updatedAt: now,
     });
-    await tx.insert(mealTemplateItems).values(
-      normalized.items.map((item, index) => ({
-        id: crypto.randomUUID(),
-        templateId,
-        productId: item.productId,
-        mealGroupLabel: item.mealGroupLabel,
-        sortOrder: index,
-        label: item.label,
-        quantity: item.quantity?.toFixed(2) ?? "1.00",
-        unit: item.unit ?? "serving",
-        servingMultiplier: item.servingMultiplier?.toFixed(2) ?? "1.00",
-        proteinG: item.proteinG.toFixed(1),
-        carbsG: item.carbsG.toFixed(1),
-        fatG: item.fatG.toFixed(1),
-        caloriesKcal: item.caloriesKcal,
-      })),
-    );
+    await insertTemplateItems(tx, templateId, normalized.items);
 
     const [created] = await getTemplateRows(userId, tx, templateId);
     if (!created) {
@@ -2097,23 +2149,7 @@ export async function updateTemplate(
     await tx
       .delete(mealTemplateItems)
       .where(eq(mealTemplateItems.templateId, templateId));
-    await tx.insert(mealTemplateItems).values(
-      normalized.items.map((item, index) => ({
-        id: crypto.randomUUID(),
-        templateId,
-        productId: item.productId,
-        mealGroupLabel: item.mealGroupLabel,
-        sortOrder: index,
-        label: item.label,
-        quantity: item.quantity?.toFixed(2) ?? "1.00",
-        unit: item.unit ?? "serving",
-        servingMultiplier: item.servingMultiplier?.toFixed(2) ?? "1.00",
-        proteinG: item.proteinG.toFixed(1),
-        carbsG: item.carbsG.toFixed(1),
-        fatG: item.fatG.toFixed(1),
-        caloriesKcal: item.caloriesKcal,
-      })),
-    );
+    await insertTemplateItems(tx, templateId, normalized.items);
 
     const [template] = await getTemplateRows(userId, tx, templateId);
     if (!template) {
@@ -2546,29 +2582,10 @@ export async function createWeightEntry(
 
   const [created] = await database
     .insert(weightEntries)
-    .values({
-      id: crypto.randomUUID(),
-      userId,
-      entryDate: normalized.date,
-      weightKg: normalized.weightKg.toFixed(2),
-      bodyFatPct:
-        normalized.bodyFatPct != null
-          ? normalized.bodyFatPct.toFixed(1)
-          : null,
-      notes: normalized.notes,
-      updatedAt: new Date(),
-    })
+    .values(buildWeightEntryValues(userId, normalized))
     .onConflictDoUpdate({
       target: [weightEntries.userId, weightEntries.entryDate],
-      set: {
-        weightKg: normalized.weightKg.toFixed(2),
-        bodyFatPct:
-          normalized.bodyFatPct != null
-            ? normalized.bodyFatPct.toFixed(1)
-            : null,
-        notes: normalized.notes,
-        updatedAt: new Date(),
-      },
+      set: buildWeightEntryUpdateValues(normalized),
     })
     .returning();
 
@@ -2585,18 +2602,7 @@ export async function createWeightEntryNoOverwrite(
 
   const [created] = await database
     .insert(weightEntries)
-    .values({
-      id: crypto.randomUUID(),
-      userId,
-      entryDate: normalized.date,
-      weightKg: normalized.weightKg.toFixed(2),
-      bodyFatPct:
-        normalized.bodyFatPct != null
-          ? normalized.bodyFatPct.toFixed(1)
-          : null,
-      notes: normalized.notes,
-      updatedAt: new Date(),
-    })
+    .values(buildWeightEntryValues(userId, normalized))
     .onConflictDoNothing({
       target: [weightEntries.userId, weightEntries.entryDate],
     })
@@ -2616,16 +2622,7 @@ export async function updateWeightEntry(
 
   const [updated] = await database
     .update(weightEntries)
-    .set({
-      entryDate: normalized.date,
-      weightKg: normalized.weightKg.toFixed(2),
-      bodyFatPct:
-        normalized.bodyFatPct != null
-          ? normalized.bodyFatPct.toFixed(1)
-          : null,
-      notes: normalized.notes,
-      updatedAt: new Date(),
-    })
+    .set(buildWeightEntryUpdateValues(normalized))
     .where(
       and(eq(weightEntries.id, entryId), eq(weightEntries.userId, userId)),
     )
@@ -2850,6 +2847,46 @@ function buildRecipeRecord(
   };
 }
 
+function buildRecipeIngredientValues(
+  recipeId: string,
+  ingredient: RecipeInput["ingredients"][number],
+  index: number,
+) {
+  return {
+    id: crypto.randomUUID(),
+    recipeId,
+    productId: ingredient.productId ?? null,
+    sortOrder: index,
+    label: ingredient.label,
+    quantity: ingredient.quantity?.toFixed(2) ?? "1.00",
+    unit: ingredient.unit ?? "serving",
+    servingMultiplier: ingredient.servingMultiplier?.toFixed(2) ?? "1.00",
+    proteinG: ingredient.proteinG.toFixed(1),
+    carbsG: ingredient.carbsG.toFixed(1),
+    fatG: ingredient.fatG.toFixed(1),
+    caloriesKcal: Math.round(ingredient.caloriesKcal),
+  };
+}
+
+async function insertRecipeIngredientRows(
+  tx: any,
+  recipeId: string,
+  ingredients: RecipeInput["ingredients"],
+) {
+  const ingredientRows = [];
+  for (let i = 0; i < ingredients.length; i++) {
+    const ingredient = ingredients[i]!;
+    const [row] = await tx
+      .insert(recipeIngredients)
+      .values(buildRecipeIngredientValues(recipeId, ingredient, i))
+      .returning();
+
+    ingredientRows.push(row!);
+  }
+
+  return ingredientRows;
+}
+
 export async function getRecipes(
   userId: string,
   db?: DatabaseClient,
@@ -3062,29 +3099,11 @@ export async function createRecipe(
       throw new Error("Unable to create recipe.");
     }
 
-    const ingredientRows = [];
-    for (let i = 0; i < validated.ingredients.length; i++) {
-      const ing = validated.ingredients[i]!;
-      const [row] = await tx
-        .insert(recipeIngredients)
-        .values({
-          id: crypto.randomUUID(),
-          recipeId,
-          productId: ing.productId ?? null,
-          sortOrder: i,
-          label: ing.label,
-          quantity: ing.quantity?.toFixed(2) ?? "1.00",
-          unit: ing.unit ?? "serving",
-          servingMultiplier: ing.servingMultiplier?.toFixed(2) ?? "1.00",
-          proteinG: ing.proteinG.toFixed(1),
-          carbsG: ing.carbsG.toFixed(1),
-          fatG: ing.fatG.toFixed(1),
-          caloriesKcal: Math.round(ing.caloriesKcal),
-        })
-        .returning();
-
-      ingredientRows.push(row!);
-    }
+    const ingredientRows = await insertRecipeIngredientRows(
+      tx,
+      recipeId,
+      validated.ingredients,
+    );
 
     return buildRecipeRecord(created, ingredientRows);
   });
@@ -3144,29 +3163,11 @@ export async function updateRecipe(
       .delete(recipeIngredients)
       .where(eq(recipeIngredients.recipeId, recipeId));
 
-    const ingredientRows = [];
-    for (let i = 0; i < validated.ingredients.length; i++) {
-      const ing = validated.ingredients[i]!;
-      const [row] = await tx
-        .insert(recipeIngredients)
-        .values({
-          id: crypto.randomUUID(),
-          recipeId,
-          productId: ing.productId ?? null,
-          sortOrder: i,
-          label: ing.label,
-          quantity: ing.quantity?.toFixed(2) ?? "1.00",
-          unit: ing.unit ?? "serving",
-          servingMultiplier: ing.servingMultiplier?.toFixed(2) ?? "1.00",
-          proteinG: ing.proteinG.toFixed(1),
-          carbsG: ing.carbsG.toFixed(1),
-          fatG: ing.fatG.toFixed(1),
-          caloriesKcal: Math.round(ing.caloriesKcal),
-        })
-        .returning();
-
-      ingredientRows.push(row!);
-    }
+    const ingredientRows = await insertRecipeIngredientRows(
+      tx,
+      recipeId,
+      validated.ingredients,
+    );
 
     return buildRecipeRecord(updatedRecipe, ingredientRows);
   });
@@ -3349,22 +3350,13 @@ async function insertBarcodeFoodProduct(
       id: crypto.randomUUID(),
       ownerUserId: null,
       scope: "global",
-      source: "barcode",
-      barcode: normalized.barcode,
-      name: normalized.name,
-      brand: normalized.brand ?? "",
-      defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
-      defaultServingUnit: normalized.defaultServingUnit,
-      proteinPer100: normalized.proteinPer100.toFixed(2),
-      carbsPer100: normalized.carbsPer100.toFixed(2),
-      fatPer100: normalized.fatPer100.toFixed(2),
-      caloriesPer100: normalized.caloriesPer100,
-      servingWeightG: normalized.servingWeightG?.toFixed(2) ?? "100.00",
-      servingVolumeMl: null,
+      ...buildFoodProductInputValues(normalized, {
+        servingWeightFallback: "100.00",
+        forceNullServingVolume: true,
+        sourceProviderFallback: "community",
+        updatedAt: now,
+      }),
       submittedByUserId,
-      sourceProvider: normalized.sourceProvider ?? "community",
-      sourceMetadata: normalized.sourceMetadata ?? {},
-      updatedAt: now,
     })
     .returning();
 
@@ -3658,6 +3650,49 @@ async function insertAdminAuditEvent(
     targetId: input.targetId,
     detailsJson: input.details,
   });
+}
+
+async function applyAdminBarcodeLifecycleChange(
+  tx: any,
+  input: {
+    actor: Pick<AppUser, "id" | "role">;
+    existing: FoodProduct;
+    barcodeProductId: string;
+    updateValues: Record<string, unknown>;
+    revisionAction: FoodProductRevisionAction;
+    auditAction: string;
+  },
+) {
+  const [updated] = await tx
+    .update(foodProducts)
+    .set(input.updateValues)
+    .where(eq(foodProducts.id, input.barcodeProductId))
+    .returning();
+
+  if (!updated) {
+    throw new Error("Barcode product not found.");
+  }
+
+  const product = mapFoodProductRow(updated);
+  await insertFoodProductRevision(tx, {
+    product,
+    actorUserId: input.actor.id,
+    action: input.revisionAction,
+  });
+
+  await insertAdminAuditEvent(tx, {
+    actorUserId: input.actor.id,
+    actorRole: input.actor.role,
+    action: input.auditAction,
+    targetType: "food_product",
+    targetId: input.barcodeProductId,
+    details: {
+      barcode: input.existing.barcode,
+      name: input.existing.name,
+    },
+  });
+
+  return product;
 }
 
 async function getOwnerCount(db: DatabaseClient | any) {
@@ -4217,22 +4252,13 @@ export async function updateAdminBarcodeProduct(
 
     const [updated] = await tx
       .update(foodProducts)
-      .set({
-        barcode: normalized.barcode,
-        name: normalized.name,
-        brand: normalized.brand ?? "",
-        defaultServingQuantity: normalized.defaultServingQuantity.toFixed(2),
-        defaultServingUnit: normalized.defaultServingUnit,
-        proteinPer100: normalized.proteinPer100.toFixed(2),
-        carbsPer100: normalized.carbsPer100.toFixed(2),
-        fatPer100: normalized.fatPer100.toFixed(2),
-        caloriesPer100: normalized.caloriesPer100,
-        servingWeightG: normalized.servingWeightG?.toFixed(2) ?? "100.00",
-        servingVolumeMl: null,
-        sourceProvider: normalized.sourceProvider ?? "community",
-        sourceMetadata: normalized.sourceMetadata ?? {},
-        updatedAt: new Date(),
-      })
+      .set(
+        buildFoodProductInputValues(normalized, {
+          servingWeightFallback: "100.00",
+          forceNullServingVolume: true,
+          sourceProviderFallback: "community",
+        }),
+      )
       .where(eq(foodProducts.id, barcodeProductId))
       .returning();
 
@@ -4288,40 +4314,18 @@ export async function softDeleteAdminBarcodeProduct(
     }
 
     const deletedAt = new Date();
-    const [updated] = await tx
-      .update(foodProducts)
-      .set({
+    return applyAdminBarcodeLifecycleChange(tx, {
+      actor,
+      existing,
+      barcodeProductId,
+      updateValues: {
         deletedAt,
         deletedByUserId: actor.id,
         updatedAt: deletedAt,
-      })
-      .where(eq(foodProducts.id, barcodeProductId))
-      .returning();
-
-    if (!updated) {
-      throw new Error("Barcode product not found.");
-    }
-
-    const product = mapFoodProductRow(updated);
-    await insertFoodProductRevision(tx, {
-      product,
-      actorUserId: actor.id,
-      action: "deleted",
-    });
-
-    await insertAdminAuditEvent(tx, {
-      actorUserId: actor.id,
-      actorRole: actor.role,
-      action: "barcode.deleted",
-      targetType: "food_product",
-      targetId: barcodeProductId,
-      details: {
-        barcode: existing.barcode,
-        name: existing.name,
       },
+      revisionAction: "deleted",
+      auditAction: "barcode.deleted",
     });
-
-    return product;
   });
 }
 
@@ -4351,40 +4355,18 @@ export async function restoreAdminBarcodeProduct(
       }
     }
 
-    const [updated] = await tx
-      .update(foodProducts)
-      .set({
+    return applyAdminBarcodeLifecycleChange(tx, {
+      actor,
+      existing,
+      barcodeProductId,
+      updateValues: {
         deletedAt: null,
         deletedByUserId: null,
         updatedAt: new Date(),
-      })
-      .where(eq(foodProducts.id, barcodeProductId))
-      .returning();
-
-    if (!updated) {
-      throw new Error("Barcode product not found.");
-    }
-
-    const product = mapFoodProductRow(updated);
-    await insertFoodProductRevision(tx, {
-      product,
-      actorUserId: actor.id,
-      action: "restored",
-    });
-
-    await insertAdminAuditEvent(tx, {
-      actorUserId: actor.id,
-      actorRole: actor.role,
-      action: "barcode.restored",
-      targetType: "food_product",
-      targetId: barcodeProductId,
-      details: {
-        barcode: existing.barcode,
-        name: existing.name,
       },
+      revisionAction: "restored",
+      auditAction: "barcode.restored",
     });
-
-    return product;
   });
 }
 

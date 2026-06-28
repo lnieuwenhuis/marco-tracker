@@ -74,14 +74,45 @@ function toActionError(error: unknown) {
   return error.message;
 }
 
+type SessionUser = Awaited<ReturnType<typeof requireSessionUser>>;
+type RevalidateTarget = readonly [path: string, type?: "page" | "layout"];
+
+function revalidateTargets(targets: readonly RevalidateTarget[] = []) {
+  for (const [path, type] of targets) {
+    if (type) {
+      revalidatePath(path, type);
+    } else {
+      revalidatePath(path);
+    }
+  }
+}
+
+async function runSessionAction<T extends ActionResult>(
+  operation: (sessionUser: SessionUser) => Promise<T>,
+  options: { revalidate?: readonly RevalidateTarget[] } = {},
+): Promise<T> {
+  const sessionUser = await requireSessionUser();
+
+  try {
+    const result = await operation(sessionUser);
+    if (result.ok) {
+      revalidateTargets(options.revalidate);
+    }
+    return result;
+  } catch (error) {
+    return {
+      ok: false,
+      error: toActionError(error),
+    } as T;
+  }
+}
+
 type SaveMealEntryResult = ActionResult & { entry?: MealEntryRecord };
 
 export async function saveMealEntryAction(
   input: SaveMealEntryInput,
 ): Promise<SaveMealEntryResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const entry = input.id
       ? await updateMealEntry(sessionUser.userId, input.id, {
           date: input.date,
@@ -116,53 +147,34 @@ export async function saveMealEntryAction(
           clientMutationId: input.clientMutationId,
         });
 
-    revalidatePath("/", "page");
     return { ok: true, entry };
-  } catch (error) {
-    return {
-      ok: false,
-      error: toActionError(error),
-    };
-  }
+  }, { revalidate: [["/", "page"]] });
 }
 
 export async function markMealEntryStatusAction(
   input: { id: string; status: MealEntryStatus },
 ): Promise<SaveMealEntryResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const entry = await markMealEntryStatus(
       sessionUser.userId,
       input.id,
       input.status,
     );
-    revalidatePath("/", "page");
     return { ok: true, entry };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "page"]] });
 }
 
 export async function deleteMealEntryAction(
   input: { id: string },
 ): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const deleted = await deleteMealEntry(sessionUser.userId, input.id);
     if (!deleted) {
       return { ok: false, error: "Meal entry not found." };
     }
 
-    revalidatePath("/", "page");
     return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      error: toActionError(error),
-    };
-  }
+  }, { revalidate: [["/", "page"]] });
 }
 
 type MealGroupResult = ActionResult & { group?: MealGroup; groups?: MealGroup[] };
@@ -170,58 +182,42 @@ type MealGroupResult = ActionResult & { group?: MealGroup; groups?: MealGroup[] 
 export async function createMealGroupAction(
   input: { label: string },
 ): Promise<MealGroupResult> {
-  const sessionUser = await requireSessionUser();
-  try {
+  return runSessionAction(async (sessionUser) => {
     const group = await createMealGroup(sessionUser.userId, input);
-    revalidatePath("/", "page");
     return { ok: true, group };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "page"]] });
 }
 
 export async function updateMealGroupAction(
   input: { id: string; label: string },
 ): Promise<MealGroupResult> {
-  const sessionUser = await requireSessionUser();
-  try {
+  return runSessionAction(async (sessionUser) => {
     const group = await updateMealGroup(sessionUser.userId, input.id, {
       label: input.label,
     });
-    revalidatePath("/", "page");
     return { ok: true, group };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "page"]] });
 }
 
 export async function deleteMealGroupAction(
   input: { id: string },
 ): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-  try {
+  return runSessionAction(async (sessionUser) => {
     const deleted = await deleteMealGroup(sessionUser.userId, input.id);
     if (!deleted) {
       return { ok: false, error: "Meal group not found." };
     }
-    revalidatePath("/", "page");
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "page"]] });
 }
 
 export async function reorderMealGroupsAction(
   input: { orderedIds: string[] },
 ): Promise<MealGroupResult> {
-  const sessionUser = await requireSessionUser();
-  try {
+  return runSessionAction(async (sessionUser) => {
     const groups = await reorderMealGroups(sessionUser.userId, input.orderedIds);
-    revalidatePath("/", "page");
     return { ok: true, groups };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "page"]] });
 }
 
 type SaveGoalsInput = {
@@ -232,18 +228,10 @@ type SaveGoalsInput = {
 };
 
 export async function saveGoalsAction(input: SaveGoalsInput): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     await saveUserGoals(sessionUser.userId, input);
-    revalidatePath("/", "layout");
     return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      error: toActionError(error),
-    };
-  }
+  }, { revalidate: [["/", "layout"]] });
 }
 
 type CompleteOnboardingActionInput = {
@@ -266,9 +254,7 @@ type CompleteOnboardingActionInput = {
 export async function completeOnboardingAction(
   input: CompleteOnboardingActionInput,
 ): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const currentWeight =
       input.currentWeightKg != null &&
       Number.isFinite(input.currentWeightKg) &&
@@ -292,11 +278,8 @@ export async function completeOnboardingAction(
       starterTemplate,
     });
 
-    revalidatePath("/", "layout");
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "layout"]] });
 }
 
 type SaveTemplateInput = {
@@ -341,41 +324,31 @@ function singleFoodTemplateInput(
 }
 
 export async function saveTemplateAction(input: SaveTemplateInput): Promise<SaveTemplateResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const template = await createTemplate(
       sessionUser.userId,
       singleFoodTemplateInput(input),
     );
     return { ok: true, template };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  });
 }
 
 export async function deleteTemplateAction(input: { id: string }): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const deleted = await deleteTemplate(sessionUser.userId, input.id);
     if (!deleted) {
       return { ok: false, error: "Template not found." };
     }
 
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  });
 }
 
 type UpdateTemplateInput = { id: string } & SaveTemplateInput;
 type UpdateTemplateResult = ActionResult & { template?: MealTemplate };
 
 export async function updateTemplateAction(input: UpdateTemplateInput): Promise<UpdateTemplateResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const existingTemplate = await getTemplateById(sessionUser.userId, input.id);
     if (!existingTemplate) {
       return { ok: false, error: "Template not found." };
@@ -393,9 +366,7 @@ export async function updateTemplateAction(input: UpdateTemplateInput): Promise<
       singleFoodTemplateInput(input, existingTemplate.items[0]),
     );
     return { ok: true, template };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  });
 }
 
 type ApplyTemplateResult = ActionResult & { entries?: MealEntryRecord[] };
@@ -405,15 +376,10 @@ export async function applyTemplateAction(input: {
   date: string;
   status?: MealEntryStatus;
 }): Promise<ApplyTemplateResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const entries = await applyTemplateToDate(sessionUser.userId, input);
-    revalidatePath("/", "layout");
     return { ok: true, entries };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "layout"]] });
 }
 
 export async function createTemplateFromDateAction(input: {
@@ -421,15 +387,10 @@ export async function createTemplateFromDateAction(input: {
   type: "meal" | "day";
   label: string;
 }): Promise<SaveTemplateResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const template = await createTemplateFromDate(sessionUser.userId, input);
-    revalidatePath("/planner", "page");
     return { ok: true, template };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/planner", "page"]] });
 }
 
 // ---------------------------------------------------------------------------
@@ -446,33 +407,23 @@ type SaveWeightEntryInput = {
 export async function saveWeightEntryAction(
   input: SaveWeightEntryInput,
 ): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     await createWeightEntry(sessionUser.userId, input);
-    revalidatePath("/weight", "page");
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/weight", "page"]] });
 }
 
 export async function deleteWeightEntryAction(
   input: { id: string },
 ): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const deleted = await deleteWeightEntry(sessionUser.userId, input.id);
     if (!deleted) {
       return { ok: false, error: "Weight entry not found." };
     }
 
-    revalidatePath("/weight", "page");
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/weight", "page"]] });
 }
 
 type UpdateWeightEntryInput = {
@@ -486,9 +437,7 @@ type UpdateWeightEntryInput = {
 export async function updateWeightEntryAction(
   input: UpdateWeightEntryInput,
 ): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const updated = await updateWeightEntry(sessionUser.userId, input.id, {
       date: input.date,
       weightKg: input.weightKg,
@@ -500,25 +449,17 @@ export async function updateWeightEntryAction(
       return { ok: false, error: "Weight entry not found." };
     }
 
-    revalidatePath("/weight", "page");
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/weight", "page"]] });
 }
 
 export async function saveWeightGoalAction(
   input: { goalWeightKg: number | null },
 ): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     await saveWeightGoal(sessionUser.userId, input.goalWeightKg);
-    revalidatePath("/weight", "page");
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/weight", "page"]] });
 }
 
 // ---------------------------------------------------------------------------
@@ -548,35 +489,25 @@ type SaveRecipeResult = ActionResult & { recipe?: RecipeRecord };
 export async function saveRecipeAction(
   input: SaveRecipeInput,
 ): Promise<SaveRecipeResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const recipe = input.id
       ? await updateRecipe(sessionUser.userId, input.id, input)
       : await createRecipe(sessionUser.userId, input);
-    revalidatePath("/recipes", "page");
     return { ok: true, recipe };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/recipes", "page"]] });
 }
 
 export async function deleteRecipeAction(
   input: { id: string },
 ): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const deleted = await deleteRecipe(sessionUser.userId, input.id);
     if (!deleted) {
       return { ok: false, error: "Recipe not found." };
     }
 
-    revalidatePath("/recipes", "page");
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/recipes", "page"]] });
 }
 
 type SearchMealEntriesResult = ActionResult & { results?: MealEntryRecord[] };
@@ -584,14 +515,10 @@ type SearchMealEntriesResult = ActionResult & { results?: MealEntryRecord[] };
 export async function searchMealEntriesAction(
   input: { query: string },
 ): Promise<SearchMealEntriesResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const results = await searchMealEntries(sessionUser.userId, input.query);
     return { ok: true, results };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  });
 }
 
 type SearchFoodProductsResult = ActionResult & { products?: FoodProduct[] };
@@ -599,14 +526,10 @@ type SearchFoodProductsResult = ActionResult & { products?: FoodProduct[] };
 export async function searchFoodProductsAction(
   input: { query: string },
 ): Promise<SearchFoodProductsResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const products = await searchFoodProducts(sessionUser.userId, input.query);
     return { ok: true, products };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  });
 }
 
 type SearchFoodsResult = ActionResult & {
@@ -617,46 +540,47 @@ type SearchFoodsResult = ActionResult & {
 export async function searchFoodsAction(
   input: { query: string },
 ): Promise<SearchFoodsResult> {
-  const sessionUser = await requireSessionUser();
-  const query = input.query.trim();
+  return runSessionAction(async (sessionUser) => {
+    const query = input.query.trim();
 
-  if (!query) {
-    return { ok: true, results: [], products: [] };
-  }
+    if (!query) {
+      return { ok: true, results: [], products: [] };
+    }
 
-  const [historyResult, productsResult] = await Promise.allSettled([
-    searchMealEntries(sessionUser.userId, query),
-    searchFoodProducts(sessionUser.userId, query),
-  ]);
+    const [historyResult, productsResult] = await Promise.allSettled([
+      searchMealEntries(sessionUser.userId, query),
+      searchFoodProducts(sessionUser.userId, query),
+    ]);
 
-  const results =
-    historyResult.status === "fulfilled" ? historyResult.value : [];
-  const products =
-    productsResult.status === "fulfilled" ? productsResult.value : [];
+    const results =
+      historyResult.status === "fulfilled" ? historyResult.value : [];
+    const products =
+      productsResult.status === "fulfilled" ? productsResult.value : [];
 
-  if (historyResult.status === "rejected" && productsResult.status === "rejected") {
-    return { ok: false, error: toActionError(historyResult.reason) };
-  }
+    if (historyResult.status === "rejected" && productsResult.status === "rejected") {
+      return { ok: false, error: toActionError(historyResult.reason) };
+    }
 
-  if (historyResult.status === "rejected") {
-    return {
-      ok: true,
-      results,
-      products,
-      error: "Food history search failed, but product results are still available.",
-    };
-  }
+    if (historyResult.status === "rejected") {
+      return {
+        ok: true,
+        results,
+        products,
+        error: "Food history search failed, but product results are still available.",
+      };
+    }
 
-  if (productsResult.status === "rejected") {
-    return {
-      ok: true,
-      results,
-      products,
-      error: "Product search failed, but history results are still available.",
-    };
-  }
+    if (productsResult.status === "rejected") {
+      return {
+        ok: true,
+        results,
+        products,
+        error: "Product search failed, but history results are still available.",
+      };
+    }
 
-  return { ok: true, results, products };
+    return { ok: true, results, products };
+  });
 }
 
 type SaveFoodProductResult = ActionResult & { product?: FoodProduct };
@@ -664,33 +588,23 @@ type SaveFoodProductResult = ActionResult & { product?: FoodProduct };
 export async function createFoodProductAction(
   input: FoodProductInput,
 ): Promise<SaveFoodProductResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const product = await createPersonalFoodProduct(sessionUser.userId, input);
-    revalidatePath("/", "layout");
     return { ok: true, product };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "layout"]] });
 }
 
 export async function updateFoodProductAction(
   input: { id: string; product: FoodProductInput },
 ): Promise<SaveFoodProductResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const product = await updatePersonalFoodProduct(
       sessionUser.userId,
       input.id,
       input.product,
     );
-    revalidatePath("/", "layout");
     return { ok: true, product };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "layout"]] });
 }
 
 type LogRecipePortionInput = {
@@ -704,9 +618,7 @@ type LogRecipePortionInput = {
 export async function logRecipePortionAction(
   input: LogRecipePortionInput,
 ): Promise<ActionResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const recipe = await getRecipeById(sessionUser.userId, input.recipeId);
     if (!recipe) {
       throw new Error("Recipe not found.");
@@ -753,11 +665,8 @@ export async function logRecipePortionAction(
       caloriesKcal: Math.round(recipe.perPortionMacros.caloriesKcal * factor),
     });
 
-    revalidatePath("/", "page");
     return { ok: true };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  }, { revalidate: [["/", "page"]] });
 }
 
 // ---------------------------------------------------------------------------
@@ -771,14 +680,10 @@ type SaveBarcodeFoodProductResult = ActionResult & {
 export async function saveBarcodeFoodProductAction(
   input: BarcodeFoodProductInput,
 ): Promise<SaveBarcodeFoodProductResult> {
-  const sessionUser = await requireSessionUser();
-
-  try {
+  return runSessionAction(async (sessionUser) => {
     const product = await saveBarcodeFoodProduct(sessionUser.userId, input);
     return { ok: true, product };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -796,11 +701,8 @@ export async function fetchLeaderboardStatsAction(
     return { ok: false, error: "Invalid reference date." };
   }
 
-  const sessionUser = await requireSessionUser();
-  try {
+  return runSessionAction(async (sessionUser) => {
     const stats = await getLeaderboardStats(sessionUser.userId, input.referenceDate);
     return { ok: true, stats };
-  } catch (error) {
-    return { ok: false, error: toActionError(error) };
-  }
+  });
 }

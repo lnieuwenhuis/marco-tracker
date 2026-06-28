@@ -13,7 +13,7 @@ import { formatSelectedDate } from "@/lib/formatting";
 import { buildMealEntryCopyInput } from "@/lib/meal-entry-copy";
 import { getLocalDateString } from "@/lib/startup-date";
 import { invalidateAppDataCache } from "./app-data-cache";
-import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
+import { OverlayPortal, useBodyScrollLock, useEscapeDismiss } from "./overlay-portal";
 
 type FoodSearchModalProps = {
   onClose: () => void;
@@ -32,6 +32,7 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
   const [copiedIds, setCopiedIds] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
   useBodyScrollLock();
+  useEscapeDismiss(true, onClose);
 
   const todayStr = useMemo(() => getLocalDateString(), []);
   const trimmedQuery = normalizeFoodSearchQuery(query);
@@ -50,16 +51,6 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
 
   useEffect(() => {
     if (!trimmedQuery) {

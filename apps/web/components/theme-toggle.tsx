@@ -11,6 +11,8 @@ import {
   isValidTheme,
 } from "@/lib/themes";
 
+import { useDismissableLayer } from "./overlay-portal";
+
 // ─── Core helpers ─────────────────────────────────────────────────────────────
 
 function applyTheme(theme: ThemeId) {
@@ -64,37 +66,11 @@ export function ThemePicker() {
     applyTheme(activeTheme);
   }, [activeTheme]);
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        return;
-      }
-
-      if (containerRef.current?.contains(target)) {
-        return;
-      }
-
-      setOpen(false);
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open]);
+  useDismissableLayer({
+    active: open,
+    layerRef: containerRef,
+    onDismiss: () => setOpen(false),
+  });
 
   const current = THEMES.find((theme) => theme.id === activeTheme) ?? THEMES[0];
   const [currentAccent, currentBg] = current.swatch;

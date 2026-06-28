@@ -2,7 +2,8 @@
 
 import type { RecipeRecord } from "@macro-tracker/db";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { OverlayPortal, useBodyScrollLock } from "./overlay-portal";
+import { CloseButton } from "./close-button";
+import { OverlayPortal, useBodyScrollLock, useEscapeDismiss } from "./overlay-portal";
 
 type RecipePickerModalProps = {
   recipes: RecipeRecord[];
@@ -18,14 +19,7 @@ export function RecipePickerModal({
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   useBodyScrollLock();
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  useEscapeDismiss(true, onClose);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -63,17 +57,11 @@ export function RecipePickerModal({
           <h2 className="text-base font-bold text-[var(--color-ink)]">
             Pick a Recipe
           </h2>
-          <button
-            type="button"
+          <CloseButton
             onClick={onClose}
             className="rounded-lg p-1.5 text-[var(--color-muted)] transition hover:text-[var(--color-ink)]"
-            aria-label="Close"
-          >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="4" y1="4" x2="14" y2="14" />
-              <line x1="14" y1="4" x2="4" y2="14" />
-            </svg>
-          </button>
+            iconSize={18}
+          />
         </div>
 
         {recipes.length > 0 ? (

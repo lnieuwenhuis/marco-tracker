@@ -94,9 +94,23 @@ describe("Macro Tracker API v1", () => {
     expect(product).not.toHaveProperty("correctedFromProductId");
   }
 
-  function createFailingUserLookupRuntime() {
+  function createFailingRuntimeForTables(input: {
+    selectTable?: unknown;
+    updateTable?: unknown;
+    message: string;
+  }) {
     const failingDb = new Proxy(runtime.db, {
       get(target, prop, receiver) {
+        if (prop === "update" && input.updateTable) {
+          return (table: unknown) => {
+            if (table === input.updateTable) {
+              throw new Error(input.message);
+            }
+            const update = Reflect.get(target, prop, receiver) as (updateTable: unknown) => unknown;
+            return update.call(target, table);
+          };
+        }
+
         if (prop === "select") {
           return (...args: unknown[]) => {
             const select = Reflect.get(target, prop, receiver) as (...selectArgs: unknown[]) => unknown;
@@ -105,8 +119,8 @@ describe("Macro Tracker API v1", () => {
               get(selectTarget, selectProp, selectReceiver) {
                 if (selectProp === "from") {
                   return (table: unknown) => {
-                    if (table === users) {
-                      throw new Error("Forced user lookup failure.");
+                    if (table === input.selectTable) {
+                      throw new Error(input.message);
                     }
                     const from = Reflect.get(selectTarget, selectProp, selectReceiver) as (
                       fromTable: unknown,
@@ -130,50 +144,19 @@ describe("Macro Tracker API v1", () => {
     return { ...runtime, db: failingDb } satisfies DatabaseRuntime;
   }
 
-  function createFailingApiTokenLookupRuntime() {
-    const failingDb = new Proxy(runtime.db, {
-      get(target, prop, receiver) {
-        if (prop === "update") {
-          return (table: unknown) => {
-            if (table === apiTokens) {
-              throw new Error("Forced API token lookup failure.");
-            }
-            const update = Reflect.get(target, prop, receiver) as (updateTable: unknown) => unknown;
-            return update.call(target, table);
-          };
-        }
-
-        if (prop === "select") {
-          return (...args: unknown[]) => {
-            const select = Reflect.get(target, prop, receiver) as (...selectArgs: unknown[]) => unknown;
-            const builder = select.apply(target, args);
-            return new Proxy(builder as object, {
-              get(selectTarget, selectProp, selectReceiver) {
-                if (selectProp === "from") {
-                  return (table: unknown) => {
-                    if (table === apiTokens) {
-                      throw new Error("Forced API token lookup failure.");
-                    }
-                    const from = Reflect.get(selectTarget, selectProp, selectReceiver) as (
-                      fromTable: unknown,
-                    ) => unknown;
-                    return from.call(selectTarget, table);
-                  };
-                }
-
-                const value = Reflect.get(selectTarget, selectProp, selectReceiver);
-                return typeof value === "function" ? value.bind(selectTarget) : value;
-              },
-            });
-          };
-        }
-
-        const value = Reflect.get(target, prop, receiver);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
+  function createFailingUserLookupRuntime() {
+    return createFailingRuntimeForTables({
+      selectTable: users,
+      message: "Forced user lookup failure.",
     });
+  }
 
-    return { ...runtime, db: failingDb } satisfies DatabaseRuntime;
+  function createFailingApiTokenLookupRuntime() {
+    return createFailingRuntimeForTables({
+      selectTable: apiTokens,
+      updateTable: apiTokens,
+      message: "Forced API token lookup failure.",
+    });
   }
 
   it("returns CORS preflight headers for API v1 paths", async () => {

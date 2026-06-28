@@ -1,13 +1,12 @@
 "use client";
 
-import type { DailySummary, MacroGoals, MealEntryRecord, MealEntryStatus, MealGroup, MealTemplate, QuantityUnit, QuickAddCandidate, RecipeRecord } from "@macro-tracker/db";
+import type { DailySummary, MacroGoals, MealEntryRecord, MealEntryStatus, MealGroup, MealTemplate, QuickAddCandidate, RecipeRecord } from "@macro-tracker/db";
 import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useMemo, useRef, useState, useTransition } from "react";
 
-import { applyTemplateAction, createMealGroupAction, deleteMealGroupAction, deleteTemplateAction, deleteMealEntryAction, markMealEntryStatusAction, saveTemplateAction, saveMealEntryAction, updateMealGroupAction, updateTemplateAction } from "@/lib/actions";
+import { applyTemplateAction, createMealGroupAction, deleteMealGroupAction, deleteMealEntryAction, markMealEntryStatusAction, saveMealEntryAction, updateMealGroupAction } from "@/lib/actions";
 import {
   getDailyMutationCacheKeys,
-  getTemplateMutationCacheKeys,
 } from "@/lib/app-warmup";
 import type { ComposeAction } from "@/lib/compose";
 import { computeLiveTotals, rankCandidates } from "@/lib/quick-add";
@@ -31,6 +30,7 @@ import { MealCard, type MealDraft } from "./meal-card";
 import { PresetModal } from "./preset-modal";
 import { QuickAddRail } from "./quick-add-rail";
 import { RecipePickerModal } from "./recipe-picker-modal";
+import { useTemplateMutations } from "./use-template-mutations";
 
 type DashboardShellProps = {
   userEmail: string;
@@ -141,6 +141,37 @@ function createDraftFromCandidate(
   };
 }
 
+function createDraftFromMacroSelection(
+  selection: {
+    productId?: string | null;
+    label: string;
+    quantity?: number;
+    unit?: MealDraft["unit"];
+    servingMultiplier?: number;
+    proteinG: number;
+    carbsG: number;
+    fatG: number;
+    caloriesKcal: number;
+  },
+  sortOrder: number,
+  status: MealEntryStatus,
+): MealDraft {
+  return {
+    clientId: `draft-${crypto.randomUUID()}`,
+    status,
+    productId: selection.productId ?? null,
+    label: selection.label,
+    quantity: String(selection.quantity ?? 1),
+    unit: selection.unit ?? "serving",
+    servingMultiplier: String(selection.servingMultiplier ?? 1),
+    proteinG: String(selection.proteinG),
+    carbsG: String(selection.carbsG),
+    fatG: String(selection.fatG),
+    caloriesKcal: String(selection.caloriesKcal),
+    sortOrder,
+  };
+}
+
 function toNumber(value: string, fallback = 0) {
   if (!value.trim()) {
     return fallback;
@@ -186,6 +217,16 @@ export function DashboardShell({
   const [localTemplates, setLocalTemplates] = useState<MealTemplate[]>(initialTemplates);
   const [presetMutation, setPresetMutation] = useState<PresetMutationState | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
+  const {
+    handleSavePreset,
+    handleDeletePreset,
+    handleUpdatePreset,
+  } = useTemplateMutations({
+    localTemplates,
+    setLocalTemplates,
+    setPresetError,
+    setPresetMutation: (mutation) => setPresetMutation(mutation),
+  });
   const [localMealGroups, setLocalMealGroups] = useState<MealGroup[]>(
     dailySummary.mealGroups,
   );
@@ -651,107 +692,6 @@ export function DashboardShell({
       invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
       router.refresh();
     });
-  }
-
-  async function handleSavePreset(input: {
-    productId?: string | null;
-    label: string;
-    quantity?: number;
-    unit?: QuantityUnit;
-    servingMultiplier?: number;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }) {
-    setPresetError(null);
-    setPresetMutation({ type: "save" });
-
-    try {
-      const result = await saveTemplateAction({
-        productId: input.productId,
-        label: input.label,
-        quantity: input.quantity,
-        unit: input.unit,
-        servingMultiplier: input.servingMultiplier,
-        proteinG: input.proteinG,
-        carbsG: input.carbsG,
-        fatG: input.fatG,
-        caloriesKcal: input.caloriesKcal,
-      });
-      const savedTemplate = result.template;
-      if (!result.ok || !savedTemplate) {
-        setPresetError(result.error ?? "Unable to save template.");
-        return false;
-      }
-
-      setLocalTemplates((prev) =>
-        [...prev, savedTemplate].sort((a, b) => a.label.localeCompare(b.label)),
-      );
-      invalidateAppDataCache(getTemplateMutationCacheKeys());
-      return true;
-    } finally {
-      setPresetMutation(null);
-    }
-  }
-
-  async function handleDeletePreset(presetId: string) {
-    const previousTemplates = localTemplates;
-
-    setPresetError(null);
-    setPresetMutation({ type: "delete", presetId });
-    setLocalTemplates((prev) => prev.filter((p) => p.id !== presetId));
-
-    try {
-      const result = await deleteTemplateAction({ id: presetId });
-      if (!result.ok) {
-        setLocalTemplates(previousTemplates);
-        setPresetError(result.error ?? "Unable to delete template.");
-        return false;
-      }
-
-      invalidateAppDataCache(getTemplateMutationCacheKeys());
-      return true;
-    } finally {
-      setPresetMutation(null);
-    }
-  }
-
-  async function handleUpdatePreset(id: string, input: {
-    label: string;
-    proteinG: number;
-    carbsG: number;
-    fatG: number;
-    caloriesKcal: number;
-  }) {
-    setPresetError(null);
-    setPresetMutation({ type: "update", presetId: id });
-
-    try {
-      const result = await updateTemplateAction({
-        id,
-        label: input.label,
-        proteinG: input.proteinG,
-        carbsG: input.carbsG,
-        fatG: input.fatG,
-        caloriesKcal: input.caloriesKcal,
-      });
-      const updatedTemplate = result.template;
-      if (!result.ok || !updatedTemplate) {
-        setPresetError(result.error ?? "Unable to update template.");
-        return false;
-      }
-
-      setLocalTemplates((prev) =>
-        prev
-          .map((preset) => (preset.id === id ? updatedTemplate : preset))
-          .sort((a, b) => a.label.localeCompare(b.label)),
-      );
-      invalidateAppDataCache(getTemplateMutationCacheKeys());
-      return true;
-    } finally {
-      setPresetMutation(null);
-    }
   }
 
   async function handleCreateMealGroup() {
@@ -1288,19 +1228,11 @@ export function DashboardShell({
           onAddToLog={(macros) => {
             setDrafts((currentDrafts) => [
               ...currentDrafts,
-              {
-                clientId: `draft-${crypto.randomUUID()}`,
-                status: defaultEntryStatus,
-                label: macros.label,
-                quantity: "1",
-                unit: "serving",
-                servingMultiplier: "1",
-                proteinG: String(macros.proteinG),
-                carbsG: String(macros.carbsG),
-                fatG: String(macros.fatG),
-                caloriesKcal: String(macros.caloriesKcal),
-                sortOrder: getNextSortOrder(currentDrafts),
-              },
+              createDraftFromMacroSelection(
+                macros,
+                getNextSortOrder(currentDrafts),
+                defaultEntryStatus,
+              ),
             ]);
             invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
             setShowPhotoModal(false);
@@ -1334,20 +1266,11 @@ export function DashboardShell({
           onAddToLog={(macros) => {
             setDrafts((currentDrafts) => [
               ...currentDrafts,
-              {
-                clientId: `draft-${crypto.randomUUID()}`,
-                status: defaultEntryStatus,
-                productId: macros.productId ?? null,
-                label: macros.label,
-                quantity: String(macros.quantity),
-                unit: macros.unit,
-                servingMultiplier: String(macros.servingMultiplier),
-                proteinG: String(macros.proteinG),
-                carbsG: String(macros.carbsG),
-                fatG: String(macros.fatG),
-                caloriesKcal: String(macros.caloriesKcal),
-                sortOrder: getNextSortOrder(currentDrafts),
-              },
+              createDraftFromMacroSelection(
+                macros,
+                getNextSortOrder(currentDrafts),
+                defaultEntryStatus,
+              ),
             ]);
             invalidateAppDataCache(getDailyMutationCacheKeys(selectedDate));
             setScanResult(null);

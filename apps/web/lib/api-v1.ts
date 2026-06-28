@@ -54,7 +54,12 @@ import {
 } from "@macro-tracker/db";
 import { NextResponse } from "next/server";
 
-import { getApiV1OpenApi } from "./api-v1-openapi";
+import {
+  getApiV1AllowedMethods,
+  getApiV1EndpointMatch,
+  getApiV1OpenApi,
+  isKnownApiV1Path,
+} from "./api-v1-openapi";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -96,7 +101,7 @@ function error(status: number, code: string, message: string, init?: ResponseIni
 }
 
 function methodNotAllowed(path?: string[]) {
-  const allowedMethods = path ? getAllowedMethods(path) : [];
+  const allowedMethods = path ? getApiV1AllowedMethods(path) : [];
   return error(405, "method_not_allowed", "Method is not allowed for this endpoint.", {
     headers: allowedMethods.length > 0 ? { Allow: allowedMethods.join(", ") } : undefined,
   });
@@ -775,111 +780,6 @@ async function dispatchApiRequest(ctx: ApiContext) {
   return notFound();
 }
 
-function scopesFor(method: ApiMethod, path: string[]): ApiScope[] | null {
-  if (path.length > 3) return null;
-
-  const [resource, id, action] = path;
-  if (resource === "openapi.json" && !id && method === "GET") return [];
-  if (resource === "me" && !id && method === "GET") return ["read:account", "read:goals"];
-  if (resource === "goals" && !id) {
-    if (method === "GET") return ["read:goals"];
-    if (method === "PATCH") return ["write:goals", "read:goals"];
-  }
-  if (resource === "days" && id) {
-    if (!action && method === "GET") return ["read:daily"];
-    if (action === "entries" && method === "POST") return ["write:daily"];
-  }
-  if (resource === "meal-entries" && id) {
-    if (!action && method === "PATCH") return ["write:daily", "read:daily"];
-    if (!action && method === "DELETE") return ["write:daily"];
-    if (action === "status" && method === "PATCH") return ["write:daily", "read:daily"];
-  }
-  if (resource === "meal-groups") {
-    if (!id && method === "GET") return ["read:daily"];
-    if ((!id && method === "POST") || (id === "reorder" && !action && method === "POST")) return ["write:daily"];
-    if (id && id !== "reorder" && !action && (method === "PATCH" || method === "DELETE")) return ["write:daily"];
-  }
-  if (resource === "foods") {
-    if (id === "search" && !action && method === "GET") return ["read:foods"];
-    if (!id && method === "POST") return ["write:foods"];
-    if (id && id !== "search" && !action && method === "PATCH") return ["write:foods", "read:foods"];
-  }
-  if (resource === "barcodes" && id && !action && method === "GET") return ["read:foods"];
-  if (resource === "templates") {
-    if (id === "from-day" && !action && method === "POST") return ["read:daily", "write:templates"];
-    if (!id && method === "GET") return ["read:templates"];
-    if (!id && method === "POST") return ["write:templates"];
-    if (id && action === "apply" && method === "POST") return ["read:templates", "write:daily"];
-    if (id && id !== "from-day" && !action && method === "GET") return ["read:templates"];
-    if (id && id !== "from-day" && !action && (method === "PATCH" || method === "DELETE")) return ["write:templates"];
-  }
-  if (resource === "recipes") {
-    if (!id && method === "GET") return ["read:recipes"];
-    if (!id && method === "POST") return ["write:recipes"];
-    if (id && action === "log" && method === "POST") return ["read:recipes", "write:daily"];
-    if (id && !action && method === "GET") return ["read:recipes"];
-    if (id && !action && (method === "PATCH" || method === "DELETE")) return ["write:recipes"];
-  }
-  if (resource === "weight") {
-    if ((!id && method === "GET") || (id === "goal" && !action && method === "GET") || (id === "entries" && !action && method === "GET")) {
-      return ["read:weight"];
-    }
-    if (id === "entries" && !action && method === "POST") return ["write:weight"];
-    if (id === "entries" && action && method === "PATCH") return ["write:weight", "read:weight"];
-    if ((id === "entries" && action && method === "DELETE") || (id === "goal" && !action && method === "PATCH")) {
-      return ["write:weight"];
-    }
-  }
-  if (resource === "summary" && !id && method === "GET") {
-    return ["read:stats", "read:daily", "read:goals", "read:weight"];
-  }
-  if ((resource === "stats" || resource === "leaderboard") && !id && method === "GET") {
-    return resource === "stats" ? ["read:stats", "read:weight", "read:goals"] : ["read:stats"];
-  }
-  return null;
-}
-
-function getAllowedMethods(path: string[]) {
-  const methods = ["GET", "POST", "PATCH", "DELETE"] as const satisfies readonly ApiMethod[];
-  return methods.filter((method) => scopesFor(method, path) !== null);
-}
-
-function isKnownApiPath(path: string[]) {
-  if (path.length > 3) return false;
-
-  const [resource, id, action] = path;
-  if (resource === "openapi.json" && !id) return true;
-  if ((resource === "me" || resource === "goals") && !id) return true;
-  if (resource === "days" && id) return !action || action === "entries";
-  if (resource === "meal-entries" && id) return !action || action === "status";
-  if (resource === "meal-groups") {
-    return !id || (id === "reorder" && !action) || Boolean(id && !action);
-  }
-  if (resource === "foods") {
-    return !id || (id === "search" && !action) || Boolean(id && !action);
-  }
-  if (resource === "barcodes" && id && !action) return true;
-  if (resource === "templates") {
-    return (
-      !id ||
-      (id === "from-day" && !action) ||
-      Boolean(id && action === "apply") ||
-      Boolean(id && !action)
-    );
-  }
-  if (resource === "recipes") {
-    return !id || Boolean(id && action === "log") || Boolean(id && !action);
-  }
-  if (resource === "weight") {
-    return !id || (id === "entries" && (!action || Boolean(action))) || (id === "goal" && !action);
-  }
-  if ((resource === "summary" || resource === "stats" || resource === "leaderboard") && !id) {
-    return true;
-  }
-
-  return false;
-}
-
 const SAFE_BAD_REQUEST_MESSAGES = new Set([
   "Request body must be valid JSON.",
   "Date must use YYYY-MM-DD.",
@@ -985,13 +885,13 @@ export async function handleApiV1Request(
     return jsonWithCors(getApiV1OpenApi());
   }
 
-  const requiredScopes = scopesFor(normalizedMethod, normalizedPath);
-  if (!requiredScopes) {
-    return isKnownApiPath(normalizedPath) ? methodNotAllowed(normalizedPath) : notFound();
+  const endpointMatch = getApiV1EndpointMatch(normalizedMethod, normalizedPath);
+  if (!endpointMatch) {
+    return isKnownApiV1Path(normalizedPath) ? methodNotAllowed(normalizedPath) : notFound();
   }
 
   try {
-    const auth = await authenticateRequest(request, requiredScopes);
+    const auth = await authenticateRequest(request, endpointMatch.method.scopes);
     if (!auth.ok) {
       return auth.response;
     }
