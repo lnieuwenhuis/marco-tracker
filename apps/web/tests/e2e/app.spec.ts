@@ -367,7 +367,17 @@ test("macro trend chart shows planned intake as a translucent projection", async
   });
   await expect(eatenCard).toContainText("planned");
   await expect(plannedCard).toContainText("planned");
-  await eatenCard.getByRole("button", { name: "Mark eaten", exact: true }).click();
+  await Promise.all([
+    page.waitForResponse((response) => {
+      const request = response.request();
+      return (
+        request.method() === "POST" &&
+        response.url().includes(`date=${plannedDate}`) &&
+        response.status() < 400
+      );
+    }),
+    eatenCard.getByRole("button", { name: "Mark eaten", exact: true }).click(),
+  ]);
   await expect(eatenCard).toContainText("eaten");
   await expect(plannedCard).toContainText("planned");
 

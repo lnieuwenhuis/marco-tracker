@@ -232,6 +232,7 @@ export function MealCard({ draft, busy, error, isCopied = false, mealGroups = []
               <div
                 ref={menuRef}
                 role="menu"
+                data-placement={menuLayout?.placement ?? "below"}
                 className={[
                   "absolute right-0 z-50 w-44 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-strong)] py-1 text-sm shadow-xl",
                   (menuLayout?.placement ?? "below") === "above"
