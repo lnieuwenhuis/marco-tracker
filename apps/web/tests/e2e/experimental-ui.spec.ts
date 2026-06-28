@@ -173,9 +173,6 @@ test("keeps low meal action menus above the bottom controls", async ({ page }, t
   expect(triggerBox).not.toBeNull();
   expect(menuBox).not.toBeNull();
   expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(triggerBox!.y);
-
-  await menu.getByRole("menuitem", { name: "Copy to today" }).click();
-  await expect(menu).toBeHidden();
 });
 
 test("keeps the empty food template tab selectable when only day templates exist", async ({

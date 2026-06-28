@@ -1,6 +1,6 @@
 {
   "name": "@macro-tracker/web",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,6 +8,7 @@
     "start": "node ./scripts/start-with-migrations.mjs",
     "lint": "eslint .",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test"
   },
   "dependencies": {
