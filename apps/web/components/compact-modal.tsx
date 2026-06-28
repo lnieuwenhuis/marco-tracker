@@ -3,7 +3,11 @@
 import type { ReactNode } from "react";
 
 import { CloseButton } from "./close-button";
-import { OverlayPortal } from "./overlay-portal";
+import {
+  OverlayPortal,
+  useBodyScrollLock,
+  useEscapeDismiss,
+} from "./overlay-portal";
 
 type CompactModalProps = {
   ariaLabel: string;
@@ -18,6 +22,9 @@ export function CompactModal({
   onClose,
   children,
 }: CompactModalProps) {
+  useBodyScrollLock();
+  useEscapeDismiss(true, onClose);
+
   return (
     <OverlayPortal>
       <div

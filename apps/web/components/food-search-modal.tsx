@@ -14,7 +14,6 @@ import { buildMealEntryCopyInput } from "@/lib/meal-entry-copy";
 import { getLocalDateString } from "@/lib/startup-date";
 import { invalidateAppDataCache } from "./app-data-cache";
 import { CompactModal } from "./compact-modal";
-import { useBodyScrollLock, useEscapeDismiss } from "./overlay-portal";
 
 type FoodSearchModalProps = {
   onClose: () => void;
@@ -32,8 +31,6 @@ export function FoodSearchModal({ onClose, onViewDate, onEntrySaved }: FoodSearc
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [copiedIds, setCopiedIds] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
-  useBodyScrollLock();
-  useEscapeDismiss(true, onClose);
 
   const todayStr = useMemo(() => getLocalDateString(), []);
   const trimmedQuery = normalizeFoodSearchQuery(query);

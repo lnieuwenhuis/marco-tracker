@@ -3,7 +3,6 @@
 import type { RecipeRecord } from "@macro-tracker/db";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CompactModal } from "./compact-modal";
-import { useBodyScrollLock, useEscapeDismiss } from "./overlay-portal";
 
 type RecipePickerModalProps = {
   recipes: RecipeRecord[];
@@ -18,8 +17,6 @@ export function RecipePickerModal({
 }: RecipePickerModalProps) {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  useBodyScrollLock();
-  useEscapeDismiss(true, onClose);
 
   useEffect(() => {
     inputRef.current?.focus();
