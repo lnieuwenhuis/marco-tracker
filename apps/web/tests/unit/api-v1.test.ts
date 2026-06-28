@@ -1,5 +1,6 @@
 import {
   apiTokens,
+  completeUserOnboarding,
   createApiToken,
   createPersonalFoodProduct,
   foodProducts,
@@ -37,6 +38,7 @@ describe("Macro Tracker API v1", () => {
       runtime.db,
     );
     userId = user.id;
+    await completeUserOnboarding(userId, { preferredWeightUnit: "kg" }, runtime.db);
     fullToken = (
       await createApiToken(
         userId,
@@ -240,6 +242,32 @@ describe("Macro Tracker API v1", () => {
     await expect(insufficient.json()).resolves.toMatchObject({
       ok: false,
       error: { code: "insufficient_scope" },
+    });
+  });
+
+  it("rejects API tokens owned by users who have not completed onboarding", async () => {
+    const user = await upsertUserFromShooProfile(
+      {
+        pairwiseSub: "api-not-onboarded-user",
+        email: "api-not-onboarded@example.com",
+      },
+      runtime.db,
+    );
+    const token = await createApiToken(
+      user.id,
+      {
+        name: "Not onboarded",
+        scopes: getApiScopes(),
+      },
+      runtime.db,
+    );
+
+    const response = await apiRequest("GET", "/goals", { token: token.token });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "onboarding_required" },
     });
   });
 
@@ -1288,7 +1316,7 @@ describe("Macro Tracker API v1", () => {
 
       expect(response.status).toBe(405);
       if (request.path === "/goals") {
-        expect(response.headers.get("allow")).toBe("GET, PATCH");
+        expect(response.headers.get("allow")).toBe("GET, PATCH, OPTIONS");
       }
       await expect(response.json()).resolves.toMatchObject({
         ok: false,
@@ -1310,7 +1338,7 @@ describe("Macro Tracker API v1", () => {
       });
 
       expect(response.status).toBe(405);
-      expect(response.headers.get("allow")).toBe("GET, PATCH");
+      expect(response.headers.get("allow")).toBe("GET, PATCH, OPTIONS");
       expect(response.headers.get("access-control-allow-origin")).toBe("*");
       expect(response.headers.get("access-control-allow-headers")).toContain("Authorization");
       await expect(response.json()).resolves.toMatchObject({
@@ -1567,6 +1595,7 @@ describe("Macro Tracker API v1", () => {
       },
       runtime.db,
     );
+    await completeUserOnboarding(otherUser.id, { preferredWeightUnit: "kg" }, runtime.db);
     const otherToken = (
       await createApiToken(otherUser.id, { name: "Other", scopes: getApiScopes() }, runtime.db)
     ).token;

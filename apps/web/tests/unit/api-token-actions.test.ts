@@ -1,5 +1,6 @@
 import {
   apiTokens,
+  createApiToken,
   listApiTokens,
   setDatabaseRuntimeForTesting,
   upsertUserFromShooProfile,
@@ -11,12 +12,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocked = vi.hoisted(() => ({
   userId: "",
-  requireSessionUser: vi.fn(),
+  requireOnboardedSessionUser: vi.fn(),
   revalidatePath: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
-  requireSessionUser: mocked.requireSessionUser,
+  requireOnboardedSessionUser: mocked.requireOnboardedSessionUser,
+}));
+
+vi.mock("@/components/api-settings-client", async (importOriginal) => ({
+  ...((await importOriginal()) as object),
+  ApiSettingsClient: () => null,
 }));
 
 vi.mock("next/cache", () => ({
@@ -28,6 +34,7 @@ import {
   revokeApiTokenAction,
 } from "@/lib/api-token-actions";
 import { getVisibleApiTokens } from "@/components/api-settings-client";
+import ApiSettingsPage from "@/app/settings/api/page";
 
 describe("API token settings actions", () => {
   let runtime: DatabaseRuntime;
@@ -43,7 +50,7 @@ describe("API token settings actions", () => {
       runtime.db,
     );
     mocked.userId = user.id;
-    mocked.requireSessionUser.mockResolvedValue({
+    mocked.requireOnboardedSessionUser.mockResolvedValue({
       userId: user.id,
       email: user.email,
     });
@@ -85,6 +92,44 @@ describe("API token settings actions", () => {
 
     const [revoked] = await listApiTokens(mocked.userId, runtime.db);
     expect(revoked?.revokedAt).toBeTruthy();
+  });
+
+  it("requires completed onboarding before listing API tokens", async () => {
+    mocked.requireOnboardedSessionUser.mockRejectedValue(new Error("redirect:/onboarding"));
+
+    await expect(ApiSettingsPage()).rejects.toThrow("redirect:/onboarding");
+  });
+
+  it("requires completed onboarding before creating API tokens", async () => {
+    mocked.requireOnboardedSessionUser.mockRejectedValue(new Error("redirect:/onboarding"));
+    const formData = new FormData();
+    formData.set("name", "Shortcut");
+    formData.set("expires", "never");
+    formData.append("scopes", "read:daily");
+
+    await expect(createApiTokenAction({}, formData)).rejects.toThrow("redirect:/onboarding");
+    await expect(listApiTokens(mocked.userId, runtime.db)).resolves.toHaveLength(0);
+    expect(mocked.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("requires completed onboarding before revoking API tokens", async () => {
+    const created = await createApiToken(
+      mocked.userId,
+      {
+        name: "Shortcut",
+        scopes: ["read:daily"],
+      },
+      runtime.db,
+    );
+    mocked.requireOnboardedSessionUser.mockRejectedValue(new Error("redirect:/onboarding"));
+    const formData = new FormData();
+    formData.set("tokenId", created.record.id);
+
+    await expect(revokeApiTokenAction(formData)).rejects.toThrow("redirect:/onboarding");
+    await expect(listApiTokens(mocked.userId, runtime.db)).resolves.toContainEqual(
+      expect.objectContaining({ id: created.record.id, revokedAt: null }),
+    );
+    expect(mocked.revalidatePath).not.toHaveBeenCalled();
   });
 
   it("returns validation errors for expected API token input failures", async () => {

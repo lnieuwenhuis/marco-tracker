@@ -101,7 +101,9 @@ function error(status: number, code: string, message: string, init?: ResponseIni
 }
 
 function methodNotAllowed(path?: string[]) {
-  const allowedMethods = path ? getApiV1AllowedMethods(path) : [];
+  const allowedMethods = path
+    ? Array.from(new Set([...getApiV1AllowedMethods(path), "OPTIONS"]))
+    : [];
   return error(405, "method_not_allowed", "Method is not allowed for this endpoint.", {
     headers: allowedMethods.length > 0 ? { Allow: allowedMethods.join(", ") } : undefined,
   });
@@ -170,6 +172,18 @@ async function authenticateRequest(request: Request, scopes: ApiScope[]) {
   if (!auth.ok) {
     const [code, message] = authErrorMessage(auth.reason);
     return { ok: false as const, response: error(401, code, message) };
+  }
+
+  const owner = await getUserById(auth.token.userId);
+  if (!owner) {
+    return { ok: false as const, response: error(401, "invalid_token", "API token is invalid.") };
+  }
+
+  if (!owner.onboardingCompletedAt) {
+    return {
+      ok: false as const,
+      response: error(403, "onboarding_required", "Complete onboarding before using API tokens."),
+    };
   }
 
   const missingScope = scopes.find((scope) => !auth.token.scopes.includes(scope));

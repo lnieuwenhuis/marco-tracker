@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { listApiTokens } from "@macro-tracker/db";
 
 import { ApiSettingsClient } from "@/components/api-settings-client";
-import { requireSessionUser } from "@/lib/auth";
+import { requireOnboardedSessionUser } from "@/lib/auth";
 import { getApiTokenScopesForSettings } from "@/lib/api-token-actions";
 
 export const metadata: Metadata = {
@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 };
 
 export default async function ApiSettingsPage() {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await requireOnboardedSessionUser();
   const [tokens, scopes] = await Promise.all([
     listApiTokens(sessionUser.userId),
     getApiTokenScopesForSettings(),
