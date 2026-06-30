@@ -8,11 +8,16 @@ import { validateFoodProductInput, validateMealEntryInput, validateRecipeInput, 
 import type {
   AdminAuditListPage,
   AdminAuditEvent,
+  AdminAuditEventDetail,
   AdminBarcodeListPage,
   AdminBarcodeRecord,
+  AdminBarcodeReviewQueueItem,
+  AdminBarcodeReviewQueuePage,
   AdminDashboardData,
   AdminRole,
   AdminUserDetail,
+  AdminUserHealthFilter,
+  AdminUserHealthSummary,
   AdminUserListItem,
   AdminUserListPage,
   AdminRecipeSummary,
@@ -3589,6 +3594,131 @@ async function getOwnerCount(db: DatabaseClient | any) {
   return toNumber(row?.total);
 }
 
+function noMealEntriesCondition() {
+  return sql`not exists (select 1 from ${mealEntries} where ${mealEntries.userId} = ${users.id})`;
+}
+
+function noWeightEntriesCondition() {
+  return sql`not exists (select 1 from ${weightEntries} where ${weightEntries.userId} = ${users.id})`;
+}
+
+function heavyBarcodeSubmitterCondition() {
+  return sql`(select count(*) from ${foodProducts} where ${foodProducts.submittedByUserId} = ${users.id} and ${foodProducts.source} = 'barcode') >= 5`;
+}
+
+function noGoalsCondition() {
+  return and(
+    isNull(users.goalCaloriesKcal),
+    isNull(users.goalProteinG),
+    isNull(users.goalCarbsG),
+    isNull(users.goalFatG),
+    isNull(users.goalWeightKg),
+  );
+}
+
+function getAdminUserHealthCondition(health?: AdminUserHealthFilter | "all") {
+  if (!health || health === "all") {
+    return undefined;
+  }
+
+  if (health === "onboarded_no_logs") {
+    return and(isNotNull(users.onboardingCompletedAt), noMealEntriesCondition());
+  }
+
+  if (health === "no_goals") {
+    return noGoalsCondition();
+  }
+
+  if (health === "no_weight_entries") {
+    return noWeightEntriesCondition();
+  }
+
+  if (health === "heavy_barcode_submitters") {
+    return heavyBarcodeSubmitterCondition();
+  }
+
+  return undefined;
+}
+
+async function countUsersWhere(db: DatabaseClient | any, whereClause: any) {
+  const [row] = await db
+    .select({
+      total: count(),
+    })
+    .from(users)
+    .where(whereClause);
+
+  return toNumber(row?.total);
+}
+
+export async function getAdminUserHealthSummary(
+  db?: DatabaseClient,
+): Promise<AdminUserHealthSummary> {
+  const database = await resolveDb(db);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const [
+    onboardedNoLogs,
+    noGoals,
+    inactive7,
+    inactive30,
+    noWeightEntries,
+    heavyBarcodeSubmitters,
+  ] = await Promise.all([
+    countUsersWhere(
+      database,
+      and(isNotNull(users.onboardingCompletedAt), noMealEntriesCondition()),
+    ),
+    countUsersWhere(database, noGoalsCondition()),
+    countUsersWhere(database, lte(users.lastLoginAt, sevenDaysAgo)),
+    countUsersWhere(database, lte(users.lastLoginAt, thirtyDaysAgo)),
+    countUsersWhere(database, noWeightEntriesCondition()),
+    countUsersWhere(database, heavyBarcodeSubmitterCondition()),
+  ]);
+
+  return {
+    segments: [
+      {
+        id: "onboarded_no_logs",
+        label: "Onboarded but no logs",
+        count: onboardedNoLogs,
+        href: "/admin/users?health=onboarded_no_logs",
+      },
+      {
+        id: "no_goals",
+        label: "No goals set",
+        count: noGoals,
+        href: "/admin/users?health=no_goals",
+      },
+      {
+        id: "inactive7",
+        label: "Inactive 7+ days",
+        count: inactive7,
+        href: "/admin/users?activity=inactive7",
+      },
+      {
+        id: "inactive30",
+        label: "Inactive 30+ days",
+        count: inactive30,
+        href: "/admin/users?activity=inactive30",
+      },
+      {
+        id: "no_weight_entries",
+        label: "No weight entries",
+        count: noWeightEntries,
+        href: "/admin/users?health=no_weight_entries",
+      },
+      {
+        id: "heavy_barcode_submitters",
+        label: "Heavy barcode submitters",
+        count: heavyBarcodeSubmitters,
+        href: "/admin/users?health=heavy_barcode_submitters",
+      },
+    ],
+  };
+}
+
 export async function ensureUserRole(
   userId: string,
   role: AdminRole,
@@ -3624,6 +3754,7 @@ export async function getAdminDashboardData(
     deletedBarcodesRow,
     recentBarcodeRows,
     recentAuditPage,
+    health,
   ] = await Promise.all([
     database.select({ total: count() }).from(users),
     database.select({ total: count() }).from(users).where(eq(users.role, "owner")),
@@ -3662,6 +3793,7 @@ export async function getAdminDashboardData(
       },
       database,
     ),
+    getAdminUserHealthSummary(database),
   ]);
 
   return {
@@ -3674,6 +3806,7 @@ export async function getAdminDashboardData(
     deletedBarcodeCount: toNumber(deletedBarcodesRow[0]?.total),
     recentBarcodeAdditions: recentBarcodeRows.map(mapFoodProductRow),
     recentAuditEvents: recentAuditPage.items,
+    health,
   };
 }
 
@@ -3681,7 +3814,8 @@ export async function listAdminUsers(
   input: {
     q?: string;
     role?: AdminRole | "all";
-    activity?: "all" | "active7" | "inactive7";
+    activity?: "all" | "active7" | "inactive7" | "inactive30";
+    health?: AdminUserHealthFilter | "all";
     page?: number;
     pageSize?: number;
   } = {},
@@ -3694,6 +3828,7 @@ export async function listAdminUsers(
   const conditions = [];
   const query = input.q?.trim();
   const activeSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const inactiveSince30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
   if (query) {
     const pattern = `%${escapeLikePattern(query)}%`;
@@ -3710,6 +3845,13 @@ export async function listAdminUsers(
     conditions.push(gte(users.lastLoginAt, activeSince));
   } else if (input.activity === "inactive7") {
     conditions.push(lte(users.lastLoginAt, activeSince));
+  } else if (input.activity === "inactive30") {
+    conditions.push(lte(users.lastLoginAt, inactiveSince30));
+  }
+
+  const healthCondition = getAdminUserHealthCondition(input.health);
+  if (healthCondition) {
+    conditions.push(healthCondition);
   }
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -4057,6 +4199,139 @@ export async function listAdminBarcodeProducts(
   };
 }
 
+function normalizeReviewName(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isRecentTimestamp(value: string | null, cutoff: Date) {
+  if (!value) {
+    return false;
+  }
+
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) && timestamp >= cutoff.getTime();
+}
+
+export async function listAdminBarcodeReviewQueue(
+  input: {
+    page?: number;
+    pageSize?: number;
+  } = {},
+  db?: DatabaseClient,
+): Promise<AdminBarcodeReviewQueuePage> {
+  const database = await resolveDb(db);
+  const page = normalizePageNumber(input.page);
+  const pageSize = input.pageSize ?? 25;
+  const offset = (page - 1) * pageSize;
+  const reviewCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  const [productRows, revisionRows, auditRows] = await Promise.all([
+    database
+      .select(foodProductSelectColumns)
+      .from(foodProducts)
+      .where(
+        and(
+          isNull(foodProducts.ownerUserId),
+          eq(foodProducts.source, "barcode"),
+        ),
+      )
+      .orderBy(desc(foodProducts.updatedAt)),
+    database
+      .select({
+        productId: foodProductRevisions.productId,
+        total: count(),
+      })
+      .from(foodProductRevisions)
+      .where(gte(foodProductRevisions.createdAt, reviewCutoff))
+      .groupBy(foodProductRevisions.productId),
+    database
+      .select({
+        targetId: adminAuditEvents.targetId,
+        action: adminAuditEvents.action,
+        createdAt: adminAuditEvents.createdAt,
+      })
+      .from(adminAuditEvents)
+      .where(
+        and(
+          eq(adminAuditEvents.targetType, "food_product"),
+          gte(adminAuditEvents.createdAt, reviewCutoff),
+        ),
+      )
+      .orderBy(desc(adminAuditEvents.createdAt)),
+  ]);
+
+  const products = productRows.map(mapFoodProductRow);
+  const nameCounts = new Map<string, number>();
+  for (const product of products) {
+    const name = normalizeReviewName(product.name);
+    if (name) {
+      nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+    }
+  }
+
+  const revisionCounts = new Map(
+    revisionRows.map((row) => [row.productId, toNumber(row.total)]),
+  );
+  const latestAuditByTarget = new Map<
+    string,
+    { action: string; createdAt: string }
+  >();
+  for (const row of auditRows) {
+    if (!latestAuditByTarget.has(row.targetId)) {
+      latestAuditByTarget.set(row.targetId, {
+        action: row.action,
+        createdAt: toTimestampString(row.createdAt),
+      });
+    }
+  }
+
+  const queueItems: AdminBarcodeReviewQueueItem[] = products
+    .map((product) => {
+      const latestAudit = latestAuditByTarget.get(product.id) ?? null;
+      const revisionCount30Days = revisionCounts.get(product.id) ?? 0;
+      const duplicateNameCount =
+        nameCounts.get(normalizeReviewName(product.name)) ?? 0;
+      const reviewReasons: AdminBarcodeReviewQueueItem["reviewReasons"] = [];
+
+      if (product.sourceConfidence != null && product.sourceConfidence < 0.75) {
+        reviewReasons.push("low_confidence");
+      }
+      if (product.servingWeightG == null && product.servingVolumeMl == null) {
+        reviewReasons.push("missing_serving_size");
+      }
+      if (isRecentTimestamp(product.deletedAt, reviewCutoff)) {
+        reviewReasons.push("recently_deleted");
+      }
+      if (
+        latestAudit?.action === "barcode.restored" &&
+        isRecentTimestamp(latestAudit.createdAt, reviewCutoff)
+      ) {
+        reviewReasons.push("recently_restored");
+      }
+      if (duplicateNameCount > 1) {
+        reviewReasons.push("duplicate_name");
+      }
+      if (revisionCount30Days >= 3) {
+        reviewReasons.push("frequent_revisions");
+      }
+
+      return {
+        ...product,
+        reviewReasons,
+        revisionCount30Days,
+        duplicateNameCount,
+        latestAuditAction: latestAudit?.action ?? null,
+        latestAuditAt: latestAudit?.createdAt ?? null,
+      };
+    })
+    .filter((product) => product.reviewReasons.length > 0);
+
+  return {
+    items: queueItems.slice(offset, offset + pageSize),
+    pagination: buildPagination(page, pageSize, queueItems.length),
+  };
+}
+
 export async function getAdminBarcodeProductById(
   barcodeProductId: string,
   db?: DatabaseClient,
@@ -4314,4 +4589,35 @@ export async function listAdminAuditEvents(
     ),
     pagination: buildPagination(page, pageSize, toNumber(countRows[0]?.total)),
   };
+}
+
+export async function getAdminAuditEventById(
+  eventId: string,
+  db?: DatabaseClient,
+): Promise<AdminAuditEventDetail | null> {
+  const database = await resolveDb(db);
+  const [row] = await database
+    .select({
+      id: adminAuditEvents.id,
+      actorUserId: adminAuditEvents.actorUserId,
+      actorRole: adminAuditEvents.actorRole,
+      action: adminAuditEvents.action,
+      targetType: adminAuditEvents.targetType,
+      targetId: adminAuditEvents.targetId,
+      detailsJson: adminAuditEvents.detailsJson,
+      createdAt: adminAuditEvents.createdAt,
+      actorEmail: users.email,
+      actorDisplayName: users.displayName,
+    })
+    .from(adminAuditEvents)
+    .leftJoin(users, eq(users.id, adminAuditEvents.actorUserId))
+    .where(eq(adminAuditEvents.id, eventId))
+    .limit(1);
+
+  return row
+    ? mapAdminAuditEventRow({
+        ...row,
+        detailsJson: row.detailsJson as Record<string, unknown> | null,
+      })
+    : null;
 }
