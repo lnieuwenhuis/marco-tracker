@@ -33,7 +33,10 @@ import {
   createApiTokenAction,
   revokeApiTokenAction,
 } from "@/lib/api-token-actions";
-import { getVisibleApiTokens } from "@/components/api-settings-client";
+import {
+  API_TOKEN_PRESETS,
+  getVisibleApiTokens,
+} from "@/components/api-settings-client";
 import ApiSettingsPage from "@/app/settings/api/page";
 
 describe("API token settings actions", () => {
@@ -200,5 +203,33 @@ describe("API token settings actions", () => {
     };
 
     expect(getVisibleApiTokens([serverRecord], staleRecord)).toEqual([serverRecord]);
+  });
+
+  it("defines API token presets with expected expiry and scopes", () => {
+    const readOnly = API_TOKEN_PRESETS.find(
+      (preset) => preset.id === "read_only_dashboard",
+    );
+    const shortcut = API_TOKEN_PRESETS.find(
+      (preset) => preset.id === "shortcut_logger",
+    );
+    const full = API_TOKEN_PRESETS.find(
+      (preset) => preset.id === "full_automation",
+    );
+
+    expect(readOnly).toMatchObject({
+      name: "Read-only dashboard",
+      expires: "90",
+    });
+    expect(readOnly?.scopes.every((scope) => scope.startsWith("read:"))).toBe(true);
+    expect(shortcut?.scopes).toEqual(
+      expect.arrayContaining(["read:daily", "write:daily", "read:foods"]),
+    );
+    expect(full).toMatchObject({
+      name: "Full automation",
+      expires: "never",
+    });
+    expect(full?.scopes).toEqual(
+      expect.arrayContaining(["write:foods", "write:templates", "write:goals"]),
+    );
   });
 });
